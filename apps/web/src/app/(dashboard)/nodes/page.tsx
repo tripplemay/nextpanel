@@ -241,7 +241,7 @@ export default function NodesPage() {
 
       <NodeFormModal
         open={modalOpen}
-        initialValues={editTarget}
+        initialValues={editTarget as Record<string, unknown> | null}
         onClose={() => setModalOpen(false)}
         onSuccess={() => { setModalOpen(false); qc.invalidateQueries({ queryKey: ['nodes'] }); }}
       />
