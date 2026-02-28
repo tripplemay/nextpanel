@@ -46,7 +46,7 @@ jobs:
             if [ ! -f "$SETUP_DONE" ]; then
               echo ">>> 首次运行，初始化服务器环境..."
               apt-get update -qq
-              apt-get install -y curl git openssl
+              apt-get install -y curl git openssl build-essential python3
 
               if ! command -v node &>/dev/null; then
                 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
