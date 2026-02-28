@@ -32,6 +32,8 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
             set -e
+            # 加载宝塔 Node.js 环境
+            export PATH="/www/server/node/bin:$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node 2>/dev/null | tail -1)/bin:$PATH"
             # 安装 pnpm（如未安装）
             if ! command -v pnpm &> /dev/null; then
               npm install -g pnpm
