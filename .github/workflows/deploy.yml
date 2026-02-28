@@ -23,7 +23,7 @@ jobs:
           target: /opt/apps/nextpanel
           rm: false
 
-      - name: Restart services on VPS
+      - name: Install deps and restart on VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -32,5 +32,10 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
             set -e
+            # 安装 pnpm（如未安装）
+            if ! command -v pnpm &> /dev/null; then
+              npm install -g pnpm
+            fi
             cd /opt/apps/nextpanel
+            pnpm install
             echo "Deploy completed at $(date)"
