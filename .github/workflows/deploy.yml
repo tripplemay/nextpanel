@@ -45,95 +45,49 @@ jobs:
               apt-get update -qq
               apt-get install -y curl git openssl
 
-              # Node.js 20
               if ! command -v node &>/dev/null; then
                 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
                 apt-get install -y nodejs
               fi
 
-              # pnpm + PM2
               npm install -g pnpm pm2
 
-              # PostgreSQL
               if ! command -v psql &>/dev/null; then
                 apt-get install -y postgresql postgresql-contrib
                 systemctl enable postgresql
                 systemctl start postgresql
               fi
 
-              # Nginx
               if ! command -v nginx &>/dev/null; then
                 apt-get install -y nginx
                 systemctl enable nginx
                 systemctl start nginx
               fi
 
-              # Certbot
               if ! command -v certbot &>/dev/null; then
                 apt-get install -y certbot python3-certbot-nginx
               fi
 
-              # 初始化数据库
               DB_PASS=$(openssl rand -hex 16)
+              JWT_SECRET=$(openssl rand -hex 32)
+              ENC_KEY=$(openssl rand -hex 32)
+
               sudo -u postgres psql -c "CREATE USER nextpanel WITH PASSWORD '$DB_PASS';" 2>/dev/null || true
               sudo -u postgres psql -c "CREATE DATABASE nextpanel OWNER nextpanel;" 2>/dev/null || true
 
-              # 写入后端 .env
-              JWT_SECRET=$(openssl rand -hex 32)
-              ENC_KEY=$(openssl rand -hex 32)
               mkdir -p $APP_DIR/apps/server
-              cat > $APP_DIR/apps/server/.env <<ENVEOF
-DATABASE_URL=postgresql://nextpanel:${DB_PASS}@localhost:5432/nextpanel
-JWT_SECRET=${JWT_SECRET}
-JWT_EXPIRES_IN=7d
-ENCRYPTION_KEY=${ENC_KEY}
-PORT=3001
-ALLOWED_ORIGIN=https://${DOMAIN}
-ENVEOF
+              printf 'DATABASE_URL=postgresql://nextpanel:%s@localhost:5432/nextpanel\nJWT_SECRET=%s\nJWT_EXPIRES_IN=7d\nENCRYPTION_KEY=%s\nPORT=3001\nALLOWED_ORIGIN=https://%s\n' "$DB_PASS" "$JWT_SECRET" "$ENC_KEY" "$DOMAIN" > $APP_DIR/apps/server/.env
 
-              # Nginx 反向代理配置
-              cat > /etc/nginx/sites-available/nextpanel <<'NGINXEOF'
-server {
-  listen 80;
-  server_name 1.router.video;
+              echo 'c2VydmVyIHsKICBsaXN0ZW4gODA7CiAgc2VydmVyX25hbWUgMS5yb3V0ZXIudmlkZW87CgogIGxvY2F0aW9uIC9hcGkvIHsKICAgIHByb3h5X3Bhc3MgaHR0cDovLzEyNy4wLjAuMTozMDAxOwogICAgcHJveHlfaHR0cF92ZXJzaW9uIDEuMTsKICAgIHByb3h5X3NldF9oZWFkZXIgVXBncmFkZSAkaHR0cF91cGdyYWRlOwogICAgcHJveHlfc2V0X2hlYWRlciBDb25uZWN0aW9uIHVwZ3JhZGU7CiAgICBwcm94eV9zZXRfaGVhZGVyIEhvc3QgJGhvc3Q7CiAgICBwcm94eV9zZXRfaGVhZGVyIFgtUmVhbC1JUCAkcmVtb3RlX2FkZHI7CiAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLUZvciAkcHJveHlfYWRkX3hfZm9yd2FyZGVkX2ZvcjsKICAgIHByb3h5X3NldF9oZWFkZXIgWC1Gb3J3YXJkZWQtUHJvdG8gJHNjaGVtZTsKICAgIHByb3h5X2NhY2hlX2J5cGFzcyAkaHR0cF91cGdyYWRlOwogIH0KCiAgbG9jYXRpb24gLyB7CiAgICBwcm94eV9wYXNzIGh0dHA6Ly8xMjcuMC4wLjE6MzAwMDsKICAgIHByb3h5X2h0dHBfdmVyc2lvbiAxLjE7CiAgICBwcm94eV9zZXRfaGVhZGVyIFVwZ3JhZGUgJGh0dHBfdXBncmFkZTsKICAgIHByb3h5X3NldF9oZWFkZXIgQ29ubmVjdGlvbiB1cGdyYWRlOwogICAgcHJveHlfc2V0X2hlYWRlciBIb3N0ICRob3N0OwogICAgcHJveHlfc2V0X2hlYWRlciBYLVJlYWwtSVAgJHJlbW90ZV9hZGRyOwogICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Gb3IgJHByb3h5X2FkZF94X2ZvcndhcmRlZF9mb3I7CiAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLVByb3RvICRzY2hlbWU7CiAgICBwcm94eV9jYWNoZV9ieXBhc3MgJGh0dHBfdXBncmFkZTsKICB9Cn0K' | base64 -d > /etc/nginx/sites-available/nextpanel
 
-  location /api/ {
-    proxy_pass http://127.0.0.1:3001;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection 'upgrade';
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_cache_bypass $http_upgrade;
-  }
-
-  location / {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection 'upgrade';
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_cache_bypass $http_upgrade;
-  }
-}
-NGINXEOF
               rm -f /etc/nginx/sites-enabled/default
               ln -sf /etc/nginx/sites-available/nextpanel /etc/nginx/sites-enabled/
               nginx -t && systemctl reload nginx
 
-              # 申请 SSL 证书
               certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m $CERTBOT_EMAIL
 
-              # 确保 SSL 自动续期
-              systemctl enable certbot.timer 2>/dev/null || \
-                (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'") | crontab -
+              systemctl enable certbot.timer 2>/dev/null || (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'") | crontab -
 
-              # PM2 开机自启
               pm2 startup systemd -u root --hp /root 2>/dev/null | tail -n 1 | bash || true
 
               touch "$SETUP_DONE"
@@ -145,23 +99,19 @@ NGINXEOF
             pnpm install
             pnpm -r build
 
-            # 数据库迁移
             cd $APP_DIR/apps/server
             pnpm exec prisma migrate deploy
 
-            # 后端：启动或热重载
             if pm2 describe nextpanel-server &>/dev/null; then
               pm2 reload nextpanel-server
             else
               pm2 start dist/main.js --name nextpanel-server
             fi
 
-            # 前端：启动或热重载
             if pm2 describe nextpanel-web &>/dev/null; then
               pm2 reload nextpanel-web
             else
-              pm2 start node_modules/.bin/next \
-                --name nextpanel-web --cwd $APP_DIR/apps/web -- start
+              pm2 start $APP_DIR/apps/web/node_modules/.bin/next --name nextpanel-web -- start
             fi
 
             pm2 save
