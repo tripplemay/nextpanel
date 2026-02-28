@@ -117,6 +117,14 @@ jobs:
 
             pm2 save
 
+            sleep 5
+            echo "=== PM2 进程状态 ==="
+            pm2 list
+            echo "=== nextpanel-server 日志（最后20行）==="
+            pm2 logs nextpanel-server --lines 20 --nostream
+            echo "=== nextpanel-web 日志（最后20行）==="
+            pm2 logs nextpanel-web --lines 20 --nostream
+
             echo ">>> Deploy completed at $(date) — https://$DOMAIN"
         env:
           CERTBOT_EMAIL: ${{ secrets.CERTBOT_EMAIL }}
