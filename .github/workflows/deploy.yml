@@ -101,8 +101,8 @@ jobs:
             cd $APP_DIR
             pnpm install
             cd $APP_DIR/apps/server && pnpm exec prisma generate && cd $APP_DIR
+            find $APP_DIR -name "*.tsbuildinfo" -delete
             pnpm -r build
-            ls $APP_DIR/apps/server/dist/ 2>/dev/null && echo "dist exists" || echo "dist NOT found"
 
             cd $APP_DIR/apps/server
             pnpm exec prisma migrate deploy
