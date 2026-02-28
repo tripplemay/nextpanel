@@ -13,15 +13,18 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Copy files to VPS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          port: ${{ secrets.SSH_PORT }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          source: "."
-          target: /opt/apps/nextpanel
-          rm: false
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+        run: |
+          sudo apt-get install -y sshpass
+          tar czf - --exclude='.git' --exclude='node_modules' --exclude='.next' --exclude='dist' . | \
+            sshpass -p "$SSH_PASSWORD" \
+            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=60 -p "$SSH_PORT" \
+            "$SSH_USER@$SSH_HOST" \
+            "mkdir -p /opt/apps/nextpanel && tar xzf - -C /opt/apps/nextpanel"
 
       - name: Setup and deploy on VPS
         uses: appleboy/ssh-action@v1.0.3
