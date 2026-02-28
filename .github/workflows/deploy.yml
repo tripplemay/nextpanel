@@ -19,12 +19,16 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           port: ${{ secrets.SSH_PORT }}
           password: ${{ secrets.SSH_PASSWORD }}
+          envs: REPO_TOKEN
           script: |
             set -e
+            REPO_URL="https://${REPO_TOKEN}@github.com/tripplemay/nextpanel.git"
             if [ -d /opt/apps/nextpanel ]; then
               cd /opt/apps/nextpanel
               git pull origin main
             else
               mkdir -p /opt/apps
-              git clone https://github.com/tripplemay/nextpanel.git /opt/apps/nextpanel
+              git clone "$REPO_URL" /opt/apps/nextpanel
             fi
+        env:
+          REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
