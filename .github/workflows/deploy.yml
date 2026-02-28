@@ -109,7 +109,7 @@ jobs:
             if pm2 describe nextpanel-server &>/dev/null; then
               pm2 reload nextpanel-server
             else
-              pm2 start dist/main.js --name nextpanel-server
+              pm2 start $APP_DIR/apps/server/dist/main.js --name nextpanel-server
             fi
 
             if pm2 describe nextpanel-web &>/dev/null; then
