@@ -21,5 +21,10 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
             set -e
-            cd /opt/apps/nextpanel
-            git pull origin main
+            if [ -d /opt/apps/nextpanel ]; then
+              cd /opt/apps/nextpanel
+              git pull origin main
+            else
+              mkdir -p /opt/apps
+              git clone https://github.com/tripplemay/nextpanel.git /opt/apps/nextpanel
+            fi
