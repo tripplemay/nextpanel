@@ -100,6 +100,7 @@ jobs:
             # ── 每次部署都执行 ─────────────────────────────────────────────
             cd $APP_DIR
             pnpm install
+            cd $APP_DIR/apps/server && pnpm exec prisma generate && cd $APP_DIR
             pnpm -r build
 
             cd $APP_DIR/apps/server
