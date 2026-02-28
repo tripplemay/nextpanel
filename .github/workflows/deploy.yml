@@ -108,12 +108,10 @@ jobs:
             pnpm exec prisma migrate deploy
 
             pm2 delete nextpanel-server 2>/dev/null || true
-            pm2 start $APP_DIR/apps/server/dist/main.js \
-              --name nextpanel-server --cwd $APP_DIR/apps/server
+            pm2 start pnpm --name nextpanel-server --cwd $APP_DIR/apps/server -- run start
 
             pm2 delete nextpanel-web 2>/dev/null || true
-            pm2 start $APP_DIR/apps/web/node_modules/.bin/next \
-              --name nextpanel-web --cwd $APP_DIR/apps/web -- start
+            pm2 start pnpm --name nextpanel-web --cwd $APP_DIR/apps/web -- run start
 
             pm2 save
 
