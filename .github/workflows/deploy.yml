@@ -23,20 +23,149 @@ jobs:
           target: /opt/apps/nextpanel
           rm: false
 
-      - name: Install deps and restart on VPS
+      - name: Setup and deploy on VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           port: ${{ secrets.SSH_PORT }}
           password: ${{ secrets.SSH_PASSWORD }}
+          command_timeout: 30m
+          envs: CERTBOT_EMAIL
           script: |
             set -e
-            export PATH="/www/server/nodejs/v24.14.0/bin:$PATH"
-            # 安装 pnpm（如未安装）
-            if ! command -v pnpm &> /dev/null; then
-              npm install -g pnpm
+            DOMAIN="1.router.video"
+            APP_DIR="/opt/apps/nextpanel"
+            SETUP_DONE="/opt/.nextpanel_setup_done"
+            export DEBIAN_FRONTEND=noninteractive
+
+            # ── 首次安装：环境初始化（幂等，后续跳过）──────────────────────
+            if [ ! -f "$SETUP_DONE" ]; then
+              echo ">>> 首次运行，初始化服务器环境..."
+              apt-get update -qq
+              apt-get install -y curl git openssl
+
+              # Node.js 20
+              if ! command -v node &>/dev/null; then
+                curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+                apt-get install -y nodejs
+              fi
+
+              # pnpm + PM2
+              npm install -g pnpm pm2
+
+              # PostgreSQL
+              if ! command -v psql &>/dev/null; then
+                apt-get install -y postgresql postgresql-contrib
+                systemctl enable postgresql
+                systemctl start postgresql
+              fi
+
+              # Nginx
+              if ! command -v nginx &>/dev/null; then
+                apt-get install -y nginx
+                systemctl enable nginx
+                systemctl start nginx
+              fi
+
+              # Certbot
+              if ! command -v certbot &>/dev/null; then
+                apt-get install -y certbot python3-certbot-nginx
+              fi
+
+              # 初始化数据库
+              DB_PASS=$(openssl rand -hex 16)
+              sudo -u postgres psql -c "CREATE USER nextpanel WITH PASSWORD '$DB_PASS';" 2>/dev/null || true
+              sudo -u postgres psql -c "CREATE DATABASE nextpanel OWNER nextpanel;" 2>/dev/null || true
+
+              # 写入后端 .env
+              JWT_SECRET=$(openssl rand -hex 32)
+              ENC_KEY=$(openssl rand -hex 32)
+              mkdir -p $APP_DIR/apps/server
+              cat > $APP_DIR/apps/server/.env <<ENVEOF
+DATABASE_URL=postgresql://nextpanel:${DB_PASS}@localhost:5432/nextpanel
+JWT_SECRET=${JWT_SECRET}
+JWT_EXPIRES_IN=7d
+ENCRYPTION_KEY=${ENC_KEY}
+PORT=3001
+ALLOWED_ORIGIN=https://${DOMAIN}
+ENVEOF
+
+              # Nginx 反向代理配置
+              cat > /etc/nginx/sites-available/nextpanel <<'NGINXEOF'
+server {
+  listen 80;
+  server_name 1.router.video;
+
+  location /api/ {
+    proxy_pass http://127.0.0.1:3001;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection 'upgrade';
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_cache_bypass $http_upgrade;
+  }
+
+  location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection 'upgrade';
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_cache_bypass $http_upgrade;
+  }
+}
+NGINXEOF
+              rm -f /etc/nginx/sites-enabled/default
+              ln -sf /etc/nginx/sites-available/nextpanel /etc/nginx/sites-enabled/
+              nginx -t && systemctl reload nginx
+
+              # 申请 SSL 证书
+              certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m $CERTBOT_EMAIL
+
+              # 确保 SSL 自动续期
+              systemctl enable certbot.timer 2>/dev/null || \
+                (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'") | crontab -
+
+              # PM2 开机自启
+              pm2 startup systemd -u root --hp /root 2>/dev/null | tail -n 1 | bash || true
+
+              touch "$SETUP_DONE"
+              echo ">>> 环境初始化完成"
             fi
-            cd /opt/apps/nextpanel
+
+            # ── 每次部署都执行 ─────────────────────────────────────────────
+            cd $APP_DIR
             pnpm install
-            echo "Deploy completed at $(date)"
+            pnpm -r build
+
+            # 数据库迁移
+            cd $APP_DIR/apps/server
+            pnpm exec prisma migrate deploy
+
+            # 后端：启动或热重载
+            if pm2 describe nextpanel-server &>/dev/null; then
+              pm2 reload nextpanel-server
+            else
+              pm2 start dist/main.js --name nextpanel-server
+            fi
+
+            # 前端：启动或热重载
+            if pm2 describe nextpanel-web &>/dev/null; then
+              pm2 reload nextpanel-web
+            else
+              pm2 start node_modules/.bin/next \
+                --name nextpanel-web --cwd $APP_DIR/apps/web -- start
+            fi
+
+            pm2 save
+
+            echo ">>> Deploy completed at $(date) — https://$DOMAIN"
+        env:
+          CERTBOT_EMAIL: ${{ secrets.CERTBOT_EMAIL }}
