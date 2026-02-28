@@ -1,5 +1,5 @@
 import * as net from 'net';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { NodeDeployService } from './node-deploy.service';
@@ -8,6 +8,8 @@ import { UpdateNodeDto } from './dto/update-node.dto';
 
 @Injectable()
 export class NodesService {
+  private readonly logger = new Logger(NodesService.name);
+
   constructor(
     private prisma: PrismaService,
     private crypto: CryptoService,
@@ -33,8 +35,11 @@ export class NodesService {
       },
       select: this.safeSelect(),
     });
-    // Fire-and-forget: deploy to server asynchronously
-    void this.nodeDeploy.deploy(node.id);
+    // Deploy asynchronously — log errors instead of silently swallowing them
+    this.nodeDeploy.deploy(node.id).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Node ${node.id} deploy failed: ${msg}`);
+    });
     return node;
   }
 
@@ -70,14 +75,20 @@ export class NodesService {
       select: this.safeSelect(),
     });
     // Re-deploy to apply updated config
-    void this.nodeDeploy.deploy(id);
+    this.nodeDeploy.deploy(id).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Node ${id} redeploy failed: ${msg}`);
+    });
     return node;
   }
 
   async remove(id: string) {
     await this.findOne(id);
     // Best-effort cleanup on the server before DB deletion
-    void this.nodeDeploy.undeploy(id);
+    this.nodeDeploy.undeploy(id).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Node ${id} undeploy failed: ${msg}`);
+    });
     return this.prisma.node.delete({ where: { id } });
   }
 

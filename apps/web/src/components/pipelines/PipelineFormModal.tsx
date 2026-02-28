@@ -5,6 +5,7 @@ import { App, Modal, Form, Input, Select, Switch, Tooltip } from 'antd';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { pipelinesApi, serversApi } from '@/lib/api';
+import type { CreatePipelineDto, UpdatePipelineDto } from '@/types/api';
 
 const { TextArea } = Input;
 
@@ -57,8 +58,8 @@ export default function PipelineFormModal({ open, initialValues, onClose, onSucc
           .filter(Boolean),
       };
       return isEdit
-        ? pipelinesApi.update(initialValues!.id as string, payload)
-        : pipelinesApi.create(payload);
+        ? pipelinesApi.update(initialValues!.id as string, payload as UpdatePipelineDto)
+        : pipelinesApi.create(payload as CreatePipelineDto);
     },
     onSuccess: () => {
       message.success(isEdit ? '流水线已更新' : '流水线已创建');

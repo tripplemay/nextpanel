@@ -1,9 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { CreateReleaseDto } from './dto/create-release.dto';
 
 @Injectable()
 export class ReleasesService {
+  private readonly logger = new Logger(ReleasesService.name);
+
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateReleaseDto, createdById: string) {
@@ -24,8 +26,11 @@ export class ReleasesService {
       include: { steps: true },
     });
 
-    // Trigger async execution — fire and forget
-    void this.executeRelease(release.id);
+    // Trigger async execution — log errors instead of silently swallowing them
+    this.executeRelease(release.id).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Release ${release.id} execution failed: ${msg}`);
+    });
 
     return release;
   }

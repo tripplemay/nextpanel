@@ -10,22 +10,10 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { IsString, IsArray } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { SubscriptionsService } from './subscriptions.service';
-
-class CreateSubscriptionDto {
-  @ApiProperty()
-  @IsString()
-  name: string;
-
-  @ApiProperty({ type: [String] })
-  @IsArray()
-  @IsString({ each: true })
-  nodeIds: string[];
-}
+import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 
 @ApiTags('subscriptions')
 @Controller('subscriptions')

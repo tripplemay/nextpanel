@@ -1,0 +1,114 @@
+import type { NodeInfo, NodeCredentials } from './config-generator';
+
+// ─── Xray / V2Ray ────────────────────────────────────────────────────────────
+
+export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): string {
+  return JSON.stringify(
+    {
+      log: { loglevel: 'warning' },
+      inbounds: [
+        {
+          tag: `in-${node.id}`,
+          port: node.listenPort,
+          listen: '0.0.0.0',
+          protocol: xrayProtocol(node.protocol),
+          settings: xraySettings(node.protocol, creds),
+          streamSettings: xrayStreamSettings(node.transport, node.tls, node.domain),
+        },
+      ],
+      outbounds: [{ protocol: 'freedom', tag: 'direct' }],
+    },
+    null,
+    2,
+  );
+}
+
+function xrayProtocol(protocol: string): string {
+  const map: Record<string, string> = {
+    VMESS: 'vmess',
+    VLESS: 'vless',
+    TROJAN: 'trojan',
+    SHADOWSOCKS: 'shadowsocks',
+    SOCKS5: 'socks',
+    HTTP: 'http',
+  };
+  return map[protocol] ?? protocol.toLowerCase();
+}
+
+function xraySettings(protocol: string, creds: NodeCredentials): unknown {
+  switch (protocol) {
+    case 'VMESS':
+      return { clients: [{ id: creds.uuid ?? '', alterId: 0 }] };
+    case 'VLESS':
+      return { clients: [{ id: creds.uuid ?? '', flow: '' }], decryption: 'none' };
+    case 'TROJAN':
+      return { clients: [{ password: creds.password ?? '' }] };
+    case 'SHADOWSOCKS':
+      return {
+        method: creds.method ?? 'aes-256-gcm',
+        password: creds.password ?? '',
+        network: 'tcp,udp',
+      };
+    case 'SOCKS5':
+      return {
+        auth: creds.username ? 'password' : 'noauth',
+        accounts: creds.username
+          ? [{ user: creds.username, pass: creds.password ?? '' }]
+          : [],
+        udp: true,
+      };
+    case 'HTTP':
+      return {
+        accounts: creds.username
+          ? [{ user: creds.username, pass: creds.password ?? '' }]
+          : [],
+      };
+    default:
+      return {};
+  }
+}
+
+function xrayStreamSettings(
+  transport: string | null,
+  tls: string,
+  domain: string | null,
+): unknown {
+  const network = transportNetwork(transport);
+  const base: Record<string, unknown> = { network };
+
+  if (network === 'ws') {
+    base.wsSettings = { path: '/' };
+  } else if (network === 'grpc') {
+    base.grpcSettings = { serviceName: 'grpc' };
+  }
+
+  if (tls === 'TLS') {
+    base.security = 'tls';
+    base.tlsSettings = {
+      serverName: domain ?? '',
+      certificates: [],
+    };
+  } else if (tls === 'REALITY') {
+    base.security = 'reality';
+    base.realitySettings = {
+      dest: `${domain ?? 'www.google.com'}:443`,
+      serverNames: [domain ?? 'www.google.com'],
+      privateKey: '',
+      shortIds: [''],
+    };
+  } else {
+    base.security = 'none';
+  }
+
+  return base;
+}
+
+function transportNetwork(transport: string | null): string {
+  const map: Record<string, string> = {
+    TCP: 'tcp',
+    WS: 'ws',
+    GRPC: 'grpc',
+    QUIC: 'quic',
+  };
+  return map[transport ?? 'TCP'] ?? 'tcp';
+}

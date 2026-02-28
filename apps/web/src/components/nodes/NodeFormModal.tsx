@@ -35,13 +35,14 @@ export default function NodeFormModal({ open, initialValues, onClose, onSuccess 
   const mutation = useMutation({
     mutationFn: (values: Record<string, unknown>) => {
       const { uuid, password, method, ...rest } = values;
-      const payload = {
-        ...rest,
-        credentials: { uuid, password, method },
-      };
+      const credentials: Record<string, string> = {};
+      if (uuid) credentials.uuid = String(uuid);
+      if (password) credentials.password = String(password);
+      if (method) credentials.method = String(method);
+      const payload = { ...(rest as Record<string, unknown>), credentials };
       return isEdit
         ? nodesApi.update(initialValues!.id as string, payload)
-        : nodesApi.create(payload);
+        : nodesApi.create(payload as Parameters<typeof nodesApi.create>[0]);
     },
     onSuccess: () => {
       message.success(isEdit ? '节点已更新' : '节点已创建');

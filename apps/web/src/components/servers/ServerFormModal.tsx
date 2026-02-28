@@ -11,6 +11,7 @@ import {
 } from 'antd';
 import { useMutation } from '@tanstack/react-query';
 import { serversApi } from '@/lib/api';
+import type { CreateServerDto, UpdateServerDto } from '@/types/api';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -53,9 +54,9 @@ export default function ServerFormModal({
           : [],
       };
       if (isEdit) {
-        return serversApi.update(initialValues!.id as string, payload);
+        return serversApi.update(initialValues!.id as string, payload as UpdateServerDto);
       }
-      return serversApi.create(payload);
+      return serversApi.create(payload as CreateServerDto);
     },
     onSuccess: () => {
       message.success(isEdit ? '服务器已更新' : '服务器已添加');

@@ -1,29 +1,25 @@
 'use client';
 
 import { useState } from 'react';
-import { App, Button, Table, Space, Card, Typography, Popconfirm, Input, Modal, QRCode } from 'antd';
-import { PlusOutlined, CopyOutlined, QrcodeOutlined } from '@ant-design/icons';
+import { App, Button, Table, Space, Card, Popconfirm, Input, Modal, QRCode } from 'antd';
+import { QrcodeOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { subscriptionsApi } from '@/lib/api';
+import SubscriptionFormModal from '@/components/subscriptions/SubscriptionFormModal';
+import PageHeader from '@/components/common/PageHeader';
+import CopyButton from '@/components/common/CopyButton';
+import type { Subscription } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
-
-const { Title } = Typography;
-
-interface Subscription {
-  id: string;
-  name: string;
-  token: string;
-  createdAt: string;
-}
 
 export default function SubscriptionsPage() {
   const { message } = App.useApp();
   const qc = useQueryClient();
+  const [createOpen, setCreateOpen] = useState(false);
   const [qrTarget, setQrTarget] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['subscriptions'],
-    queryFn: () => subscriptionsApi.list().then((r) => r.data as Subscription[]),
+    queryFn: () => subscriptionsApi.list().then((r) => r.data),
   });
 
   const deleteMutation = useMutation({
@@ -32,6 +28,7 @@ export default function SubscriptionsPage() {
       qc.invalidateQueries({ queryKey: ['subscriptions'] });
       message.success('订阅已删除');
     },
+    onError: () => message.error('删除失败'),
   });
 
   function getSubUrl(token: string) {
@@ -47,23 +44,28 @@ export default function SubscriptionsPage() {
           readOnly
           value={getSubUrl(r.token)}
           suffix={
-            <CopyOutlined
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                navigator.clipboard.writeText(getSubUrl(r.token));
-                message.success('已复制');
-              }}
+            <CopyButton
+              text={getSubUrl(r.token)}
+              size="small"
             />
           }
         />
       ),
     },
-    { title: '创建时间', dataIndex: 'createdAt', render: (v: string) => new Date(v).toLocaleString() },
+    {
+      title: '创建时间',
+      dataIndex: 'createdAt',
+      render: (v: string) => new Date(v).toLocaleString(),
+    },
     {
       title: '操作',
       render: (_: unknown, record) => (
         <Space>
-          <Button size="small" icon={<QrcodeOutlined />} onClick={() => setQrTarget(getSubUrl(record.token))}>
+          <Button
+            size="small"
+            icon={<QrcodeOutlined />}
+            onClick={() => setQrTarget(getSubUrl(record.token))}
+          >
             二维码
           </Button>
           <Popconfirm
@@ -81,10 +83,21 @@ export default function SubscriptionsPage() {
 
   return (
     <Card>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>订阅管理</Title>
-      </div>
+      <PageHeader
+        title="订阅管理"
+        addLabel="新增订阅"
+        onAdd={() => setCreateOpen(true)}
+      />
       <Table rowKey="id" loading={isLoading} dataSource={data} columns={columns} />
+
+      <SubscriptionFormModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onSuccess={() => {
+          setCreateOpen(false);
+          qc.invalidateQueries({ queryKey: ['subscriptions'] });
+        }}
+      />
 
       <Modal
         open={!!qrTarget}

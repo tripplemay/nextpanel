@@ -1,30 +1,24 @@
 'use client';
 
-import { App, Card, Table, Tag, Button, Space, Typography, Popconfirm } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { useState } from 'react';
+import { App, Card, Table, Tag, Space, Popconfirm } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { templatesApi } from '@/lib/api';
+import TemplateFormModal from '@/components/templates/TemplateFormModal';
+import PageHeader from '@/components/common/PageHeader';
+import type { Template } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
-
-const { Title } = Typography;
-
-interface Template {
-  id: string;
-  name: string;
-  protocol: string;
-  implementation: string | null;
-  variables: string[];
-  createdAt: string;
-  createdBy: { username: string };
-}
+import { Button } from 'antd';
 
 export default function TemplatesPage() {
   const { message } = App.useApp();
   const qc = useQueryClient();
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<Template | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['templates'],
-    queryFn: () => templatesApi.list().then((r) => r.data as Template[]),
+    queryFn: () => templatesApi.list().then((r) => r.data),
   });
 
   const deleteMutation = useMutation({
@@ -33,7 +27,18 @@ export default function TemplatesPage() {
       qc.invalidateQueries({ queryKey: ['templates'] });
       message.success('模板已删除');
     },
+    onError: () => message.error('删除失败'),
   });
+
+  function openCreate() {
+    setEditTarget(null);
+    setModalOpen(true);
+  }
+
+  function openEdit(record: Template) {
+    setEditTarget(record);
+    setModalOpen(true);
+  }
 
   const columns: ColumnType<Template>[] = [
     { title: '名称', dataIndex: 'name' },
@@ -52,29 +57,43 @@ export default function TemplatesPage() {
       render: (vars: string[]) => vars.map((v) => <Tag key={v}>{`{{${v}}}`}</Tag>),
     },
     { title: '创建人', render: (_: unknown, r) => r.createdBy?.username },
-    { title: '创建时间', dataIndex: 'createdAt', render: (v: string) => new Date(v).toLocaleString() },
+    {
+      title: '创建时间',
+      dataIndex: 'createdAt',
+      render: (v: string) => new Date(v).toLocaleString(),
+    },
     {
       title: '操作',
       render: (_: unknown, record) => (
-        <Popconfirm
-          title="确认删除该模板？"
-          onConfirm={() => deleteMutation.mutate(record.id)}
-          okText="删除"
-          okType="danger"
-        >
-          <Button size="small" danger>删除</Button>
-        </Popconfirm>
+        <Space>
+          <Button size="small" onClick={() => openEdit(record)}>编辑</Button>
+          <Popconfirm
+            title="确认删除该模板？"
+            onConfirm={() => deleteMutation.mutate(record.id)}
+            okText="删除"
+            okType="danger"
+          >
+            <Button size="small" danger>删除</Button>
+          </Popconfirm>
+        </Space>
       ),
     },
   ];
 
   return (
     <Card>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>配置模板</Title>
-        <Button type="primary" icon={<PlusOutlined />}>新增模板</Button>
-      </div>
+      <PageHeader title="配置模板" addLabel="新增模板" onAdd={openCreate} />
       <Table rowKey="id" loading={isLoading} dataSource={data} columns={columns} />
+
+      <TemplateFormModal
+        open={modalOpen}
+        initialValues={editTarget}
+        onClose={() => setModalOpen(false)}
+        onSuccess={() => {
+          setModalOpen(false);
+          qc.invalidateQueries({ queryKey: ['templates'] });
+        }}
+      />
     </Card>
   );
 }

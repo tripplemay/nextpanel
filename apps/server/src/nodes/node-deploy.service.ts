@@ -1,10 +1,11 @@
 import * as crypto from 'crypto';
-import { Injectable, MessageEvent, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, MessageEvent, NotFoundException } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { NodeSSH } from 'node-ssh';
 import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
-import { generateConfig, getBinaryCommand, NodeInfo } from './config-generator';
+import { generateConfig, getBinaryCommand, NodeInfo } from './config/config-generator';
+import { connectSsh, uploadText, binaryExists, whichBinary, detectPackageManager } from './ssh/ssh.util';
 
 export interface DeployResult {
   success: boolean;
@@ -13,6 +14,8 @@ export interface DeployResult {
 
 @Injectable()
 export class NodeDeployService {
+  private readonly logger = new Logger(NodeDeployService.name);
+
   constructor(
     private prisma: PrismaService,
     private crypto: CryptoService,
@@ -32,7 +35,9 @@ export class NodeDeployService {
           } as MessageEvent);
           subscriber.complete();
         })
-        .catch(() => {
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.error(`deployStream error for node ${nodeId}: ${msg}`);
           subscriber.next({
             data: { done: true, success: false },
           } as MessageEvent);
@@ -82,29 +87,23 @@ export class NodeDeployService {
     // ── 3. SSH connect ───────────────────────────────────────────────────────
     const server = node.server;
     const sshAuth = this.crypto.decrypt(server.sshAuthEnc);
-    const ssh = new NodeSSH();
+    let ssh: NodeSSH | null = null;
 
     try {
-      const connectOpts: Parameters<NodeSSH['connect']>[0] = {
+      log(`Connecting via SSH...`);
+      ssh = await connectSsh({
         host: server.ip,
         port: server.sshPort,
         username: server.sshUser,
-        readyTimeout: 15000,
-      };
-      if (server.sshAuthType === 'KEY') {
-        connectOpts.privateKey = sshAuth;
-      } else {
-        connectOpts.password = sshAuth;
-      }
-
-      log(`Connecting via SSH...`);
-      await ssh.connect(connectOpts);
+        authType: server.sshAuthType as 'KEY' | 'PASSWORD',
+        auth: sshAuth,
+        readyTimeout: 10000,
+      });
       log(`SSH connected to ${server.ip}:${server.sshPort}`);
 
       // ── 4. Check binary, auto-install if missing ──────────────────────────
       log(`Checking binary: ${bin}`);
-      const { code: binCheck } = await ssh.execCommand(`test -x ${bin}`);
-      if (binCheck !== 0) {
+      if (!(await binaryExists(ssh, bin))) {
         log(`Binary not found: ${bin}. Starting auto-install...`);
         const impl = (node.implementation ?? 'XRAY').toUpperCase();
         const resolvedBin = await this.autoInstall(ssh, impl, log);
@@ -115,8 +114,7 @@ export class NodeDeployService {
           return { success: false, log: logs.join('\n') };
         }
         // Re-verify — use resolved path (may differ from default for ss-libev)
-        const { code: recheck } = await ssh.execCommand(`test -x ${resolvedBin}`);
-        if (recheck !== 0) {
+        if (!(await binaryExists(ssh, resolvedBin))) {
           log(`Binary still not found at ${resolvedBin} after install. Aborting.`);
           ssh.dispose();
           await this.finalize(nodeId, false, logs, configJson);
@@ -134,20 +132,14 @@ export class NodeDeployService {
 
       // ── 5. Upload config file (base64 to avoid shell escaping issues) ──────
       log(`Uploading config to ${configPath}...`);
-      const b64 = Buffer.from(configJson).toString('base64');
-      await ssh.execCommand('mkdir -p /etc/nextpanel/nodes');
-      const { stderr: writeErr } = await ssh.execCommand(
-        `echo ${b64} | base64 -d > ${configPath}`,
-      );
-      if (writeErr) log(`Config write warning: ${writeErr}`);
+      await uploadText(ssh, configJson, configPath);
       log(`Config uploaded to ${configPath}`);
 
       // ── 6. Write systemd unit ──────────────────────────────────────────────
       const unitContent = buildSystemdUnit(node.name, bin, args);
-      const unitB64 = Buffer.from(unitContent).toString('base64');
       const unitPath = `/etc/systemd/system/${serviceName}.service`;
       log(`Writing systemd unit to ${unitPath}...`);
-      await ssh.execCommand(`echo ${unitB64} | base64 -d > ${unitPath}`);
+      await uploadText(ssh, unitContent, unitPath);
       log(`Systemd unit written`);
 
       // ── 7. Enable & restart service ────────────────────────────────────────
@@ -181,7 +173,7 @@ export class NodeDeployService {
 
       return { success: isActive, log: logs.join('\n') };
     } catch (err: unknown) {
-      ssh.dispose();
+      ssh?.dispose();
       const msg = err instanceof Error ? err.message : String(err);
       log(`Deploy error: ${msg}`);
       await this.finalize(nodeId, false, logs, configJson);
@@ -198,22 +190,18 @@ export class NodeDeployService {
     if (!node) return;
 
     const sshAuth = this.crypto.decrypt(node.server.sshAuthEnc);
-    const ssh = new NodeSSH();
     const serviceName = `nextpanel-${node.id}`;
 
+    let ssh: NodeSSH | null = null;
     try {
-      const connectOpts: Parameters<NodeSSH['connect']>[0] = {
+      ssh = await connectSsh({
         host: node.server.ip,
         port: node.server.sshPort,
         username: node.server.sshUser,
+        authType: node.server.sshAuthType as 'KEY' | 'PASSWORD',
+        auth: sshAuth,
         readyTimeout: 10000,
-      };
-      if (node.server.sshAuthType === 'KEY') {
-        connectOpts.privateKey = sshAuth;
-      } else {
-        connectOpts.password = sshAuth;
-      }
-      await ssh.connect(connectOpts);
+      });
       await ssh.execCommand(
         `systemctl stop ${serviceName}; systemctl disable ${serviceName}; ` +
           `rm -f /etc/systemd/system/${serviceName}.service /etc/nextpanel/nodes/${node.id}.json; ` +
@@ -221,7 +209,7 @@ export class NodeDeployService {
       );
       ssh.dispose();
     } catch {
-      ssh.dispose();
+      ssh?.dispose();
     }
   }
 
@@ -311,18 +299,16 @@ export class NodeDeployService {
 
   private async installSsLibev(ssh: NodeSSH, log: (msg: string) => void): Promise<string | null> {
     log(`Detecting package manager...`);
-    const { code: aptCode } = await ssh.execCommand(`which apt-get`);
-    const { code: yumCode } = await ssh.execCommand(`which yum`);
-    const { code: dnfCode } = await ssh.execCommand(`which dnf`);
+    const pm = await detectPackageManager(ssh);
 
     let installCmd: string;
-    if (aptCode === 0) {
+    if (pm === 'apt') {
       log(`Package manager: apt`);
       installCmd = `DEBIAN_FRONTEND=noninteractive apt-get update -qq && apt-get install -y shadowsocks-libev`;
-    } else if (dnfCode === 0) {
+    } else if (pm === 'dnf') {
       log(`Package manager: dnf`);
       installCmd = `dnf install -y shadowsocks-libev`;
-    } else if (yumCode === 0) {
+    } else if (pm === 'yum') {
       log(`Package manager: yum`);
       installCmd = `yum install -y epel-release && yum install -y shadowsocks-libev`;
     } else {
@@ -335,9 +321,8 @@ export class NodeDeployService {
     if (stderr) log(stderr.slice(-200));
 
     // ss-server path varies by distro — resolve dynamically
-    const { stdout: whichOut, code: whichCode } = await ssh.execCommand(`which ss-server`);
-    if (whichCode === 0 && whichOut.trim()) {
-      const resolvedPath = whichOut.trim();
+    const resolvedPath = await whichBinary(ssh, 'ss-server');
+    if (resolvedPath) {
       log(`ss-server installed at: ${resolvedPath}`);
       return resolvedPath;
     }
