@@ -4,6 +4,67 @@
 
 ---
 
+## [未发布] — 2026-03-02
+
+### 一、审计日志系统全面升级
+
+#### 数据库 Schema 重构
+
+- `OperationLog` 表泛化，去掉节点专用字段，改为通用资源模型：
+  - `nodeId / nodeName` → `resourceType / resourceId / resourceName`（支持任意资源类型）
+  - `operation` 字段由 `OpType` 枚举改为 `String`（不再受限于固定操作类型）
+  - 新增 `correlationId` 字段，与 `AuditLog` 精确关联
+  - 删除 `OpType` 枚举；存量数据通过迁移脚本自动回填 `resourceType='node'`
+- `AuditLog` 表新增 `correlationId` 字段与对应索引，实现与 `OperationLog` 的双向关联
+
+#### 后端 — `@Audit` 装饰器 + 全局拦截器
+
+- 新建 `@Audit(action, resource)` 方法装饰器，统一声明审计动作
+- 新建 `AuditInterceptor` 全局拦截器：
+  - 在 handler 执行前生成 `correlationId`，注入 `req.correlationId`
+  - handler 返回后自动写入 `AuditLog`，无需 controller 手动调用
+  - SSE 流式接口不经过拦截器，保留 controller 内手动写入，并携带 `correlationId`
+- 通过 `APP_INTERCEPTOR` 全局注册，一行装饰器即可为任意新接口接入审计
+
+**替换范围：**
+
+| Controller | 改动 |
+|-----------|------|
+| `ServersController` | CREATE / UPDATE / DELETE / SSH_TEST 全部改用 `@Audit` |
+| `NodesController` | CREATE / UPDATE / DELETE / DEPLOY（非 SSE）改用 `@Audit`；SSE 接口手动写入 |
+| `TemplatesController` | CREATE / UPDATE / DELETE 全部改用 `@Audit` |
+| `PipelinesController` | 新增 CREATE / UPDATE / DELETE 审计（此前无任何审计记录） |
+
+#### 后端 — OperationLog 泛化与独立接口
+
+- `OperationLogService` 支持任意 `resourceType`（'node'、'server' 或未来任意资源）
+- 新增查询方法：`listByResource()`、`getByCorrelationId()`（含日志全文）、`getLog()`
+- 新建独立 `OperationLogController`，路由从 `nodes` 模块剥离：
+
+| 路由 | 说明 |
+|------|------|
+| `GET /operation-logs/by-resource/:type/:id` | 资源历史日志 |
+| `GET /operation-logs/by-correlation/:correlationId` | 审计日志展开行懒加载 |
+| `GET /operation-logs/:id` | 完整日志详情 |
+
+#### 后端 — correlationId 链路打通
+
+- `NodeDeployService` 所有 `finalize()` 和 `doUndeployWithLogs()` 调用均传递 `correlationId`
+- `POST /nodes/:id/deploy-stream` 和 `DELETE /nodes/:id/delete-stream` 补录 `action=DEPLOY / DELETE` 审计日志（此前手动部署无审计记录）
+- `AuditService.findAll()` 新增 `action` 筛选参数
+
+#### 前端 — 审计日志页面改造
+
+- **动作类型筛选**：Select 下拉框，支持 8 种 action 类型（CREATE / UPDATE / DELETE / LOGIN / LOGOUT / DEPLOY / ROLLBACK / SSH_TEST），切换后自动重置分页
+- **展开行**：满足条件的日志行显示展开箭头，点击后展示：
+  - 「变更详情」— 格式化 JSON，浅色背景（有 diff 时显示）
+  - 「SSH 执行日志」— 深色终端样式，通过 `correlationId` 懒加载（resource=node 且 action 为 CREATE/UPDATE/DELETE/DEPLOY 时显示）
+  - 两者均有时同时展示，均无时不显示展开箭头
+- `DeployLogModal` 迁移至新的 `/operation-logs/*` 接口，`operation` 字段支持任意字符串显示
+- `operationLogsApi` 新增到 `lib/api.ts`；`AuditLog` 与 `OperationLogEntry` 类型同步更新
+
+---
+
 ## [未发布] — 2026-03-01
 
 > 本阶段为项目从初始提交到当前状态的完整变更记录，覆盖 CI/CD 部署、代码重构、新功能开发和测试补全四个里程碑。
