@@ -46,7 +46,13 @@ const mockCrypto = {
   decrypt: jest.fn((s: string) => s.replace('enc:', '')),
 } as unknown as CryptoService;
 
-const svc = new NodeDeployService(mockPrisma, mockCrypto);
+const mockOperationLog = {
+  createLog: jest.fn().mockResolvedValue({}),
+  listByNode: jest.fn().mockResolvedValue([]),
+  getLog: jest.fn().mockResolvedValue(null),
+} as unknown as import('../operation-log/operation-log.service').OperationLogService;
+
+const svc = new NodeDeployService(mockPrisma, mockCrypto, mockOperationLog);
 
 const fakeServer = {
   id: 'srv-1', ip: '1.2.3.4', sshPort: 22,

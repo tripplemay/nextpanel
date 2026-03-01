@@ -324,15 +324,15 @@ describe('NodesService', () => {
       await expect(svc.getShareLink('bad')).rejects.toThrow(NotFoundException);
     });
 
-    it('uses domain over server IP when domain is set', async () => {
+    it('always uses server IP as host (domain is only SNI, not the connection target)', async () => {
       const fakeNodeWithDomain = { ...fakeNode, protocol: 'VLESS', transport: 'TCP', tls: 'NONE', domain: 'cdn.example.com', server: { ip: '1.2.3.4' } };
       (mockPrisma.node.findUnique as jest.Mock)
         .mockResolvedValueOnce(fakeNodeWithDomain)
         .mockResolvedValueOnce({ credentialsEnc: 'enc:{"uuid":"u1"}' });
 
       const uri = await svc.getShareLink('node-1');
-      expect(uri).toContain('cdn.example.com');
-      expect(uri).not.toContain('1.2.3.4');
+      expect(uri).toContain('1.2.3.4');
+      expect(uri).not.toContain('cdn.example.com@');
     });
   });
 

@@ -147,6 +147,17 @@ describe('generateSingBoxConfig – TLS', () => {
     expect(cfg.inbounds[0].tls.reality.handshake.server).toBe('www.google.com');
   });
 
+  it('REALITY mode uses realityPrivateKey from credentials', () => {
+    const creds: NodeCredentials = { ...baseCreds, realityPrivateKey: 'my-private-key' };
+    const cfg = parseSingBox({ ...baseNode, tls: 'REALITY', domain: 'example.com' }, creds);
+    expect(cfg.inbounds[0].tls.reality.private_key).toBe('my-private-key');
+  });
+
+  it('REALITY mode uses empty string for private_key when not provided', () => {
+    const cfg = parseSingBox({ ...baseNode, tls: 'REALITY', domain: 'example.com' }, {});
+    expect(cfg.inbounds[0].tls.reality.private_key).toBe('');
+  });
+
   it('NONE tls does not add tls key', () => {
     const cfg = parseSingBox({ ...baseNode, tls: 'NONE' });
     expect(cfg.inbounds[0].tls).toBeUndefined();
