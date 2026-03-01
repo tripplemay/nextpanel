@@ -2,11 +2,12 @@
 
 import { useState } from 'react';
 import { App, Button, Table, Tag, Space, Popconfirm, Card } from 'antd';
-import { PlusOutlined, ApiOutlined, CloudUploadOutlined } from '@ant-design/icons';
+import { ApiOutlined, CloudUploadOutlined, ShareAltOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { nodesApi } from '@/lib/api';
 import NodeFormModal from '@/components/nodes/NodeFormModal';
 import DeployDrawer from '@/components/nodes/DeployDrawer';
+import NodeShareModal from '@/components/nodes/NodeShareModal';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
 import { useDeployStream } from '@/hooks/useDeployStream';
@@ -21,6 +22,7 @@ export default function NodesPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [deployingNode, setDeployingNode] = useState<Node | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [shareNode, setShareNode] = useState<Node | null>(null);
 
   const { logLines, deployStatus, startDeploy, abort, reset } = useDeployStream();
 
@@ -107,6 +109,13 @@ export default function NodesPage() {
           </Button>
           <Button
             size="small"
+            icon={<ShareAltOutlined />}
+            onClick={() => setShareNode(record)}
+          >
+            分享
+          </Button>
+          <Button
+            size="small"
             onClick={() => {
               setEditTarget(record);
               setModalOpen(true);
@@ -153,6 +162,8 @@ export default function NodesPage() {
         deployStatus={deployStatus}
         onClose={closeDrawer}
       />
+
+      <NodeShareModal node={shareNode} onClose={() => setShareNode(null)} />
     </Card>
   );
 }

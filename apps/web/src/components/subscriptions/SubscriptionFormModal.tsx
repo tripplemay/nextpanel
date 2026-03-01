@@ -58,7 +58,7 @@ export default function SubscriptionFormModal({
       onOk={handleSubmit}
       okText="创建"
       confirmLoading={createMutation.isPending}
-      destroyOnClose
+      destroyOnHidden
     >
       <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
         <Form.Item name="name" label="订阅名称" rules={[{ required: true, message: '请输入订阅名称' }]}>

@@ -74,6 +74,8 @@ export const nodesApi = {
   create: (data: CreateNodeDto) => api.post<Node>('/nodes', data),
   update: (id: string, data: UpdateNodeDto) => api.patch<Node>(`/nodes/${id}`, data),
   delete: (id: string) => api.delete<void>(`/nodes/${id}`),
+  credentials: (id: string) => api.get<Record<string, string>>(`/nodes/${id}/credentials`),
+  shareLink: (id: string) => api.get<{ uri: string | null }>(`/nodes/${id}/share`),
   test: (id: string) => api.post<ConnectivityResult>(`/nodes/${id}/test`),
   deploy: (id: string) => api.post<void>(`/nodes/${id}/deploy`),
 };

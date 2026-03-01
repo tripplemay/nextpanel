@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Table, Tag, Card, Typography } from 'antd';
+import { App, Table, Tag, Card, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { auditApi } from '@/lib/api';
 import type { ColumnType } from 'antd/es/table';
@@ -30,13 +30,15 @@ const actionColor: Record<string, string> = {
 };
 
 export default function AuditLogsPage() {
+  const { message } = App.useApp();
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['audit-logs', page],
     queryFn: () => auditApi.list(page, pageSize).then((r) => r.data as { data: AuditLog[]; total: number }),
   });
+  if (isError) message.error('加载审计日志失败');
 
   const columns: ColumnType<AuditLog>[] = [
     { title: '操作人', render: (_: unknown, r) => r.actor?.username },

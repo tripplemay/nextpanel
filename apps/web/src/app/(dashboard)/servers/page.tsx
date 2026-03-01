@@ -53,10 +53,11 @@ export default function ServersPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Server | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['servers'],
     queryFn: () => serversApi.list().then((r) => r.data as Server[]),
   });
+  if (isError) message.error('加载服务器失败');
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => serversApi.delete(id),
@@ -64,6 +65,7 @@ export default function ServersPage() {
       qc.invalidateQueries({ queryKey: ['servers'] });
       message.success('服务器已删除');
     },
+    onError: () => message.error('删除失败'),
   });
 
   const testSshMutation = useMutation({

@@ -98,7 +98,7 @@ export default function TemplateFormModal({
       okText={isEdit ? '保存' : '创建'}
       confirmLoading={isPending}
       width={640}
-      destroyOnClose
+      destroyOnHidden
     >
       <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
         <Form.Item name="name" label="模板名称" rules={[{ required: true, message: '请输入模板名称' }]}>

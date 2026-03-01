@@ -16,10 +16,11 @@ export default function TemplatesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Template | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['templates'],
     queryFn: () => templatesApi.list().then((r) => r.data),
   });
+  if (isError) message.error('加载模板失败');
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => templatesApi.delete(id),
