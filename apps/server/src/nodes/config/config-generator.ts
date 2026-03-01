@@ -21,6 +21,8 @@ export interface NodeCredentials {
   password?: string;
   method?: string;
   username?: string;
+  realityPrivateKey?: string;
+  realityPublicKey?: string;
 }
 
 // ─── Public entry point ──────────────────────────────────────────────────────

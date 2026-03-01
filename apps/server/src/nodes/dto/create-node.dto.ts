@@ -31,6 +31,16 @@ export class NodeCredentialsDto {
   @IsString()
   @IsOptional()
   username?: string;
+
+  @ApiPropertyOptional({ description: 'REALITY private key (auto-generated if omitted)' })
+  @IsString()
+  @IsOptional()
+  realityPrivateKey?: string;
+
+  @ApiPropertyOptional({ description: 'REALITY public key (auto-generated if omitted)' })
+  @IsString()
+  @IsOptional()
+  realityPublicKey?: string;
 }
 
 export class CreateNodeDto {

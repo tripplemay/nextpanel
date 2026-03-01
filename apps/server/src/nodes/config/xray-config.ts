@@ -13,7 +13,7 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
           listen: '0.0.0.0',
           protocol: xrayProtocol(node.protocol),
           settings: xraySettings(node.protocol, creds),
-          streamSettings: xrayStreamSettings(node.transport, node.tls, node.domain),
+          streamSettings: xrayStreamSettings(node.transport, node.tls, node.domain, creds),
         },
       ],
       outbounds: [{ protocol: 'freedom', tag: 'direct' }],
@@ -72,6 +72,7 @@ function xrayStreamSettings(
   transport: string | null,
   tls: string,
   domain: string | null,
+  creds: NodeCredentials,
 ): unknown {
   const network = transportNetwork(transport);
   const base: Record<string, unknown> = { network };
@@ -93,7 +94,7 @@ function xrayStreamSettings(
     base.realitySettings = {
       dest: `${domain ?? 'www.google.com'}:443`,
       serverNames: [domain ?? 'www.google.com'],
-      privateKey: '',
+      privateKey: creds.realityPrivateKey ?? '',
       shortIds: [''],
     };
   } else {

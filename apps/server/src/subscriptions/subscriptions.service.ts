@@ -1,7 +1,24 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { NodesService } from '../nodes/nodes.service';
-import { Protocol } from '@prisma/client';
+import { buildShareUri, buildClashProxy, buildSingboxOutbound } from './uri-builder';
+import type { NodeExportInfo } from './uri-builder';
+
+type SubscriptionNode = {
+  node: {
+    id: string;
+    name: string;
+    protocol: string;
+    implementation: string | null;
+    transport: string | null;
+    tls: string;
+    listenPort: number;
+    domain: string | null;
+    enabled: boolean;
+    status: string;
+    server: { ip: string };
+  };
+};
 
 @Injectable()
 export class SubscriptionsService {
@@ -37,11 +54,77 @@ export class SubscriptionsService {
     return this.prisma.subscription.delete({ where: { id } });
   }
 
-  /**
-   * Generate a Base64-encoded subscription link content (Clash/v2ray format).
-   * Each node produces a URI line according to its protocol.
-   */
+  /** Base64-encoded subscription (V2Ray / Xray universal format) */
   async generateContent(token: string): Promise<string> {
+    const nodes = await this.fetchActiveNodes(token);
+    const lines = nodes.map((n) => buildShareUri(n)).filter((u): u is string => u !== null);
+    return Buffer.from(lines.join('\n')).toString('base64');
+  }
+
+  /** Clash / Mihomo YAML subscription */
+  async generateClashContent(token: string): Promise<string> {
+    const nodes = await this.fetchActiveNodes(token);
+
+    const proxyBlocks = nodes
+      .map((n) => buildClashProxy(n))
+      .filter((b): b is string => b !== null);
+
+    if (proxyBlocks.length === 0) {
+      return 'proxies: []\nproxy-groups: []\nrules:\n  - MATCH,DIRECT\n';
+    }
+
+    const names = nodes.map((n) => `      - ${n.name}`).join('\n');
+
+    return [
+      'proxies:',
+      proxyBlocks.join('\n'),
+      '',
+      'proxy-groups:',
+      '  - name: 🚀 节点选择',
+      '    type: select',
+      '    proxies:',
+      names,
+      '',
+      'rules:',
+      '  - MATCH,🚀 节点选择',
+      '',
+    ].join('\n');
+  }
+
+  /** Sing-box JSON subscription */
+  async generateSingboxContent(token: string): Promise<string> {
+    const nodes = await this.fetchActiveNodes(token);
+
+    const outbounds = nodes
+      .map((n) => buildSingboxOutbound(n))
+      .filter((o): o is Record<string, unknown> => o !== null);
+
+    const tags = outbounds.map((o) => o.tag as string);
+
+    const config = {
+      log: { level: 'info' },
+      outbounds: [
+        ...outbounds,
+        {
+          type: 'selector',
+          tag: '🚀 节点选择',
+          outbounds: tags.length > 0 ? tags : ['direct'],
+          default: tags[0] ?? 'direct',
+        },
+        { type: 'direct', tag: 'direct' },
+        { type: 'block', tag: 'block' },
+      ],
+      route: {
+        final: '🚀 节点选择',
+      },
+    };
+
+    return JSON.stringify(config, null, 2);
+  }
+
+  // ─── Private helpers ──────────────────────────────────────────────────────
+
+  private async fetchActiveNodes(token: string): Promise<NodeExportInfo[]> {
     const sub = await this.prisma.subscription.findUnique({
       where: { token },
       include: {
@@ -57,62 +140,23 @@ export class SubscriptionsService {
 
     if (!sub) throw new NotFoundException('Subscription not found');
 
-    const lines: string[] = [];
+    const result: NodeExportInfo[] = [];
 
-    for (const { node } of sub.nodes) {
+    for (const { node } of sub.nodes as SubscriptionNode[]) {
       if (!node.enabled || node.status !== 'RUNNING') continue;
-
       const credentials = await this.nodesService.getCredentials(node.id);
-      const host = node.domain ?? node.server.ip;
-
-      const uri = this.buildUri(
-        node.protocol,
-        host,
-        node.listenPort,
-        node.name,
+      result.push({
+        name: node.name,
+        protocol: node.protocol,
+        host: node.domain ?? node.server.ip,
+        port: node.listenPort,
+        transport: node.transport,
+        tls: node.tls,
+        domain: node.domain,
         credentials,
-      );
-      if (uri) lines.push(uri);
+      });
     }
 
-    return Buffer.from(lines.join('\n')).toString('base64');
-  }
-
-  private buildUri(
-    protocol: Protocol,
-    host: string,
-    port: number,
-    name: string,
-    creds: Record<string, string>,
-  ): string | null {
-    const tag = encodeURIComponent(name);
-    switch (protocol) {
-      case 'VMESS': {
-        const obj = {
-          v: '2',
-          ps: name,
-          add: host,
-          port: String(port),
-          id: creds.uuid ?? '',
-          aid: '0',
-          net: 'tcp',
-          type: 'none',
-          tls: '',
-        };
-        return `vmess://${Buffer.from(JSON.stringify(obj)).toString('base64')}`;
-      }
-      case 'VLESS':
-        return `vless://${creds.uuid ?? ''}@${host}:${port}?encryption=none#${tag}`;
-      case 'TROJAN':
-        return `trojan://${creds.password ?? ''}@${host}:${port}#${tag}`;
-      case 'SHADOWSOCKS':
-        return `ss://${Buffer.from(`${creds.method ?? 'aes-256-gcm'}:${creds.password ?? ''}`).toString('base64')}@${host}:${port}#${tag}`;
-      case 'SOCKS5':
-        return `socks5://${host}:${port}#${tag}`;
-      case 'HTTP':
-        return `http://${host}:${port}#${tag}`;
-      default:
-        return null;
-    }
+    return result;
   }
 }

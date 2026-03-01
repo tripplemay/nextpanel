@@ -78,6 +78,21 @@ export class NodesController {
     return node;
   }
 
+  @Get(':id/credentials')
+  @Roles('ADMIN', 'OPERATOR')
+  @ApiOperation({ summary: 'Get decrypted credentials for a node (edit use only)' })
+  getCredentials(@Param('id') id: string) {
+    return this.nodesService.getCredentials(id);
+  }
+
+  @Get(':id/share')
+  @Roles('ADMIN', 'OPERATOR')
+  @ApiOperation({ summary: 'Get single-node share URI (vmess://, vless://, etc.)' })
+  async getShareLink(@Param('id') id: string) {
+    const uri = await this.nodesService.getShareLink(id);
+    return { uri };
+  }
+
   @Post(':id/test')
   @Roles('ADMIN', 'OPERATOR')
   @ApiOperation({ summary: 'Test node TCP connectivity' })

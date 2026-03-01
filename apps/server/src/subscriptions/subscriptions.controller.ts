@@ -46,13 +46,33 @@ export class SubscriptionsController {
     return this.subscriptionsService.remove(id);
   }
 
-  /** Public endpoint — returns Base64 subscription content by token */
+  /** Public — Base64 universal subscription (V2Ray / Xray compatible) */
   @Get('link/:token')
-  @ApiOperation({ summary: 'Public subscription content endpoint' })
+  @ApiOperation({ summary: 'Base64 universal subscription content' })
   async getContent(@Param('token') token: string, @Res() res: Response) {
     const content = await this.subscriptionsService.generateContent(token);
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Subscription-Userinfo', 'upload=0; download=0; total=0');
+    res.send(content);
+  }
+
+  /** Public — Clash / Mihomo YAML subscription */
+  @Get('link/:token/clash')
+  @ApiOperation({ summary: 'Clash / Mihomo YAML subscription content' })
+  async getClashContent(@Param('token') token: string, @Res() res: Response) {
+    const content = await this.subscriptionsService.generateClashContent(token);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', 'inline; filename="clash.yaml"');
+    res.send(content);
+  }
+
+  /** Public — Sing-box JSON subscription */
+  @Get('link/:token/singbox')
+  @ApiOperation({ summary: 'Sing-box JSON subscription content' })
+  async getSingboxContent(@Param('token') token: string, @Res() res: Response) {
+    const content = await this.subscriptionsService.generateSingboxContent(token);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', 'inline; filename="singbox.json"');
     res.send(content);
   }
 }

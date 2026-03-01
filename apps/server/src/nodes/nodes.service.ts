@@ -1,10 +1,12 @@
 import * as net from 'net';
+import * as crypto from 'crypto';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { NodeDeployService } from './node-deploy.service';
 import { CreateNodeDto } from './dto/create-node.dto';
 import { UpdateNodeDto } from './dto/update-node.dto';
+import { buildShareUri } from '../subscriptions/uri-builder';
 
 @Injectable()
 export class NodesService {
@@ -17,9 +19,11 @@ export class NodesService {
   ) {}
 
   async create(dto: CreateNodeDto) {
-    const credentialsEnc = this.crypto.encrypt(
-      JSON.stringify(dto.credentials),
-    );
+    const creds = { ...dto.credentials };
+    if (dto.tls === 'REALITY' && !creds.realityPrivateKey) {
+      Object.assign(creds, generateRealityKeys());
+    }
+    const credentialsEnc = this.crypto.encrypt(JSON.stringify(creds));
     const node = await this.prisma.node.create({
       data: {
         serverId: dto.serverId,
@@ -61,9 +65,27 @@ export class NodesService {
   }
 
   async update(id: string, dto: UpdateNodeDto) {
-    await this.findOne(id);
+    const existing = await this.prisma.node.findUnique({
+      where: { id },
+      select: { tls: true, credentialsEnc: true },
+    });
+    if (!existing) throw new NotFoundException(`Node ${id} not found`);
+
     const data: Record<string, unknown> = { ...dto };
-    if (dto.credentials) {
+    const effectiveTls = dto.tls ?? existing.tls;
+
+    if (effectiveTls === 'REALITY') {
+      // Decrypt current creds, merge with incoming, then ensure reality keys exist
+      const currentCreds = JSON.parse(
+        this.crypto.decrypt(existing.credentialsEnc),
+      ) as Record<string, string>;
+      const merged = { ...currentCreds, ...(dto.credentials ?? {}) };
+      if (!merged.realityPrivateKey) {
+        Object.assign(merged, generateRealityKeys());
+      }
+      data.credentialsEnc = this.crypto.encrypt(JSON.stringify(merged));
+      delete data.credentials;
+    } else if (dto.credentials) {
       data.credentialsEnc = this.crypto.encrypt(
         JSON.stringify(dto.credentials),
       );
@@ -123,6 +145,26 @@ export class NodesService {
     });
   }
 
+  /** Build a single-node share URI (vmess://, vless://, etc.) */
+  async getShareLink(id: string): Promise<string | null> {
+    const node = await this.prisma.node.findUnique({
+      where: { id },
+      include: { server: { select: { ip: true } } },
+    });
+    if (!node) throw new NotFoundException(`Node ${id} not found`);
+    const credentials = await this.getCredentials(id);
+    return buildShareUri({
+      name: node.name,
+      protocol: node.protocol,
+      host: node.domain ?? node.server.ip,
+      port: node.listenPort,
+      transport: node.transport,
+      tls: node.tls,
+      domain: node.domain,
+      credentials,
+    });
+  }
+
   /** Decrypt credentials — only use when generating subscription / deploying */
   async getCredentials(id: string): Promise<Record<string, string>> {
     const node = await this.prisma.node.findUnique({
@@ -150,4 +192,19 @@ export class NodesService {
       updatedAt: true,
     } as const;
   }
+}
+
+/**
+ * Generate an X25519 key pair in Xray's base64url format.
+ * PKCS8 DER for X25519: 48 bytes, raw key starts at offset 16.
+ * SPKI  DER for X25519: 44 bytes, raw key starts at offset 12.
+ */
+function generateRealityKeys(): { realityPrivateKey: string; realityPublicKey: string } {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('x25519');
+  const privDer = privateKey.export({ type: 'pkcs8', format: 'der' }) as Buffer;
+  const pubDer  = publicKey.export({ type: 'spki',  format: 'der' }) as Buffer;
+  return {
+    realityPrivateKey: privDer.slice(16).toString('base64url'),
+    realityPublicKey:  pubDer.slice(12).toString('base64url'),
+  };
 }

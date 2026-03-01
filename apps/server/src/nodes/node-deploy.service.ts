@@ -234,9 +234,10 @@ export class NodeDeployService {
 
   private async installXray(ssh: NodeSSH, log: (msg: string) => void): Promise<boolean> {
     log(`Installing Xray via official script...`);
+    // Download to tmp file first to avoid process substitution (<()) which sh/dash don't support
     const { stdout, stderr } = await ssh.execCommand(
-      `bash <(curl -sL https://github.com/XTLS/Xray-install/raw/main/install-release.sh) @ install 2>&1`,
-      { execOptions: { pty: false } },
+      `curl -sL https://github.com/XTLS/Xray-install/raw/main/install-release.sh -o /tmp/install-xray.sh && ` +
+      `bash /tmp/install-xray.sh install 2>&1; rm -f /tmp/install-xray.sh`,
     );
     if (stdout) log(stdout.trim());
     if (stderr) log(stderr.trim());
@@ -249,7 +250,8 @@ export class NodeDeployService {
   private async installV2Ray(ssh: NodeSSH, log: (msg: string) => void): Promise<boolean> {
     log(`Installing V2Ray via official script...`);
     const { stdout, stderr } = await ssh.execCommand(
-      `bash <(curl -sL https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh) 2>&1`,
+      `curl -sL https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh -o /tmp/install-v2ray.sh && ` +
+      `bash /tmp/install-v2ray.sh install 2>&1; rm -f /tmp/install-v2ray.sh`,
     );
     if (stdout) log(stdout.trim());
     if (stderr) log(stderr.trim());
