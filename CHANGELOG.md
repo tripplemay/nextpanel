@@ -4,6 +4,35 @@
 
 ---
 
+## [未发布] — 2026-03-02（二）
+
+### 前端视觉统一与布局间距优化
+
+#### 全局样式
+
+- `providers.tsx` 全局 AntD Token 新增 `borderRadius: 8`，所有组件（Card、Input、Tag 等）统一圆角风格
+
+#### PageHeader 组件升级
+
+- 标题行与表格内容之间新增 `Divider` 分隔线（`margin: 12px 0 16px`），移除原来的 `marginBottom: 16` 硬编码间距
+- 视觉层次更清晰，标题与数据区域不再粘连
+
+#### 服务器页面重构
+
+- 替换内联 `div + Title + Button` 头部 → 统一使用 `PageHeader` 组件
+- 移除本地重复定义的 `Server` 接口和 `statusColor` 常量，改用 `@/types/api` 共享类型
+- 状态列从 `Badge + Tag` 组合渲染 → 统一使用 `StatusTag` 共享组件
+
+#### 所有仪表盘页面
+
+| 页面 | 改动 |
+|------|------|
+| 服务器、节点、模板、订阅、GitHub Actions、审计日志 | `Table size="middle"`（审计日志从 `"small"` 升级） |
+| 所有页面 | `Card` 新增 `boxShadow: '0 1px 4px rgba(0,0,0,0.08)'`，在浅灰背景下具有轻微浮起感 |
+| 所有页面 | 分页统一显示"共 N 条"汇总 |
+
+---
+
 ## [未发布] — 2026-03-02
 
 ### 一、审计日志系统全面升级
