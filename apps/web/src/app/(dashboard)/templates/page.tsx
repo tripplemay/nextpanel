@@ -82,9 +82,9 @@ export default function TemplatesPage() {
   ];
 
   return (
-    <Card>
+    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
       <PageHeader title="配置模板" addLabel="新增模板" onAdd={openCreate} />
-      <Table rowKey="id" loading={isLoading} dataSource={data} columns={columns} />
+      <Table rowKey="id" size="middle" loading={isLoading} dataSource={data} columns={columns} pagination={{ showTotal: (total) => `共 ${total} 条` }} />
 
       <TemplateFormModal
         open={modalOpen}

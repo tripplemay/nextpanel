@@ -119,7 +119,7 @@ export default function GithubActionsPage() {
   ];
 
   return (
-    <Card>
+    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
       <PageHeader
         title="GitHub Actions 自动部署"
         addLabel="新增部署配置"
@@ -135,7 +135,7 @@ export default function GithubActionsPage() {
         description="配置部署信息后，点击「查看配置」获取 GitHub Actions Workflow 文件和所需 Secrets。将 Workflow 文件提交到仓库，并在 GitHub 仓库 Settings → Secrets 中添加对应变量，之后每次 push 代码将自动触发部署。"
       />
 
-      <Table rowKey="id" loading={isLoading} dataSource={data} columns={columns} />
+      <Table rowKey="id" size="middle" loading={isLoading} dataSource={data} columns={columns} pagination={{ showTotal: (total) => `共 ${total} 条` }} />
 
       <PipelineFormModal
         open={modalOpen}

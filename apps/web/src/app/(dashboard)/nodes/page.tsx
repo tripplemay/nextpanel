@@ -161,13 +161,13 @@ export default function NodesPage() {
   ];
 
   return (
-    <Card>
+    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
       <PageHeader
         title="节点管理"
         addLabel="新增节点"
         onAdd={() => { setEditTarget(null); setModalOpen(true); }}
       />
-      <Table rowKey="id" loading={isLoading} dataSource={data} columns={columns} />
+      <Table rowKey="id" size="middle" loading={isLoading} dataSource={data} columns={columns} pagination={{ showTotal: (total) => `共 ${total} 条` }} />
 
       <NodeFormModal
         open={modalOpen}

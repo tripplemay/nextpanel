@@ -205,7 +205,7 @@ export default function AuditLogsPage() {
   };
 
   return (
-    <Card>
+    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
       <Space style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
         <Title level={4} style={{ margin: 0 }}>审计日志</Title>
         <Select
@@ -237,7 +237,7 @@ export default function AuditLogsPage() {
           },
           showTotal: (total) => `共 ${total} 条`,
         }}
-        size="small"
+        size="middle"
       />
     </Card>
   );

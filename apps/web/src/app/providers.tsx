@@ -20,7 +20,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
         locale={zhCN}
         theme={{
           algorithm: theme.defaultAlgorithm,
-          token: { colorPrimary: '#1677ff' },
+          token: { colorPrimary: '#1677ff', borderRadius: 8 },
         }}
       >
         <App>{children}</App>

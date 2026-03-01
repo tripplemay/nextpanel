@@ -8,44 +8,20 @@ import {
   Tag,
   Space,
   Popconfirm,
-  Badge,
   Card,
-  Typography,
   Tooltip,
 } from 'antd';
 import {
-  PlusOutlined,
   CheckCircleOutlined,
   ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { serversApi } from '@/lib/api';
 import ServerFormModal from '@/components/servers/ServerFormModal';
+import PageHeader from '@/components/common/PageHeader';
+import StatusTag from '@/components/common/StatusTag';
+import type { Server } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
-
-const { Title } = Typography;
-
-interface Server {
-
-  id: string;
-  name: string;
-  ip: string;
-  region: string;
-  provider: string;
-  status: string;
-  cpuUsage: number | null;
-  memUsage: number | null;
-  lastSeenAt: string | null;
-  agentVersion: string | null;
-  tags: string[];
-}
-
-const statusColor: Record<string, string> = {
-  ONLINE: 'green',
-  OFFLINE: 'red',
-  UNKNOWN: 'default',
-  ERROR: 'orange',
-};
 
 export default function ServersPage() {
   const { message } = App.useApp();
@@ -92,12 +68,7 @@ export default function ServersPage() {
     {
       title: '状态',
       dataIndex: 'status',
-      render: (status: string) => (
-        <Badge
-          status={status === 'ONLINE' ? 'success' : status === 'OFFLINE' ? 'error' : 'default'}
-          text={<Tag color={statusColor[status]}>{status}</Tag>}
-        />
-      ),
+      render: (status: string) => <StatusTag status={status} />,
     },
     {
       title: 'CPU / 内存',
@@ -155,29 +126,19 @@ export default function ServersPage() {
   ];
 
   return (
-    <Card>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>
-          服务器管理
-        </Title>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            setEditTarget(null);
-            setModalOpen(true);
-          }}
-        >
-          新增服务器
-        </Button>
-      </div>
-
+    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+      <PageHeader
+        title="服务器管理"
+        addLabel="新增服务器"
+        onAdd={() => { setEditTarget(null); setModalOpen(true); }}
+      />
       <Table
         rowKey="id"
+        size="middle"
         loading={isLoading}
         dataSource={data}
         columns={columns}
-        pagination={{ pageSize: 10 }}
+        pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
       />
 
       <ServerFormModal
