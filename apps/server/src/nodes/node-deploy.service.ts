@@ -4,6 +4,7 @@ import { Observable } from 'rxjs';
 import { NodeSSH } from 'node-ssh';
 import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
+import { OperationLogService } from '../operation-log/operation-log.service';
 import { generateConfig, getBinaryCommand, NodeInfo } from './config/config-generator';
 import { connectSsh, uploadText, binaryExists, whichBinary, detectPackageManager } from './ssh/ssh.util';
 
@@ -19,16 +20,17 @@ export class NodeDeployService {
   constructor(
     private prisma: PrismaService,
     private crypto: CryptoService,
+    private operationLog: OperationLogService,
   ) {}
 
   /** Stream deploy logs as SSE events */
-  deployStream(nodeId: string): Observable<MessageEvent> {
+  deployStream(nodeId: string, actorId?: string, correlationId?: string): Observable<MessageEvent> {
     return new Observable((subscriber) => {
       const onLog = (line: string) => {
         subscriber.next({ data: { log: line } } as MessageEvent);
       };
 
-      this.deploy(nodeId, onLog)
+      this.deploy(nodeId, onLog, actorId, correlationId)
         .then((result) => {
           subscriber.next({
             data: { done: true, success: result.success },
@@ -46,7 +48,8 @@ export class NodeDeployService {
     });
   }
 
-  async deploy(nodeId: string, onLog?: (line: string) => void): Promise<DeployResult> {
+  async deploy(nodeId: string, onLog?: (line: string) => void, actorId?: string, correlationId?: string): Promise<DeployResult> {
+    const startMs = Date.now();
     const node = await this.prisma.node.findUnique({
       where: { id: nodeId },
       include: { server: true },
@@ -110,14 +113,14 @@ export class NodeDeployService {
         if (!resolvedBin) {
           log(`Auto-install failed. Please install the binary manually and retry.`);
           ssh.dispose();
-          await this.finalize(nodeId, false, logs, configJson);
+          await this.finalize(nodeId, node.name, false, logs, configJson, actorId, startMs, correlationId);
           return { success: false, log: logs.join('\n') };
         }
         // Re-verify — use resolved path (may differ from default for ss-libev)
         if (!(await binaryExists(ssh, resolvedBin))) {
           log(`Binary still not found at ${resolvedBin} after install. Aborting.`);
           ssh.dispose();
-          await this.finalize(nodeId, false, logs, configJson);
+          await this.finalize(nodeId, node.name, false, logs, configJson, actorId, startMs, correlationId);
           return { success: false, log: logs.join('\n') };
         }
         // Override bin if ss-libev resolved to a different path
@@ -162,8 +165,15 @@ export class NodeDeployService {
       const isActive = activeOut.trim() === 'active';
       log(`Service status: ${activeOut.trim()}`);
 
+      if (!isActive) {
+        const { stdout: journalOut } = await ssh.execCommand(
+          `journalctl -u ${serviceName} -n 30 --no-pager 2>&1 || true`,
+        );
+        if (journalOut?.trim()) log(`Service logs:\n${journalOut.trim()}`);
+      }
+
       ssh.dispose();
-      await this.finalize(nodeId, isActive, logs, configJson);
+      await this.finalize(nodeId, node.name, isActive, logs, configJson, actorId, startMs, correlationId);
 
       if (isActive) {
         log(`Deployment completed successfully!`);
@@ -176,9 +186,118 @@ export class NodeDeployService {
       ssh?.dispose();
       const msg = err instanceof Error ? err.message : String(err);
       log(`Deploy error: ${msg}`);
-      await this.finalize(nodeId, false, logs, configJson);
+      await this.finalize(nodeId, node.name, false, logs, configJson, actorId, startMs, correlationId);
       return { success: false, log: logs.join('\n') };
     }
+  }
+
+  /** Stream undeploy logs via SSE and delete the node record when done */
+  undeployStream(nodeId: string, actorId?: string, correlationId?: string): Observable<MessageEvent> {
+    return new Observable((subscriber) => {
+      const onLog = (line: string) => {
+        subscriber.next({ data: { log: line } } as MessageEvent);
+      };
+
+      this.doUndeployWithLogs(nodeId, onLog, actorId, correlationId)
+        .then(() => {
+          subscriber.next({ data: { done: true, success: true } } as MessageEvent);
+          subscriber.complete();
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.error(`undeployStream error for node ${nodeId}: ${msg}`);
+          onLog(`[${new Date().toLocaleTimeString()}] 删除失败: ${msg}`);
+          subscriber.next({ data: { done: true, success: false } } as MessageEvent);
+          subscriber.complete();
+        });
+    });
+  }
+
+  private async doUndeployWithLogs(
+    nodeId: string,
+    onLog: (line: string) => void,
+    actorId?: string,
+    correlationId?: string,
+  ): Promise<void> {
+    const startMs = Date.now();
+    const log = (msg: string) => onLog(`[${new Date().toLocaleTimeString()}] ${msg}`);
+
+    const node = await this.prisma.node.findUnique({
+      where: { id: nodeId },
+      include: { server: true },
+    });
+    if (!node) throw new NotFoundException(`节点 ${nodeId} 不存在`);
+
+    const sshAuth = this.crypto.decrypt(node.server.sshAuthEnc);
+    const serviceName = `nextpanel-${node.id}`;
+    const undeployLogs: string[] = [];
+    const trackLog = (msg: string) => {
+      undeployLogs.push(msg);
+      log(msg);
+    };
+
+    // ── Step 1: SSH cleanup — must succeed before DB deletion ─────────────────
+    let ssh: NodeSSH | null = null;
+    try {
+      trackLog(`正在连接服务器 ${node.server.ip}:${node.server.sshPort}...`);
+      ssh = await connectSsh({
+        host: node.server.ip,
+        port: node.server.sshPort,
+        username: node.server.sshUser,
+        authType: node.server.sshAuthType as 'KEY' | 'PASSWORD',
+        auth: sshAuth,
+        readyTimeout: 10000,
+      });
+      trackLog('SSH 已连接');
+
+      trackLog(`正在停止服务 ${serviceName}...`);
+      await ssh.execCommand(`systemctl stop ${serviceName}`);
+      trackLog('服务已停止');
+
+      trackLog('正在删除 systemd 单元和配置文件...');
+      await ssh.execCommand(
+        `systemctl disable ${serviceName}; ` +
+          `rm -f /etc/systemd/system/${serviceName}.service /etc/nextpanel/nodes/${node.id}.json; ` +
+          `systemctl daemon-reload`,
+      );
+      trackLog('服务器清理完成');
+    } catch (err: unknown) {
+      ssh?.dispose();
+      const msg = err instanceof Error ? err.message : String(err);
+      trackLog(`SSH 清理失败，节点记录已保留: ${msg}`);
+      trackLog('请确认服务器可达后重试删除操作');
+      // Save failed undeploy log before throwing
+      await this.operationLog.createLog({
+        resourceType: 'node',
+        resourceId: node.id,
+        resourceName: node.name,
+        actorId: actorId ?? null,
+        operation: 'UNDEPLOY',
+        correlationId: correlationId ?? null,
+        success: false,
+        log: undeployLogs.join('\n'),
+        durationMs: Date.now() - startMs,
+      });
+      throw new Error(`SSH 清理失败: ${msg}`);
+    }
+    ssh.dispose();
+
+    // ── Step 2: DB deletion — only after SSH cleanup confirmed ────────────────
+    trackLog('服务器清理已确认，正在从数据库删除节点记录...');
+    // Save operation log BEFORE deleting the node (while nodeId is still valid)
+    await this.operationLog.createLog({
+      resourceType: 'node',
+      resourceId: node.id,
+      resourceName: node.name,
+      actorId: actorId ?? null,
+      operation: 'UNDEPLOY',
+      correlationId: correlationId ?? null,
+      success: true,
+      log: undeployLogs.join('\n'),
+      durationMs: Date.now() - startMs,
+    });
+    await this.prisma.node.delete({ where: { id: nodeId } });
+    trackLog('节点已删除');
   }
 
   /** Remove service + config from the server when node is deleted */
@@ -208,8 +327,10 @@ export class NodeDeployService {
           `systemctl daemon-reload`,
       );
       ssh.dispose();
-    } catch {
+    } catch (err: unknown) {
       ssh?.dispose();
+      // Re-throw so callers (NodesService.remove) know cleanup failed
+      throw err;
     }
   }
 
@@ -251,7 +372,7 @@ export class NodeDeployService {
     log(`Installing V2Ray via official script...`);
     const { stdout, stderr } = await ssh.execCommand(
       `curl -sL https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh -o /tmp/install-v2ray.sh && ` +
-      `bash /tmp/install-v2ray.sh install 2>&1; rm -f /tmp/install-v2ray.sh`,
+      `bash /tmp/install-v2ray.sh 2>&1; rm -f /tmp/install-v2ray.sh`,
     );
     if (stdout) log(stdout.trim());
     if (stderr) log(stderr.trim());
@@ -336,9 +457,13 @@ export class NodeDeployService {
 
   private async finalize(
     nodeId: string,
+    nodeName: string,
     success: boolean,
     logs: string[],
     configJson: string,
+    actorId: string | undefined,
+    startMs: number,
+    correlationId?: string,
   ) {
     const last = await this.prisma.configSnapshot.findFirst({
       where: { nodeId },
@@ -353,11 +478,22 @@ export class NodeDeployService {
 
     await Promise.all([
       this.prisma.configSnapshot.create({
-        data: { nodeId, version, content: configJson, checksum },
+        data: { nodeId, version, content: configJson, checksum, deployLog: logs.join('\n') },
       }),
       this.prisma.node.update({
         where: { id: nodeId },
         data: { status: success ? 'RUNNING' : 'ERROR' },
+      }),
+      this.operationLog.createLog({
+        resourceType: 'node',
+        resourceId: nodeId,
+        resourceName: nodeName,
+        actorId: actorId ?? null,
+        operation: 'DEPLOY',
+        correlationId: correlationId ?? null,
+        success,
+        log: logs.join('\n'),
+        durationMs: Date.now() - startMs,
       }),
     ]);
   }

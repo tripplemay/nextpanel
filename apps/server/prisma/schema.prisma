@@ -213,6 +213,8 @@ model ConfigSnapshot {
   /// Full rendered config content
   content   String
   checksum  String
+  /// Full deployment log text (newline-separated)
+  deployLog String?
   createdAt DateTime @default(now())
 
   @@unique([nodeId, version])
@@ -260,18 +262,21 @@ model SubscriptionNode {
 // ──────────────────────────── AuditLog ────────────────────────────
 
 model AuditLog {
-  id         String      @id @default(cuid())
-  actor      User        @relation(fields: [actorId], references: [id])
-  actorId    String
-  action     AuditAction
-  resource   String
-  resourceId String?
-  diff       Json?
-  ip         String?
-  timestamp  DateTime    @default(now())
+  id            String      @id @default(cuid())
+  actor         User        @relation(fields: [actorId], references: [id])
+  actorId       String
+  action        AuditAction
+  resource      String
+  resourceId    String?
+  diff          Json?
+  ip            String?
+  /// Links to OperationLog.correlationId — set for SSH-related actions
+  correlationId String?
+  timestamp     DateTime    @default(now())
 
   @@index([actorId])
   @@index([timestamp])
+  @@index([correlationId])
 }
 
 enum AuditAction {
@@ -283,6 +288,34 @@ enum AuditAction {
   DEPLOY
   ROLLBACK
   SSH_TEST
+}
+
+// ──────────────────────────── OperationLog ────────────────────────────
+
+model OperationLog {
+  id            String   @id @default(cuid())
+  /// Resource type — e.g. 'node', 'server', any future resource
+  resourceType  String
+  /// Nullable — resource may be deleted but log must persist
+  resourceId    String?
+  /// Denormalised resource name — survives resource deletion
+  resourceName  String
+  /// Nullable — system-triggered operations have no human actor
+  actorId       String?
+  /// Flexible operation name — e.g. 'DEPLOY', 'UNDEPLOY', any future operation
+  operation     String
+  /// Links to AuditLog.correlationId for join queries
+  correlationId String?
+  success       Boolean
+  /// Full log text (newline-separated)
+  log           String?
+  /// Duration in milliseconds
+  durationMs    Int?
+  createdAt     DateTime @default(now())
+
+  @@index([resourceType, resourceId])
+  @@index([correlationId])
+  @@index([createdAt])
 }
 
 // ──────────────────────────── Pipeline (CI/CD) ────────────────────────────

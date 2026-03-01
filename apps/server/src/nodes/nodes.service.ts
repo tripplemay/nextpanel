@@ -106,10 +106,11 @@ export class NodesService {
 
   async remove(id: string) {
     await this.findOne(id);
-    // Best-effort cleanup on the server before DB deletion
-    this.nodeDeploy.undeploy(id).catch((err: unknown) => {
+    // Undeploy MUST succeed before DB deletion — errors propagate to caller.
+    await this.nodeDeploy.undeploy(id).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Node ${id} undeploy failed: ${msg}`);
+      this.logger.error(`Node ${id} undeploy failed, aborting deletion: ${msg}`);
+      throw err;
     });
     return this.prisma.node.delete({ where: { id } });
   }
@@ -156,12 +157,20 @@ export class NodesService {
     return buildShareUri({
       name: node.name,
       protocol: node.protocol,
-      host: node.domain ?? node.server.ip,
+      host: node.server.ip,
       port: node.listenPort,
       transport: node.transport,
       tls: node.tls,
       domain: node.domain,
       credentials,
+    });
+  }
+
+  async getLatestSnapshot(nodeId: string) {
+    return this.prisma.configSnapshot.findFirst({
+      where: { nodeId },
+      orderBy: { version: 'desc' },
+      select: { version: true, deployLog: true, createdAt: true },
     });
   }
 

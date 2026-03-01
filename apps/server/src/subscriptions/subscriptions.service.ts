@@ -148,7 +148,7 @@ export class SubscriptionsService {
       result.push({
         name: node.name,
         protocol: node.protocol,
-        host: node.domain ?? node.server.ip,
+        host: node.server.ip,
         port: node.listenPort,
         transport: node.transport,
         tls: node.tls,

@@ -1,13 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { App, Button, Table, Tag, Space, Popconfirm, Card } from 'antd';
-import { ApiOutlined, CloudUploadOutlined, ShareAltOutlined } from '@ant-design/icons';
+import { App, Button, Table, Tag, Space, Popconfirm, Card, Modal, Typography } from 'antd';
+import { ApiOutlined, CloudUploadOutlined, ShareAltOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { nodesApi } from '@/lib/api';
 import NodeFormModal from '@/components/nodes/NodeFormModal';
 import DeployDrawer from '@/components/nodes/DeployDrawer';
 import NodeShareModal from '@/components/nodes/NodeShareModal';
+import DeployLogModal from '@/components/nodes/DeployLogModal';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
 import { useDeployStream } from '@/hooks/useDeployStream';
@@ -21,10 +22,20 @@ export default function NodesPage() {
   const [editTarget, setEditTarget] = useState<Node | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [deployingNode, setDeployingNode] = useState<Node | null>(null);
+  const [deleteDrawerOpen, setDeleteDrawerOpen] = useState(false);
+  const [deletingNode, setDeletingNode] = useState<Node | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [shareNode, setShareNode] = useState<Node | null>(null);
+  const [logNode, setLogNode] = useState<Node | null>(null);
 
-  const { logLines, deployStatus, startDeploy, abort, reset } = useDeployStream();
+  const { logLines, deployStatus, startStream, abort, reset } = useDeployStream();
+  const {
+    logLines: deleteLogLines,
+    deployStatus: deleteStatus,
+    startStream: startDeleteStream,
+    abort: abortDelete,
+    reset: resetDelete,
+  } = useDeployStream();
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['nodes'],
@@ -32,15 +43,6 @@ export default function NodesPage() {
   });
 
   if (isError) message.error('加载节点失败');
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => nodesApi.delete(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['nodes'] });
-      message.success('节点已删除');
-    },
-    onError: () => message.error('删除失败'),
-  });
 
   const testMutation = useMutation({
     mutationFn: (id: string) => {
@@ -59,7 +61,7 @@ export default function NodesPage() {
     reset();
     setDeployingNode(node);
     setDrawerOpen(true);
-    startDeploy(node.id, (success) => {
+    void startStream(`/api/nodes/${node.id}/deploy-stream`, (success) => {
       if (success) qc.invalidateQueries({ queryKey: ['nodes'] });
     });
   }
@@ -67,6 +69,20 @@ export default function NodesPage() {
   function closeDrawer() {
     abort();
     setDrawerOpen(false);
+  }
+
+  function openDelete(node: Node) {
+    resetDelete();
+    setDeletingNode(node);
+    setDeleteDrawerOpen(true);
+    void startDeleteStream(`/api/nodes/${node.id}/delete-stream`, (success) => {
+      if (success) qc.invalidateQueries({ queryKey: ['nodes'] });
+    });
+  }
+
+  function closeDeleteDrawer() {
+    abortDelete();
+    setDeleteDrawerOpen(false);
   }
 
   const columns: ColumnType<Node>[] = [
@@ -116,6 +132,13 @@ export default function NodesPage() {
           </Button>
           <Button
             size="small"
+            icon={<FileTextOutlined />}
+            onClick={() => setLogNode(record)}
+          >
+            日志
+          </Button>
+          <Button
+            size="small"
             onClick={() => {
               setEditTarget(record);
               setModalOpen(true);
@@ -125,7 +148,8 @@ export default function NodesPage() {
           </Button>
           <Popconfirm
             title="确认删除该节点？"
-            onConfirm={() => deleteMutation.mutate(record.id)}
+            description="将同步停止并移除代理服务器上的对应服务"
+            onConfirm={() => openDelete(record)}
             okText="删除"
             okType="danger"
           >
@@ -163,7 +187,18 @@ export default function NodesPage() {
         onClose={closeDrawer}
       />
 
+      <DeployDrawer
+        open={deleteDrawerOpen}
+        nodeName={deletingNode?.name ?? null}
+        logLines={deleteLogLines}
+        deployStatus={deleteStatus}
+        onClose={closeDeleteDrawer}
+        actionLabel="删除"
+      />
+
       <NodeShareModal node={shareNode} onClose={() => setShareNode(null)} />
+
+      <DeployLogModal node={logNode} onClose={() => setLogNode(null)} />
     </Card>
   );
 }

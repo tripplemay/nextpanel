@@ -109,7 +109,11 @@ function transportNetwork(transport: string | null): string {
     TCP: 'tcp',
     WS: 'ws',
     GRPC: 'grpc',
-    QUIC: 'quic',
   };
+  if (transport === 'QUIC') {
+    throw new Error(
+      'QUIC transport was removed in Xray 26.x. Change the node transport to TCP, WS, or GRPC.',
+    );
+  }
   return map[transport ?? 'TCP'] ?? 'tcp';
 }

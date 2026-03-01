@@ -12,6 +12,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { Audit } from '../common/decorators/audit.decorator';
 import { PipelinesService } from './pipelines.service';
 import { CreatePipelineDto } from './dto/create-pipeline.dto';
 import { UpdatePipelineDto } from './dto/update-pipeline.dto';
@@ -25,6 +26,7 @@ export class PipelinesController {
 
   @Post()
   @Roles('ADMIN', 'OPERATOR')
+  @Audit('CREATE', 'pipeline')
   @ApiOperation({ summary: 'Create a deploy config' })
   create(@Body() dto: CreatePipelineDto) {
     return this.pipelinesService.create(dto);
@@ -43,12 +45,14 @@ export class PipelinesController {
 
   @Patch(':id')
   @Roles('ADMIN', 'OPERATOR')
+  @Audit('UPDATE', 'pipeline')
   update(@Param('id') id: string, @Body() dto: UpdatePipelineDto) {
     return this.pipelinesService.update(id, dto);
   }
 
   @Delete(':id')
   @Roles('ADMIN')
+  @Audit('DELETE', 'pipeline')
   remove(@Param('id') id: string) {
     return this.pipelinesService.remove(id);
   }

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './prisma.module';
@@ -12,6 +13,8 @@ import { AuditModule } from './audit/audit.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { AgentModule } from './agent/agent.module';
 import { PipelinesModule } from './pipelines/pipelines.module';
+import { OperationLogModule } from './operation-log/operation-log.module';
+import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 
 @Module({
   imports: [
@@ -28,6 +31,13 @@ import { PipelinesModule } from './pipelines/pipelines.module';
     MetricsModule,
     AgentModule,
     PipelinesModule,
+    OperationLogModule,
+  ],
+  providers: [
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: AuditInterceptor,
+    },
   ],
 })
 export class AppModule {}

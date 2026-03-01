@@ -58,7 +58,7 @@ function singBoxInbound(node: NodeInfo, creds: NodeCredentials): unknown {
       reality: {
         enabled: true,
         handshake: { server: node.domain ?? 'www.google.com', server_port: 443 },
-        private_key: '',
+        private_key: creds.realityPrivateKey ?? '',
         short_id: [''],
       },
     };

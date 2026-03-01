@@ -10,6 +10,8 @@ import type {
   ConnectivityResult,
   PaginatedResponse,
   AuditLog,
+  OperationLogEntry,
+  OperationLogDetail,
   CreateServerDto,
   UpdateServerDto,
   CreateNodeDto,
@@ -75,6 +77,7 @@ export const nodesApi = {
   update: (id: string, data: UpdateNodeDto) => api.patch<Node>(`/nodes/${id}`, data),
   delete: (id: string) => api.delete<void>(`/nodes/${id}`),
   credentials: (id: string) => api.get<Record<string, string>>(`/nodes/${id}/credentials`),
+  deployLog: (id: string) => api.get<{ deployLog: string | null; version: number | null; createdAt: string | null }>(`/nodes/${id}/deploy-log`),
   shareLink: (id: string) => api.get<{ uri: string | null }>(`/nodes/${id}/share`),
   test: (id: string) => api.post<ConnectivityResult>(`/nodes/${id}/test`),
   deploy: (id: string) => api.post<void>(`/nodes/${id}/deploy`),
@@ -105,8 +108,17 @@ export const metricsApi = {
 
 // ── Audit ─────────────────────────────────────────────
 export const auditApi = {
-  list: (page = 1, pageSize = 20) =>
-    api.get<PaginatedResponse<AuditLog>>('/audit-logs', { params: { page, pageSize } }),
+  list: (page = 1, pageSize = 20, action?: string) =>
+    api.get<PaginatedResponse<AuditLog>>('/audit-logs', { params: { page, pageSize, action } }),
+};
+
+// ── OperationLogs ─────────────────────────────────────
+export const operationLogsApi = {
+  listByResource: (type: string, id: string) =>
+    api.get<OperationLogEntry[]>(`/operation-logs/by-resource/${type}/${id}`),
+  getByCorrelationId: (correlationId: string) =>
+    api.get<OperationLogDetail | null>(`/operation-logs/by-correlation/${correlationId}`),
+  getLog: (logId: string) => api.get<OperationLogDetail>(`/operation-logs/${logId}`),
 };
 
 // ── Pipelines (GitHub Actions deploy configs) ──────────

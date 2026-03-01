@@ -13,6 +13,7 @@ interface DeployDrawerProps {
   logLines: string[];
   deployStatus: DeployStatus;
   onClose: () => void;
+  actionLabel?: string;
 }
 
 export default function DeployDrawer({
@@ -21,6 +22,7 @@ export default function DeployDrawer({
   logLines,
   deployStatus,
   onClose,
+  actionLabel = '部署',
 }: DeployDrawerProps) {
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -32,16 +34,16 @@ export default function DeployDrawer({
 
   const drawerTitle = (
     <Space>
-      <span>部署日志 — {nodeName}</span>
-      {deployStatus === 'running' && <Badge status="processing" text="部署中" />}
+      <span>{actionLabel}日志 — {nodeName}</span>
+      {deployStatus === 'running' && <Badge status="processing" text={`${actionLabel}中`} />}
       {deployStatus === 'success' && (
         <Text type="success">
-          <CheckCircleFilled /> 部署成功
+          <CheckCircleFilled /> {actionLabel}成功
         </Text>
       )}
       {deployStatus === 'failed' && (
         <Text type="danger">
-          <CloseCircleFilled /> 部署失败
+          <CloseCircleFilled /> {actionLabel}失败
         </Text>
       )}
     </Space>
@@ -93,10 +95,10 @@ export default function DeployDrawer({
           </div>
         ))}
         {deployStatus === 'success' && (
-          <div style={{ color: '#3fb950', marginTop: 8 }}>✓ 部署完成</div>
+          <div style={{ color: '#3fb950', marginTop: 8 }}>✓ {actionLabel}完成</div>
         )}
         {deployStatus === 'failed' && (
-          <div style={{ color: '#f85149', marginTop: 8 }}>✗ 部署失败，请检查以上日志</div>
+          <div style={{ color: '#f85149', marginTop: 8 }}>✗ {actionLabel}失败，请检查以上日志</div>
         )}
         <div ref={logEndRef} />
       </div>

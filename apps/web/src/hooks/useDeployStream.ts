@@ -7,7 +7,7 @@ export type DeployStatus = 'idle' | 'running' | 'success' | 'failed';
 export interface UseDeployStreamResult {
   logLines: string[];
   deployStatus: DeployStatus;
-  startDeploy: (nodeId: string, onDone?: (success: boolean) => void) => Promise<void>;
+  startStream: (url: string, onDone?: (success: boolean) => void) => Promise<void>;
   abort: () => void;
   reset: () => void;
 }
@@ -26,7 +26,7 @@ export function useDeployStream(): UseDeployStreamResult {
     setDeployStatus('idle');
   }, []);
 
-  const startDeploy = useCallback(async (nodeId: string, onDone?: (success: boolean) => void) => {
+  const startStream = useCallback(async (url: string, onDone?: (success: boolean) => void) => {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
@@ -36,7 +36,7 @@ export function useDeployStream(): UseDeployStreamResult {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : '';
 
     try {
-      const res = await fetch(`/api/nodes/${nodeId}/deploy-stream`, {
+      const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
         signal: abortRef.current.signal,
       });
@@ -91,5 +91,5 @@ export function useDeployStream(): UseDeployStreamResult {
     }
   }, []);
 
-  return { logLines, deployStatus, startDeploy, abort, reset };
+  return { logLines, deployStatus, startStream, abort, reset };
 }

@@ -13,8 +13,8 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Audit } from '../common/decorators/audit.decorator';
 import { TemplatesService } from './templates.service';
-import { AuditService } from '../audit/audit.service';
 import { CreateTemplateDto } from './dto/create-template.dto';
 
 @ApiTags('templates')
@@ -22,23 +22,13 @@ import { CreateTemplateDto } from './dto/create-template.dto';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('templates')
 export class TemplatesController {
-  constructor(
-    private templatesService: TemplatesService,
-    private auditService: AuditService,
-  ) {}
+  constructor(private templatesService: TemplatesService) {}
 
   @Post()
   @Roles('ADMIN', 'OPERATOR')
-  async create(@Body() dto: CreateTemplateDto, @CurrentUser() user: { id: string }) {
-    const template = await this.templatesService.create(dto, user.id);
-    await this.auditService.log({
-      actorId: user.id,
-      action: 'CREATE',
-      resource: 'Template',
-      resourceId: template.id,
-      diff: { name: dto.name },
-    });
-    return template;
+  @Audit('CREATE', 'template')
+  create(@Body() dto: CreateTemplateDto, @CurrentUser() user: { id: string }) {
+    return this.templatesService.create(dto, user.id);
   }
 
   @Get()
@@ -53,32 +43,15 @@ export class TemplatesController {
 
   @Patch(':id')
   @Roles('ADMIN', 'OPERATOR')
-  async update(
-    @Param('id') id: string,
-    @Body() dto: Partial<CreateTemplateDto>,
-    @CurrentUser() user: { id: string },
-  ) {
-    const template = await this.templatesService.update(id, dto);
-    await this.auditService.log({
-      actorId: user.id,
-      action: 'UPDATE',
-      resource: 'Template',
-      resourceId: id,
-      diff: dto as Record<string, unknown>,
-    });
-    return template;
+  @Audit('UPDATE', 'template')
+  update(@Param('id') id: string, @Body() dto: Partial<CreateTemplateDto>) {
+    return this.templatesService.update(id, dto);
   }
 
   @Delete(':id')
   @Roles('ADMIN')
-  async remove(@Param('id') id: string, @CurrentUser() user: { id: string }) {
-    const result = await this.templatesService.remove(id);
-    await this.auditService.log({
-      actorId: user.id,
-      action: 'DELETE',
-      resource: 'Template',
-      resourceId: id,
-    });
-    return result;
+  @Audit('DELETE', 'template')
+  remove(@Param('id') id: string) {
+    return this.templatesService.remove(id);
   }
 }

@@ -135,6 +135,7 @@ export interface AuditLog {
   resourceId: string | null;
   diff: unknown;
   ip: string | null;
+  correlationId: string | null;
   timestamp: string;
 }
 
@@ -168,4 +169,20 @@ export interface ConnectivityResult {
   reachable: boolean;
   latency: number;
   message: string;
+}
+
+export interface OperationLogEntry {
+  id: string;
+  resourceType: string;
+  resourceName: string;
+  actorId: string | null;
+  operation: string;
+  correlationId: string | null;
+  success: boolean;
+  durationMs: number | null;
+  createdAt: string;
+}
+
+export interface OperationLogDetail extends OperationLogEntry {
+  log: string | null;
 }

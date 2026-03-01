@@ -9,6 +9,7 @@ interface LogParams {
   resourceId?: string;
   diff?: Record<string, unknown>;
   ip?: string;
+  correlationId?: string;
 }
 
 @Injectable()
@@ -24,19 +25,22 @@ export class AuditService {
         resourceId: params.resourceId,
         diff: params.diff as Prisma.InputJsonValue | undefined,
         ip: params.ip,
+        correlationId: params.correlationId,
       },
     });
   }
 
-  async findAll(page = 1, pageSize = 20) {
+  async findAll(page = 1, pageSize = 20, action?: AuditAction) {
+    const where: Prisma.AuditLogWhereInput = action ? { action } : {};
     const [data, total] = await Promise.all([
       this.prisma.auditLog.findMany({
+        where,
         skip: (page - 1) * pageSize,
         take: pageSize,
         orderBy: { timestamp: 'desc' },
         include: { actor: { select: { username: true } } },
       }),
-      this.prisma.auditLog.count(),
+      this.prisma.auditLog.count({ where }),
     ]);
     return { data, total, page, pageSize };
   }
