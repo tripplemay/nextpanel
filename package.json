@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "dev": "pnpm --parallel -r dev",
+    "dev": "sh -c '(nc -z localhost 5433 2>/dev/null || (ssh -N -f nextpanel-db && sleep 1)) && pnpm --parallel -r dev'",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint"
   },

@@ -14,10 +14,13 @@ import {
 import {
   CheckCircleOutlined,
   ExclamationCircleOutlined,
+  KeyOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { serversApi } from '@/lib/api';
 import ServerFormModal from '@/components/servers/ServerFormModal';
+import AgentTokenModal from '@/components/servers/AgentTokenModal';
+import AgentInstallDrawer from '@/components/servers/AgentInstallDrawer';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
 import type { Server } from '@/types/api';
@@ -28,10 +31,13 @@ export default function ServersPage() {
   const qc = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Server | null>(null);
+  const [tokenTarget, setTokenTarget] = useState<Server | null>(null);
+  const [installTarget, setInstallTarget] = useState<Server | null>(null);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['servers'],
     queryFn: () => serversApi.list().then((r) => r.data as Server[]),
+    refetchInterval: 10_000,
   });
   if (isError) message.error('加载服务器失败');
 
@@ -44,12 +50,17 @@ export default function ServersPage() {
     onError: () => message.error('删除失败'),
   });
 
+  const [testingSshId, setTestingSshId] = useState<string | null>(null);
   const testSshMutation = useMutation({
-    mutationFn: (id: string) => serversApi.testSsh(id),
+    mutationFn: (id: string) => {
+      setTestingSshId(id);
+      return serversApi.testSsh(id);
+    },
     onSuccess: (res) => {
       if (res.data.success) message.success('SSH 连接成功');
       else message.error(`SSH 连接失败: ${res.data.message}`);
     },
+    onSettled: () => setTestingSshId(null),
   });
 
   const columns: ColumnType<Server>[] = [
@@ -99,8 +110,15 @@ export default function ServersPage() {
             <Button
               size="small"
               icon={<CheckCircleOutlined />}
-              loading={testSshMutation.isPending}
+              loading={testingSshId === record.id}
               onClick={() => testSshMutation.mutate(record.id)}
+            />
+          </Tooltip>
+          <Tooltip title="Agent Token">
+            <Button
+              size="small"
+              icon={<KeyOutlined />}
+              onClick={() => setTokenTarget(record)}
             />
           </Tooltip>
           <Button
@@ -145,11 +163,34 @@ export default function ServersPage() {
         open={modalOpen}
         initialValues={editTarget as Record<string, unknown> | null}
         onClose={() => setModalOpen(false)}
-        onSuccess={() => {
+        onSuccess={(server) => {
           setModalOpen(false);
           qc.invalidateQueries({ queryKey: ['servers'] });
+          // 新增服务器后自动触发 Agent 安装
+          if (!editTarget && server) {
+            setInstallTarget(server as Server);
+          }
         }}
       />
+
+      {tokenTarget && (
+        <AgentTokenModal
+          open={!!tokenTarget}
+          token={tokenTarget.agentToken}
+          serverName={tokenTarget.name}
+          onClose={() => setTokenTarget(null)}
+        />
+      )}
+
+      {installTarget && (
+        <AgentInstallDrawer
+          open={!!installTarget}
+          serverId={installTarget.id}
+          serverName={installTarget.name}
+          agentToken={installTarget.agentToken}
+          onClose={() => setInstallTarget(null)}
+        />
+      )}
     </Card>
   );
 }
