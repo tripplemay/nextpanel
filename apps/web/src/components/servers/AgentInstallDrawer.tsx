@@ -42,7 +42,7 @@ export default function AgentInstallDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, serverId]);
 
-  const manualCmd = `curl -fsSL https://raw.githubusercontent.com/YOUR_REPO/main/apps/agent/install.sh | bash -s -- https://YOUR_PANEL_URL ${agentToken}`;
+  const manualCmd = `curl -fsSL https://raw.githubusercontent.com/tripplemay/nextpanel/main/apps/agent/install.sh | bash -s -- https://1.router.video ${agentToken}`;
 
   const drawerTitle = (
     <Space>
