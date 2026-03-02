@@ -102,13 +102,14 @@ Follows standard NestJS module-per-feature structure. Each feature folder contai
 - `<PageHeader>` renders its own `<Divider>` below the title — do **not** add `marginBottom` before tables
 - Status display: use `<StatusTag status={...} />` (`components/common/StatusTag.tsx`), not local Badge/Tag combos
 
-**Component structure** (`components/`): Organized by feature — `servers/`, `nodes/`, `templates/`, `releases/`, `pipelines/`, `subscriptions/`, `common/`, `layout/`.
+**Component structure** (`components/`): Organized by feature — `servers/`, `nodes/`, `templates/`, `pipelines/`, `subscriptions/`, `common/`.
 
 Key shared components:
 - `common/PageHeader.tsx` — title + add button + Divider
 - `common/StatusTag.tsx` — colored tag with status color map
 - `common/CopyButton.tsx` — copy-to-clipboard with feedback
 - `nodes/DeployDrawer.tsx` — SSE terminal drawer (reused for deploy and delete)
+- `nodes/DeployLogModal.tsx` — operation history modal (lists past deploy/undeploy logs per node)
 - `hooks/useDeployStream.ts` — `EventSource` wrapper, URL-based for reuse
 
 ### Database (PostgreSQL + Prisma)
@@ -137,7 +138,7 @@ Backend (`apps/server/.env`):
 | `JWT_EXPIRES_IN` | Token expiry, default `7d` |
 | `ENCRYPTION_KEY` | 64 hex chars, must be exactly 32 bytes |
 | `PORT` | Server port, default `3001` |
-| `ALLOWED_ORIGIN` | CORS origin, default `http://localhost:3000` |
+| `ALLOWED_ORIGIN` | CORS origin, default `http://localhost:3000` — set to `http://localhost:3400` for local dev |
 
 Frontend (`apps/web/.env.local`):
 
