@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Drawer, Button, Space, Badge, Typography, Alert } from 'antd';
 import {
   CheckCircleFilled,
@@ -17,7 +17,6 @@ interface Props {
   open: boolean;
   serverId: string;
   serverName: string;
-  agentToken: string;
   onClose: () => void;
 }
 
@@ -25,24 +24,29 @@ export default function AgentInstallDrawer({
   open,
   serverId,
   serverName,
-  agentToken,
   onClose,
 }: Props) {
   const { logLines, deployStatus, startStream, reset } = useDeployStream();
+  const [manualCmd, setManualCmd] = useState('');
 
   const start = () => {
-    void startStream(`/api/servers/${serverId}/install-agent`);
+    void startStream(
+      `/api/servers/${serverId}/install-agent`,
+      undefined,
+      (json) => {
+        if (typeof json.manualCmd === 'string') setManualCmd(json.manualCmd);
+      },
+    );
   };
 
   useEffect(() => {
     if (open) {
       reset();
+      setManualCmd('');
       start();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, serverId]);
-
-  const manualCmd = `curl -fsSL https://raw.githubusercontent.com/tripplemay/nextpanel/main/apps/agent/install.sh | bash -s -- https://1.router.video ${agentToken}`;
 
   const drawerTitle = (
     <Space>

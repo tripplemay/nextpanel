@@ -7,7 +7,7 @@ export type DeployStatus = 'idle' | 'running' | 'success' | 'failed';
 export interface UseDeployStreamResult {
   logLines: string[];
   deployStatus: DeployStatus;
-  startStream: (url: string, onDone?: (success: boolean) => void) => Promise<void>;
+  startStream: (url: string, onDone?: (success: boolean) => void, onRawEvent?: (json: Record<string, unknown>) => void) => Promise<void>;
   abort: () => void;
   reset: () => void;
 }
@@ -26,7 +26,7 @@ export function useDeployStream(): UseDeployStreamResult {
     setDeployStatus('idle');
   }, []);
 
-  const startStream = useCallback(async (url: string, onDone?: (success: boolean) => void) => {
+  const startStream = useCallback(async (url: string, onDone?: (success: boolean) => void, onRawEvent?: (json: Record<string, unknown>) => void) => {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
@@ -68,7 +68,9 @@ export function useDeployStream(): UseDeployStreamResult {
               log?: string;
               done?: boolean;
               success?: boolean;
+              [key: string]: unknown;
             };
+            onRawEvent?.(json);
             if (json.log) {
               setLogLines((prev) => [...prev, json.log!]);
             }

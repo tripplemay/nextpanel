@@ -187,7 +187,6 @@ export default function ServersPage() {
           open={!!installTarget}
           serverId={installTarget.id}
           serverName={installTarget.name}
-          agentToken={installTarget.agentToken}
           onClose={() => setInstallTarget(null)}
         />
       )}

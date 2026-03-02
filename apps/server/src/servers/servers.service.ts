@@ -110,6 +110,19 @@ export class ServersService {
       const emit = (log: string) =>
         subscriber.next({ data: { log } } as MessageEvent);
 
+      // Emit manualCmd upfront so the frontend can show it without waiting for failure
+      const panelUrl = process.env.PANEL_URL ?? '';
+      const githubRepo = process.env.GITHUB_REPO ?? '';
+      this.prisma.server
+        .findUnique({ where: { id }, select: { agentToken: true } })
+        .then((server) => {
+          if (server && panelUrl && githubRepo) {
+            const manualCmd = `curl -fsSL https://raw.githubusercontent.com/${githubRepo}/main/apps/agent/install.sh | bash -s -- ${panelUrl} ${server.agentToken}`;
+            subscriber.next({ data: { manualCmd } } as MessageEvent);
+          }
+        })
+        .catch(() => { /* non-critical, ignore */ });
+
       this.installAgent(id, emit)
         .then((success) => {
           subscriber.next({ data: { done: true, success } } as MessageEvent);

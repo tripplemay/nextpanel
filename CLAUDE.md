@@ -139,6 +139,8 @@ Backend (`apps/server/.env`):
 | `ENCRYPTION_KEY` | 64 hex chars, must be exactly 32 bytes |
 | `PORT` | Server port, default `3001` |
 | `ALLOWED_ORIGIN` | CORS origin, default `http://localhost:3000` — set to `http://localhost:3400` for local dev |
+| `PANEL_URL` | Public URL of the panel (used by Agent install script), e.g. `https://your-panel-domain.com` |
+| `GITHUB_REPO` | GitHub repo path for Agent releases, e.g. `your-username/nextpanel` |
 
 Frontend (`apps/web/.env.local`):
 
