@@ -73,6 +73,7 @@ export interface Server {
   memUsage: number | null;
   lastSeenAt: string | null;
   agentVersion: string | null;
+  agentToken: string;
   createdAt: string;
   updatedAt: string;
 }

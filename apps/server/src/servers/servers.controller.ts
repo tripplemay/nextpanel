@@ -7,7 +7,10 @@ import {
   Body,
   Param,
   UseGuards,
+  Sse,
+  MessageEvent,
 } from '@nestjs/common';
+import { Observable } from 'rxjs';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -66,5 +69,12 @@ export class ServersController {
   @ApiOperation({ summary: 'Test SSH connectivity to a server' })
   testSsh(@Param('id') id: string) {
     return this.serversService.testSsh(id);
+  }
+
+  @Sse(':id/install-agent')
+  @Roles('ADMIN', 'OPERATOR')
+  @ApiOperation({ summary: 'Install agent on server via SSH (SSE stream)' })
+  installAgent(@Param('id') id: string): Observable<MessageEvent> {
+    return this.serversService.installAgentStream(id);
   }
 }

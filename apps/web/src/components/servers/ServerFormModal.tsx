@@ -11,7 +11,7 @@ import {
 } from 'antd';
 import { useMutation } from '@tanstack/react-query';
 import { serversApi } from '@/lib/api';
-import type { CreateServerDto, UpdateServerDto } from '@/types/api';
+import type { CreateServerDto, UpdateServerDto, Server } from '@/types/api';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -20,7 +20,7 @@ interface Props {
   open: boolean;
   initialValues: Record<string, unknown> | null;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (server?: Server) => void;
 }
 
 export default function ServerFormModal({
@@ -58,9 +58,9 @@ export default function ServerFormModal({
       }
       return serversApi.create(payload as CreateServerDto);
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       message.success(isEdit ? '服务器已更新' : '服务器已添加');
-      onSuccess();
+      onSuccess(res.data as Server);
     },
     onError: () => message.error('操作失败'),
   });
