@@ -13,6 +13,7 @@ import {
 } from 'antd';
 import {
   CheckCircleOutlined,
+  CloudDownloadOutlined,
   ExclamationCircleOutlined,
   KeyOutlined,
 } from '@ant-design/icons';
@@ -112,6 +113,13 @@ export default function ServersPage() {
               icon={<CheckCircleOutlined />}
               loading={testingSshId === record.id}
               onClick={() => testSshMutation.mutate(record.id)}
+            />
+          </Tooltip>
+          <Tooltip title="安装 Agent">
+            <Button
+              size="small"
+              icon={<CloudDownloadOutlined />}
+              onClick={() => setInstallTarget(record)}
             />
           </Tooltip>
           <Tooltip title="Agent Token">
