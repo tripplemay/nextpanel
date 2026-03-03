@@ -18,11 +18,17 @@ export class MetricsService {
   }
 
   async getServerMetrics(serverId: string, limit = 60) {
-    return this.prisma.serverMetric.findMany({
+    const records = await this.prisma.serverMetric.findMany({
       where: { serverId },
       orderBy: { timestamp: 'desc' },
       take: limit,
     });
+    // Convert BigInt to Number for JSON serialization
+    return records.map((r) => ({
+      ...r,
+      networkIn: Number(r.networkIn),
+      networkOut: Number(r.networkOut),
+    }));
   }
 
   /** Called by Agent heartbeat to record metrics */

@@ -195,6 +195,7 @@ export class NodesService {
       tls: true,
       listenPort: true,
       domain: true,
+      source: true,
       status: true,
       enabled: true,
       createdAt: true,

@@ -68,6 +68,11 @@ export class ServersService {
     return this.prisma.server.delete({ where: { id } });
   }
 
+  async checkIp(ip: string): Promise<{ exists: boolean }> {
+    const server = await this.prisma.server.findFirst({ where: { ip } });
+    return { exists: !!server };
+  }
+
   async testSsh(id: string): Promise<{ success: boolean; message: string }> {
     const server = await this.prisma.server.findUnique({ where: { id } });
     if (!server) throw new NotFoundException(`Server ${id} not found`);
@@ -288,6 +293,9 @@ export class ServersService {
       cpuUsage: true,
       memUsage: true,
       diskUsage: true,
+      networkIn: true,
+      networkOut: true,
+      pingMs: true,
       lastSeenAt: true,
       agentVersion: true,
       agentToken: true,

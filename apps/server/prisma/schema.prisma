@@ -48,6 +48,9 @@ model Server {
   cpuUsage     Float?
   memUsage     Float?
   diskUsage    Float?
+  networkIn    BigInt?
+  networkOut   BigInt?
+  pingMs       Int?
   lastSeenAt   DateTime?
   agentVersion String?
   agentToken   String       @unique @default(cuid())
@@ -86,6 +89,7 @@ model Node {
   domain         String?
   /// AES-GCM encrypted JSON credentials
   credentialsEnc String
+  source         NodeSource      @default(MANUAL)
   status         NodeStatus      @default(INACTIVE)
   enabled        Boolean         @default(true)
   createdAt      DateTime        @default(now())
@@ -129,6 +133,11 @@ enum NodeStatus {
   RUNNING
   STOPPED
   ERROR
+}
+
+enum NodeSource {
+  MANUAL
+  AUTO
 }
 
 // ──────────────────────────── Template ────────────────────────────

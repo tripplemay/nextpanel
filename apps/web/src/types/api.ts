@@ -71,6 +71,11 @@ export interface Server {
   provider: string;
   cpuUsage: number | null;
   memUsage: number | null;
+  diskUsage: number | null;
+  networkIn: number | null;
+  networkOut: number | null;
+  pingMs: number | null;
+  notes: string | null;
   lastSeenAt: string | null;
   agentVersion: string | null;
   agentToken: string;
@@ -89,6 +94,7 @@ export interface Node {
   tls: string;
   listenPort: number;
   domain: string | null;
+  source: 'MANUAL' | 'AUTO';
   status: string;
   enabled: boolean;
   createdAt: string;
@@ -141,10 +147,13 @@ export interface AuditLog {
 }
 
 export interface Metric {
+  id: string;
   serverId: string;
   cpu: number;
   mem: number;
   disk: number;
+  networkIn: number;
+  networkOut: number;
   timestamp: string;
 }
 

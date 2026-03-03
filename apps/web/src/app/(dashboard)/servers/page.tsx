@@ -1,39 +1,99 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import dayjs from 'dayjs';
+import relativeTime from 'dayjs/plugin/relativeTime';
+import 'dayjs/locale/zh-cn';
 import {
   App,
   Button,
   Table,
   Tag,
   Space,
-  Popconfirm,
   Card,
   Tooltip,
+  Dropdown,
+  Input,
+  Select,
+  Typography,
+  Row,
+  Col,
+  Alert,
 } from 'antd';
 import {
+  AppstoreOutlined,
+  BarsOutlined,
   CheckCircleOutlined,
   CloudDownloadOutlined,
-  ExclamationCircleOutlined,
-  KeyOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  FileTextOutlined,
+  MoreOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import { serversApi } from '@/lib/api';
 import ServerFormModal from '@/components/servers/ServerFormModal';
-import AgentTokenModal from '@/components/servers/AgentTokenModal';
 import AgentInstallDrawer from '@/components/servers/AgentInstallDrawer';
+import AutoSetupDrawer from '@/components/servers/AutoSetupDrawer';
+import ServerCard from '@/components/servers/ServerCard';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
 import type { Server } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
+dayjs.extend(relativeTime);
+dayjs.locale('zh-cn');
+
+const { Text } = Typography;
+
+function formatRate(bytes: number | null | undefined): string {
+  if (bytes == null) return '—';
+  const n = Number(bytes);
+  if (n < 1024) return `${n} B/s`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB/s`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB/s`;
+}
+
+function heartbeatColor(lastSeenAt: string | null): string {
+  if (!lastSeenAt) return '#8c8c8c';
+  const diffMin = dayjs().diff(dayjs(lastSeenAt), 'minute');
+  if (diffMin <= 5) return '#52c41a';
+  if (diffMin <= 30) return '#faad14';
+  return '#ff4d4f';
+}
+
 export default function ServersPage() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const qc = useQueryClient();
+  const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Server | null>(null);
-  const [tokenTarget, setTokenTarget] = useState<Server | null>(null);
   const [installTarget, setInstallTarget] = useState<Server | null>(null);
+  const [autoSetupTarget, setAutoSetupTarget] = useState<{ server: Server; templateIds: string[] } | null>(null);
+
+  // 视图模式
+  const [viewMode, setViewMode] = useState<'table' | 'card'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('servers_view_mode') as 'table' | 'card') ?? 'table';
+    }
+    return 'table';
+  });
+
+  const switchView = (mode: 'table' | 'card') => {
+    setViewMode(mode);
+    localStorage.setItem('servers_view_mode', mode);
+  };
+
+  // 批量选择
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  const [bulkTestingIds, setBulkTestingIds] = useState<Set<string>>(new Set());
+
+  // 筛选状态
+  const [searchText, setSearchText] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
+  const [tagsFilter, setTagsFilter] = useState<string[]>([]);
+  const [regionFilter, setRegionFilter] = useState<string | undefined>(undefined);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['servers'],
@@ -64,13 +124,90 @@ export default function ServersPage() {
     onSettled: () => setTestingSshId(null),
   });
 
+  const handleDelete = (record: Server) =>
+    modal.confirm({
+      title: '确认删除该服务器？',
+      content: `将删除「${record.name}」，此操作不可撤销。`,
+      okText: '删除',
+      okType: 'danger',
+      onOk: () => deleteMutation.mutate(record.id),
+    });
+
+  const handleEdit = (record: Server) => {
+    setEditTarget(record);
+    setModalOpen(true);
+  };
+
+  // 批量删除
+  const handleBulkDelete = () => {
+    modal.confirm({
+      title: `确认删除 ${selectedRowKeys.length} 台服务器？`,
+      content: '此操作不可撤销，已部署的 Agent 不会自动卸载。',
+      okText: '删除',
+      okType: 'danger',
+      onOk: async () => {
+        await Promise.allSettled(selectedRowKeys.map((id) => serversApi.delete(id)));
+        qc.invalidateQueries({ queryKey: ['servers'] });
+        setSelectedRowKeys([]);
+        message.success('批量删除完成');
+      },
+    });
+  };
+
+  // 批量测试 SSH
+  const handleBulkTestSsh = async () => {
+    const ids = [...selectedRowKeys];
+    setBulkTestingIds(new Set(ids));
+    const results = await Promise.allSettled(ids.map((id) => serversApi.testSsh(id)));
+    setBulkTestingIds(new Set());
+    const succeeded = results.filter(
+      (r) => r.status === 'fulfilled' && r.value.data.success,
+    ).length;
+    message.info(`SSH 测试完成：${succeeded} 台成功，${ids.length - succeeded} 台失败`);
+  };
+
+  // 动态聚合可选标签和区域
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    data?.forEach((s) => s.tags.forEach((t) => set.add(t)));
+    return [...set].sort();
+  }, [data]);
+
+  const allRegions = useMemo(() => {
+    const set = new Set<string>();
+    data?.forEach((s) => { if (s.region) set.add(s.region); });
+    return [...set].sort();
+  }, [data]);
+
+  // 前端过滤
+  const filteredData = useMemo(() => {
+    if (!data) return [];
+    return data.filter((s) => {
+      const q = searchText.toLowerCase();
+      const matchSearch = !q || s.name.toLowerCase().includes(q) || s.ip.includes(q);
+      const matchStatus = !statusFilter || s.status === statusFilter;
+      const matchTags = tagsFilter.length === 0 || tagsFilter.every((t) => s.tags.includes(t));
+      const matchRegion = !regionFilter || s.region === regionFilter;
+      return matchSearch && matchStatus && matchTags && matchRegion;
+    });
+  }, [data, searchText, statusFilter, tagsFilter, regionFilter]);
+
   const columns: ColumnType<Server>[] = [
     {
       title: '名称',
       dataIndex: 'name',
       render: (name, record) => (
         <Space direction="vertical" size={0}>
-          <strong>{name}</strong>
+          <Space size={4}>
+            <a onClick={() => router.push(`/servers/${record.id}`)} style={{ fontWeight: 600 }}>
+              {name}
+            </a>
+            {record.notes && (
+              <Tooltip title={record.notes}>
+                <FileTextOutlined style={{ color: '#8c8c8c', fontSize: 12 }} />
+              </Tooltip>
+            )}
+          </Space>
           <small style={{ color: '#888' }}>{record.ip}</small>
         </Space>
       ),
@@ -80,18 +217,45 @@ export default function ServersPage() {
     {
       title: '状态',
       dataIndex: 'status',
-      render: (status: string) => <StatusTag status={status} />,
+      render: (status: string, record) => (
+        <Space direction="vertical" size={2}>
+          <StatusTag status={status} />
+          <Text style={{ fontSize: 11, color: heartbeatColor(record.lastSeenAt) }}>
+            {record.lastSeenAt ? dayjs(record.lastSeenAt).fromNow() : '从未连接'}
+          </Text>
+        </Space>
+      ),
     },
     {
-      title: 'CPU / 内存',
+      title: 'CPU / 内存 / 磁盘',
       render: (_: unknown, record) =>
         record.cpuUsage != null ? (
-          <span>
-            {record.cpuUsage.toFixed(1)}% / {record.memUsage?.toFixed(1)}%
-          </span>
+          <Space direction="vertical" size={0} style={{ fontSize: 12 }}>
+            <span>CPU&nbsp;&nbsp;{record.cpuUsage.toFixed(1)}%</span>
+            <span>内存&nbsp;&nbsp;{record.memUsage?.toFixed(1) ?? '—'}%</span>
+            <span>磁盘&nbsp;&nbsp;{record.diskUsage?.toFixed(1) ?? '—'}%</span>
+          </Space>
         ) : (
           <span style={{ color: '#ccc' }}>—</span>
         ),
+    },
+    {
+      title: '网络',
+      render: (_: unknown, record) => (
+        <Space direction="vertical" size={0} style={{ fontSize: 12 }}>
+          <span style={{ color: '#52c41a' }}>↑ {formatRate(record.networkOut)}</span>
+          <span style={{ color: '#1677ff' }}>↓ {formatRate(record.networkIn)}</span>
+        </Space>
+      ),
+    },
+    {
+      title: '延迟',
+      render: (_: unknown, record) => {
+        const ms = record.pingMs;
+        if (ms == null) return <span style={{ color: '#ccc' }}>—</span>;
+        const color = ms <= 50 ? '#52c41a' : ms <= 150 ? '#faad14' : '#ff4d4f';
+        return <span style={{ color, fontWeight: 500 }}>{ms} ms</span>;
+      },
     },
     {
       title: 'Agent 版本',
@@ -107,49 +271,60 @@ export default function ServersPage() {
       title: '操作',
       render: (_: unknown, record) => (
         <Space>
-          <Tooltip title="测试 SSH">
-            <Button
-              size="small"
-              icon={<CheckCircleOutlined />}
-              loading={testingSshId === record.id}
-              onClick={() => testSshMutation.mutate(record.id)}
-            />
-          </Tooltip>
-          <Tooltip title="安装 Agent">
-            <Button
-              size="small"
-              icon={<CloudDownloadOutlined />}
-              onClick={() => setInstallTarget(record)}
-            />
-          </Tooltip>
-          <Tooltip title="Agent Token">
-            <Button
-              size="small"
-              icon={<KeyOutlined />}
-              onClick={() => setTokenTarget(record)}
-            />
-          </Tooltip>
-          <Button
-            size="small"
-            onClick={() => {
-              setEditTarget(record);
-              setModalOpen(true);
-            }}
-          >
+          <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
             编辑
           </Button>
-          <Popconfirm
-            title="确认删除该服务器？"
-            onConfirm={() => deleteMutation.mutate(record.id)}
-            okText="删除"
-            okType="danger"
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: [
+                {
+                  key: 'ssh',
+                  icon: <CheckCircleOutlined />,
+                  label: testingSshId === record.id ? '测试中...' : '测试 SSH',
+                  disabled: testingSshId === record.id,
+                  onClick: () => testSshMutation.mutate(record.id),
+                },
+                {
+                  key: 'install',
+                  icon: <CloudDownloadOutlined />,
+                  label: '安装 / 更新 Agent',
+                  onClick: () => setInstallTarget(record),
+                },
+                { type: 'divider' },
+                {
+                  key: 'delete',
+                  icon: <DeleteOutlined />,
+                  label: '删除',
+                  danger: true,
+                  onClick: () => handleDelete(record),
+                },
+              ],
+            }}
           >
-            <Button size="small" danger icon={<ExclamationCircleOutlined />} />
-          </Popconfirm>
+            <Button size="small" icon={<MoreOutlined />} />
+          </Dropdown>
         </Space>
       ),
     },
   ];
+
+  const viewToggle = (
+    <Space>
+      <Button
+        size="small"
+        type={viewMode === 'table' ? 'primary' : 'default'}
+        icon={<BarsOutlined />}
+        onClick={() => switchView('table')}
+      />
+      <Button
+        size="small"
+        type={viewMode === 'card' ? 'primary' : 'default'}
+        icon={<AppstoreOutlined />}
+        onClick={() => switchView('card')}
+      />
+    </Space>
+  );
 
   return (
     <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
@@ -157,38 +332,127 @@ export default function ServersPage() {
         title="服务器管理"
         addLabel="新增服务器"
         onAdd={() => { setEditTarget(null); setModalOpen(true); }}
+        extra={viewToggle}
       />
-      <Table
-        rowKey="id"
-        size="middle"
-        loading={isLoading}
-        dataSource={data}
-        columns={columns}
-        pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
-      />
+
+      {/* 搜索与筛选栏 */}
+      <Space style={{ marginBottom: 16 }} wrap>
+        <Input.Search
+          placeholder="搜索名称或 IP"
+          allowClear
+          style={{ width: 200 }}
+          onChange={(e) => setSearchText(e.target.value)}
+        />
+        <Select
+          placeholder="状态"
+          allowClear
+          style={{ width: 120 }}
+          onChange={(v) => setStatusFilter(v)}
+          options={[
+            { value: 'ONLINE', label: '在线' },
+            { value: 'OFFLINE', label: '离线' },
+            { value: 'UNKNOWN', label: '未知' },
+            { value: 'ERROR', label: '异常' },
+          ]}
+        />
+        <Select
+          mode="multiple"
+          placeholder="标签筛选"
+          allowClear
+          style={{ minWidth: 150 }}
+          onChange={(v) => setTagsFilter(v)}
+          options={allTags.map((t) => ({ value: t, label: t }))}
+        />
+        <Select
+          placeholder="区域"
+          allowClear
+          style={{ width: 120 }}
+          onChange={(v) => setRegionFilter(v)}
+          options={allRegions.map((r) => ({ value: r, label: r }))}
+        />
+      </Space>
+
+      {/* 批量操作栏 */}
+      {selectedRowKeys.length > 0 && (
+        <Alert
+          style={{ marginBottom: 12 }}
+          message={
+            <Space>
+              <span>已选 {selectedRowKeys.length} 台服务器</span>
+              <Button
+                size="small"
+                icon={<CheckCircleOutlined />}
+                loading={bulkTestingIds.size > 0}
+                onClick={handleBulkTestSsh}
+              >
+                批量测试 SSH
+              </Button>
+              <Button
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={handleBulkDelete}
+              >
+                批量删除
+              </Button>
+              <Button size="small" onClick={() => setSelectedRowKeys([])}>取消选择</Button>
+            </Space>
+          }
+          type="info"
+          showIcon={false}
+        />
+      )}
+
+      {/* 表格视图 */}
+      {viewMode === 'table' && (
+        <Table
+          rowKey="id"
+          size="middle"
+          loading={isLoading}
+          dataSource={filteredData}
+          columns={columns}
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys as string[]),
+          }}
+          pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
+        />
+      )}
+
+      {/* 卡片视图 */}
+      {viewMode === 'card' && (
+        <Row gutter={[16, 16]}>
+          {filteredData.map((server) => (
+            <Col key={server.id} xs={24} sm={12} lg={8} xl={6}>
+              <ServerCard
+                server={server}
+                testingSsh={testingSshId === server.id || bulkTestingIds.has(server.id)}
+                onEdit={handleEdit}
+                onInstall={setInstallTarget}
+                onDelete={handleDelete}
+                onTestSsh={(s) => testSshMutation.mutate(s.id)}
+              />
+            </Col>
+          ))}
+        </Row>
+      )}
 
       <ServerFormModal
         open={modalOpen}
         initialValues={editTarget as Record<string, unknown> | null}
         onClose={() => setModalOpen(false)}
-        onSuccess={(server) => {
+        onSuccess={(server, templateIds) => {
           setModalOpen(false);
           qc.invalidateQueries({ queryKey: ['servers'] });
-          // 新增服务器后自动触发 Agent 安装
           if (!editTarget && server) {
-            setInstallTarget(server as Server);
+            if (templateIds && templateIds.length > 0) {
+              setAutoSetupTarget({ server: server as Server, templateIds });
+            } else {
+              setInstallTarget(server as Server);
+            }
           }
         }}
       />
-
-      {tokenTarget && (
-        <AgentTokenModal
-          open={!!tokenTarget}
-          token={tokenTarget.agentToken}
-          serverName={tokenTarget.name}
-          onClose={() => setTokenTarget(null)}
-        />
-      )}
 
       {installTarget && (
         <AgentInstallDrawer
@@ -196,6 +460,16 @@ export default function ServersPage() {
           serverId={installTarget.id}
           serverName={installTarget.name}
           onClose={() => setInstallTarget(null)}
+        />
+      )}
+
+      {autoSetupTarget && (
+        <AutoSetupDrawer
+          open={!!autoSetupTarget}
+          serverId={autoSetupTarget.server.id}
+          serverName={autoSetupTarget.server.name}
+          templateIds={autoSetupTarget.templateIds}
+          onClose={() => { setAutoSetupTarget(null); qc.invalidateQueries({ queryKey: ['servers'] }); }}
         />
       )}
     </Card>

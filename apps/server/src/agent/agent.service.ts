@@ -36,6 +36,8 @@ export class AgentService {
         cpuUsage: payload.cpu,
         memUsage: payload.mem,
         diskUsage: payload.disk,
+        networkIn: payload.networkIn,
+        networkOut: payload.networkOut,
         status: 'ONLINE',
         lastSeenAt: new Date(),
       },
