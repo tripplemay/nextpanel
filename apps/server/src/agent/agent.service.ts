@@ -31,7 +31,14 @@ export class AgentService {
 
     await this.prisma.server.update({
       where: { id: server.id },
-      data: { agentVersion: payload.agentVersion },
+      data: {
+        agentVersion: payload.agentVersion,
+        cpuUsage: payload.cpu,
+        memUsage: payload.mem,
+        diskUsage: payload.disk,
+        status: 'ONLINE',
+        lastSeenAt: new Date(),
+      },
     });
 
     await this.metricsService.record(
