@@ -164,8 +164,23 @@ export class ServersService {
       const { code: activeCode } = await ssh.execCommand(
         'systemctl is-active nextpanel-agent',
       );
-      if (activeCode === 0) {
-        onLog('Agent 已在运行，跳过安装。');
+      const alreadyInstalled = activeCode === 0;
+
+      if (alreadyInstalled) {
+        // 已安装：只更新配置文件（Token 可能已变），重启服务
+        onLog('Agent 已安装，更新配置文件...');
+        const configJson = JSON.stringify({
+          serverUrl: panelUrl,
+          agentToken: server.agentToken,
+        });
+        const b64Config = Buffer.from(configJson).toString('base64');
+        await ssh.execCommand('mkdir -p /etc/nextpanel');
+        await ssh.execCommand(
+          `echo '${b64Config}' | base64 -d > /etc/nextpanel/agent.json`,
+        );
+        onLog('配置已更新，重启 Agent...');
+        await ssh.execCommand('systemctl restart nextpanel-agent');
+        onLog('Agent 已重启，Token 已同步。');
         return true;
       }
 
