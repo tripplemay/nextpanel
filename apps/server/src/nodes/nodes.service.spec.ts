@@ -143,16 +143,14 @@ describe('NodesService', () => {
     });
   });
 
-  describe('remove – undeploy error logging', () => {
-    it('logs error when undeploy rejects', async () => {
+  describe('remove – undeploy error propagation', () => {
+    it('throws and aborts deletion when undeploy rejects (SSH-first pattern)', async () => {
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
       (mockPrisma.node.delete as jest.Mock).mockResolvedValue(fakeNode);
       (mockDeploy.undeploy as jest.Mock).mockRejectedValue(new Error('undeploy fail'));
 
-      await svc.remove('node-1');
-      await new Promise((r) => setTimeout(r, 0));
-
-      // no throw — error is caught and logged
+      await expect(svc.remove('node-1')).rejects.toThrow('undeploy fail');
+      expect(mockPrisma.node.delete).not.toHaveBeenCalled();
     });
   });
 

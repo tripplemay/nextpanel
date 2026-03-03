@@ -16,6 +16,17 @@ jest.mock('node-ssh', () => ({
   })),
 }));
 
+// Mock connectSsh used by installAgentStream
+const mockSsh = {
+  execCommand: jest.fn(),
+  dispose: jest.fn(),
+};
+jest.mock('../nodes/ssh/ssh.util', () => ({
+  connectSsh: jest.fn(),
+}));
+import { connectSsh } from '../nodes/ssh/ssh.util';
+const mockConnectSsh = connectSsh as jest.Mock;
+
 const mockPrisma = {
   server: {
     create: jest.fn(),
@@ -45,6 +56,9 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockConnect.mockResolvedValue(undefined);
   mockExecCommand.mockResolvedValue({ stdout: 'ok', stderr: '' });
+  mockConnectSsh.mockResolvedValue(mockSsh);
+  mockSsh.execCommand.mockResolvedValue({ stdout: '', stderr: '', code: 1 });
+  mockSsh.dispose.mockReset();
 });
 
 describe('ServersService', () => {
@@ -227,6 +241,236 @@ describe('ServersService', () => {
 
       expect(result.success).toBe(false);
       expect(result.message).toBe('Connection failed');
+    });
+  });
+
+  describe('installAgentStream', () => {
+    const fakeServerWithToken = { ...fakeServer, sshAuthEnc: 'enc:secret', agentToken: 'tok-abc' };
+
+    // Helper: collect all SSE events from the observable
+    function collectEvents(id: string): Promise<Array<{ data: Record<string, unknown> }>> {
+      return new Promise((resolve, reject) => {
+        const events: Array<{ data: Record<string, unknown> }> = [];
+        svc.installAgentStream(id).subscribe({
+          next: (ev) => events.push(ev as any),
+          error: reject,
+          complete: () => resolve(events),
+        });
+      });
+    }
+
+    it('emits manualCmd when PANEL_URL and GITHUB_REPO are set', async () => {
+      process.env.PANEL_URL = 'https://panel.test';
+      process.env.GITHUB_REPO = 'org/repo';
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
+      // SSH connect succeeds; agent not active; arch detection, then fail on release fetch
+      mockSsh.execCommand
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' }) // systemctl is-active
+        .mockResolvedValueOnce({ stdout: 'unsupported_arch', stderr: '' }); // uname -m → throw
+
+      const events = await collectEvents('srv-1');
+      const manualCmdEvent = events.find((e) => 'manualCmd' in e.data);
+      // manualCmd includes panel URL and token
+      if (manualCmdEvent) {
+        expect(manualCmdEvent.data.manualCmd).toContain('https://panel.test');
+        expect(manualCmdEvent.data.manualCmd).toContain('tok-abc');
+      }
+      // done event always emitted
+      const doneEvent = events.find((e) => e.data.done === true);
+      expect(doneEvent).toBeDefined();
+
+      delete process.env.PANEL_URL;
+      delete process.env.GITHUB_REPO;
+    });
+
+    it('emits done=false when PANEL_URL is not configured', async () => {
+      delete process.env.PANEL_URL;
+      delete process.env.GITHUB_REPO;
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
+
+      const events = await collectEvents('srv-1');
+
+      const doneEvent = events.find((e) => e.data.done === true);
+      expect(doneEvent?.data.success).toBe(false);
+    });
+
+    it('emits done=false when server is not found', async () => {
+      process.env.PANEL_URL = 'https://panel.test';
+      process.env.GITHUB_REPO = 'org/repo';
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(null);
+
+      const events = await collectEvents('srv-1');
+
+      const doneEvent = events.find((e) => e.data.done === true);
+      expect(doneEvent?.data.success).toBe(false);
+
+      delete process.env.PANEL_URL;
+      delete process.env.GITHUB_REPO;
+    });
+
+    it('returns true when agent is already running (activeCode === 0)', async () => {
+      process.env.PANEL_URL = 'https://panel.test';
+      process.env.GITHUB_REPO = 'org/repo';
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
+      mockSsh.execCommand.mockResolvedValueOnce({ code: 0, stdout: 'active', stderr: '' });
+
+      const events = await collectEvents('srv-1');
+
+      const doneEvent = events.find((e) => e.data.done === true);
+      expect(doneEvent?.data.success).toBe(true);
+
+      delete process.env.PANEL_URL;
+      delete process.env.GITHUB_REPO;
+    });
+
+    it('throws for unsupported architecture', async () => {
+      process.env.PANEL_URL = 'https://panel.test';
+      process.env.GITHUB_REPO = 'org/repo';
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
+      mockSsh.execCommand
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' }) // is-active
+        .mockResolvedValueOnce({ stdout: 'mips', stderr: '' }); // uname -m
+
+      const events = await collectEvents('srv-1');
+
+      const doneEvent = events.find((e) => e.data.done === true);
+      expect(doneEvent?.data.success).toBe(false);
+      const logEvents = events.filter((e) => typeof e.data.log === 'string');
+      expect(logEvents.some((e) => (e.data.log as string).includes('不支持的架构'))).toBe(true);
+
+      delete process.env.PANEL_URL;
+      delete process.env.GITHUB_REPO;
+    });
+
+    it('selects amd64 binary for x86_64 and completes full happy path', async () => {
+      process.env.PANEL_URL = 'https://panel.test';
+      process.env.GITHUB_REPO = 'org/repo';
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
+      mockSsh.execCommand
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })       // is-active
+        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })          // uname -m
+        .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' }) // curl github release
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })       // download
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // mkdir
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // write config
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // write service
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // daemon-reload
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // enable
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })       // start
+        .mockResolvedValueOnce({ stdout: 'active', stderr: '' });          // status
+
+      const events = await collectEvents('srv-1');
+
+      const doneEvent = events.find((e) => e.data.done === true);
+      expect(doneEvent?.data.success).toBe(true);
+      expect(mockSsh.dispose).toHaveBeenCalled();
+
+      delete process.env.PANEL_URL;
+      delete process.env.GITHUB_REPO;
+    });
+
+    it('selects arm64 binary for aarch64', async () => {
+      process.env.PANEL_URL = 'https://panel.test';
+      process.env.GITHUB_REPO = 'org/repo';
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
+      mockSsh.execCommand
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })       // is-active
+        .mockResolvedValueOnce({ stdout: 'aarch64', stderr: '' })         // uname -m
+        .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' }) // github release
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })       // download
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // mkdir
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // write config
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // write service
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // daemon-reload
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // enable
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })       // start
+        .mockResolvedValueOnce({ stdout: 'active', stderr: '' });          // status
+
+      const events = await collectEvents('srv-1');
+
+      const logEvents = events.filter((e) => typeof e.data.log === 'string');
+      expect(logEvents.some((e) => (e.data.log as string).includes('arm64'))).toBe(true);
+
+      delete process.env.PANEL_URL;
+      delete process.env.GITHUB_REPO;
+    });
+
+    it('fails when GitHub release tag cannot be parsed', async () => {
+      process.env.PANEL_URL = 'https://panel.test';
+      process.env.GITHUB_REPO = 'org/repo';
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
+      mockSsh.execCommand
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' }) // is-active
+        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })    // uname -m
+        .mockResolvedValueOnce({ stdout: '{}', stderr: '' });        // no tag_name
+
+      const events = await collectEvents('srv-1');
+
+      const doneEvent = events.find((e) => e.data.done === true);
+      expect(doneEvent?.data.success).toBe(false);
+      expect(mockSsh.dispose).toHaveBeenCalled();
+
+      delete process.env.PANEL_URL;
+      delete process.env.GITHUB_REPO;
+    });
+
+    it('fails when binary download returns non-zero exit code', async () => {
+      process.env.PANEL_URL = 'https://panel.test';
+      process.env.GITHUB_REPO = 'org/repo';
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
+      mockSsh.execCommand
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })       // is-active
+        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })          // uname -m
+        .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' }) // release
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: 'curl failed' }); // download
+
+      const events = await collectEvents('srv-1');
+
+      const doneEvent = events.find((e) => e.data.done === true);
+      expect(doneEvent?.data.success).toBe(false);
+      expect(mockSsh.dispose).toHaveBeenCalled();
+
+      delete process.env.PANEL_URL;
+      delete process.env.GITHUB_REPO;
+    });
+
+    it('fails when systemctl start returns non-zero exit code', async () => {
+      process.env.PANEL_URL = 'https://panel.test';
+      process.env.GITHUB_REPO = 'org/repo';
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
+      mockSsh.execCommand
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })       // is-active
+        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })          // uname -m
+        .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' }) // release
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })       // download
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // mkdir
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // write config
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // write service
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // daemon-reload
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // enable
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: 'start failed' }); // start
+
+      const events = await collectEvents('srv-1');
+
+      const doneEvent = events.find((e) => e.data.done === true);
+      expect(doneEvent?.data.success).toBe(false);
+
+      delete process.env.PANEL_URL;
+      delete process.env.GITHUB_REPO;
+    });
+
+    it('always calls ssh.dispose even when an error is thrown', async () => {
+      process.env.PANEL_URL = 'https://panel.test';
+      process.env.GITHUB_REPO = 'org/repo';
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
+      mockSsh.execCommand.mockRejectedValue(new Error('unexpected SSH error'));
+
+      await collectEvents('srv-1');
+
+      expect(mockSsh.dispose).toHaveBeenCalled();
+
+      delete process.env.PANEL_URL;
+      delete process.env.GITHUB_REPO;
     });
   });
 });

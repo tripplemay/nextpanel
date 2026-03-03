@@ -256,11 +256,11 @@ describe('NodeDeployService', () => {
       expect(mockDispose).toHaveBeenCalled();
     });
 
-    it('silently handles SSH errors during undeploy', async () => {
+    it('re-throws SSH errors during undeploy so caller can abort deletion', async () => {
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
       mockConnectSsh.mockRejectedValue(new Error('SSH failed'));
 
-      await expect(svc.undeploy('node-1')).resolves.toBeUndefined();
+      await expect(svc.undeploy('node-1')).rejects.toThrow('SSH failed');
     });
   });
 

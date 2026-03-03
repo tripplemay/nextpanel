@@ -178,9 +178,10 @@ describe('generateXrayConfig – streamSettings', () => {
     expect(cfg.inbounds[0].streamSettings.grpcSettings.serviceName).toBe('grpc');
   });
 
-  it('QUIC transport maps correctly', () => {
-    const cfg = parse({ ...baseNode, transport: 'QUIC', tls: 'NONE' });
-    expect(cfg.inbounds[0].streamSettings.network).toBe('quic');
+  it('QUIC transport throws — removed in Xray 26.x', () => {
+    expect(() => parse({ ...baseNode, transport: 'QUIC', tls: 'NONE' })).toThrow(
+      'QUIC transport was removed in Xray 26.x',
+    );
   });
 
   it('null transport defaults to tcp', () => {
