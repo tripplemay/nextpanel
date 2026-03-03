@@ -98,11 +98,18 @@ jobs:
             fi
 
             # ── 每次部署都执行 ─────────────────────────────────────────────
+            # 先停服务，释放内存供构建使用
+            pm2 stop all 2>/dev/null || true
+
             cd $APP_DIR
             pnpm install
             cd $APP_DIR/apps/server && pnpm exec prisma generate && cd $APP_DIR
             find $APP_DIR -name "*.tsbuildinfo" -delete
-            pnpm -r build
+
+            # 顺序构建（避免并行 OOM），限制 Node 堆内存
+            export NODE_OPTIONS="--max-old-space-size=512"
+            pnpm -r --workspace-concurrency=1 build
+            unset NODE_OPTIONS
 
             cd $APP_DIR/apps/server
             pnpm exec prisma migrate deploy
