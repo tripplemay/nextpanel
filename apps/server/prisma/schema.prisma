@@ -48,8 +48,8 @@ model Server {
   cpuUsage     Float?
   memUsage     Float?
   diskUsage    Float?
-  networkIn    BigInt?
-  networkOut   BigInt?
+  networkIn    Float?
+  networkOut   Float?
   pingMs       Int?
   lastSeenAt   DateTime?
   agentVersion String?
@@ -238,8 +238,8 @@ model ServerMetric {
   cpu        Float
   mem        Float
   disk       Float
-  networkIn  BigInt
-  networkOut BigInt
+  networkIn  Float
+  networkOut Float
   timestamp  DateTime @default(now())
 
   @@index([serverId, timestamp])
