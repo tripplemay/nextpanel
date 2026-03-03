@@ -15,6 +15,9 @@ export interface HeartbeatPayload {
 
 @Injectable()
 export class AgentService {
+  /** Stores previous cumulative network bytes per server for rate calculation */
+  private readonly prevNetwork = new Map<string, { in: number; out: number }>();
+
   constructor(
     private prisma: PrismaService,
     private metricsService: MetricsService,
@@ -29,6 +32,13 @@ export class AgentService {
       throw new UnauthorizedException('Unknown agent token');
     }
 
+    // Agent sends cumulative bytes; calculate bytes/sec rate from delta
+    const INTERVAL = 10; // heartbeat interval in seconds
+    const prev = this.prevNetwork.get(server.id);
+    const netInRate  = prev ? Math.max(0, (payload.networkIn  - prev.in)  / INTERVAL) : 0;
+    const netOutRate = prev ? Math.max(0, (payload.networkOut - prev.out) / INTERVAL) : 0;
+    this.prevNetwork.set(server.id, { in: payload.networkIn, out: payload.networkOut });
+
     await this.prisma.server.update({
       where: { id: server.id },
       data: {
@@ -36,8 +46,8 @@ export class AgentService {
         cpuUsage: payload.cpu,
         memUsage: payload.mem,
         diskUsage: payload.disk,
-        networkIn: payload.networkIn,
-        networkOut: payload.networkOut,
+        networkIn: netInRate,
+        networkOut: netOutRate,
         status: 'ONLINE',
         lastSeenAt: new Date(),
       },
@@ -48,8 +58,8 @@ export class AgentService {
       payload.cpu,
       payload.mem,
       payload.disk,
-      payload.networkIn,
-      payload.networkOut,
+      netInRate,
+      netOutRate,
     );
 
     if (payload.nodeStatuses) {
