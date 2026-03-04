@@ -2,6 +2,8 @@ import { NodesService } from './nodes.service';
 import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { NodeDeployService } from './node-deploy.service';
+import { CloudflareService } from '../cloudflare/cloudflare.service';
+import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.service';
 import { NotFoundException } from '@nestjs/common';
 import type { CreateNodeDto } from './dto/create-node.dto';
 
@@ -25,7 +27,16 @@ const mockDeploy = {
   undeploy: jest.fn().mockResolvedValue(undefined),
 } as unknown as NodeDeployService;
 
-const svc = new NodesService(mockPrisma, mockCrypto, mockDeploy);
+const mockCfService = {
+  createARecord: jest.fn().mockResolvedValue('cf-record-id'),
+  deleteRecord: jest.fn().mockResolvedValue(undefined),
+} as unknown as CloudflareService;
+
+const mockCfSettings = {
+  getDecryptedToken: jest.fn().mockResolvedValue(null),
+} as unknown as CloudflareSettingsService;
+
+const svc = new NodesService(mockPrisma, mockCrypto, mockDeploy, mockCfService, mockCfSettings);
 
 const fakeNode = {
   id: 'node-1', serverId: 'srv-1', name: 'Test Node',
@@ -242,6 +253,46 @@ describe('NodesService', () => {
       const parsed = JSON.parse(encArg) as Record<string, string>;
       expect(parsed.uuid).toBe('new-uuid');
       expect(parsed.realityPrivateKey).toBe('pk');
+    });
+  });
+
+  describe('createFromPreset', () => {
+    it('creates node with auto-generated credentials for VLESS_REALITY', async () => {
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]); // no existing ports
+      (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-preset' });
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-preset' });
+
+      const result = await svc.createFromPreset('user-1', {
+        serverId: 'srv-1',
+        name: 'My REALITY Node',
+        preset: 'VLESS_REALITY',
+      });
+
+      expect(mockPrisma.node.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            protocol: 'VLESS',
+            tls: 'REALITY',
+            source: 'AUTO',
+            userId: 'user-1',
+          }),
+        }),
+      );
+      expect(result).toBeDefined();
+    });
+
+    it('uses fixed port 443 for VLESS_WS_TLS', async () => {
+      (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-ws' });
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-ws' });
+
+      await svc.createFromPreset('user-1', {
+        serverId: 'srv-1',
+        name: 'WS Node',
+        preset: 'VLESS_WS_TLS',
+      });
+
+      const createData = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
+      expect(createData.listenPort).toBe(443);
     });
   });
 

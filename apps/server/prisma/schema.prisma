@@ -17,10 +17,13 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  auditLogs    AuditLog[]
-  releases     Release[]
-  templates    Template[]
-  subscriptions Subscription[]
+  auditLogs          AuditLog[]
+  releases           Release[]
+  templates          Template[]
+  subscriptions      Subscription[]
+  servers            Server[]
+  nodes              Node[]
+  cloudflareSetting  CloudflareSetting?
 }
 
 enum UserRole {
@@ -33,6 +36,9 @@ enum UserRole {
 
 model Server {
   id           String       @id @default(cuid())
+  /// Resource owner — nullable during migration, required once multi-tenancy is enforced
+  owner        User?        @relation(fields: [userId], references: [id])
+  userId       String?
   name         String
   region       String
   provider     String
@@ -60,6 +66,8 @@ model Server {
   nodes        Node[]
   releaseSteps ReleaseStep[]
   metrics      ServerMetric[]
+
+  @@index([userId])
 }
 
 enum SshAuthType {
@@ -80,6 +88,9 @@ model Node {
   id             String          @id @default(cuid())
   server         Server          @relation(fields: [serverId], references: [id], onDelete: Cascade)
   serverId       String
+  /// Resource owner — nullable during migration, required once multi-tenancy is enforced
+  owner          User?           @relation(fields: [userId], references: [id])
+  userId         String?
   name           String
   protocol       Protocol
   implementation Implementation?
@@ -89,6 +100,8 @@ model Node {
   domain         String?
   /// AES-GCM encrypted JSON credentials
   credentialsEnc String
+  /// Cloudflare DNS record ID — set for VLESS+WS+TLS nodes, used for cleanup on delete
+  cfDnsRecordId  String?
   source         NodeSource      @default(MANUAL)
   status         NodeStatus      @default(INACTIVE)
   enabled        Boolean         @default(true)
@@ -97,6 +110,8 @@ model Node {
 
   snapshots         ConfigSnapshot[]
   subscriptionNodes SubscriptionNode[]
+
+  @@index([userId])
 }
 
 enum Protocol {
@@ -106,6 +121,7 @@ enum Protocol {
   SHADOWSOCKS
   SOCKS5
   HTTP
+  HYSTERIA2
 }
 
 enum Implementation {
@@ -379,4 +395,21 @@ enum PipelineRunStatus {
   SUCCESS
   FAILED
   CANCELLED
+}
+
+// ──────────────────────────── CloudflareSetting ────────────────────────────
+
+model CloudflareSetting {
+  id          String   @id @default(cuid())
+  /// Resource owner — one setting per user (unique)
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String   @unique
+  /// AES-GCM encrypted Cloudflare API Token
+  apiTokenEnc String
+  /// Root domain managed by this Cloudflare account (e.g. example.com)
+  domain      String
+  /// Cloudflare Zone ID for the domain
+  zoneId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

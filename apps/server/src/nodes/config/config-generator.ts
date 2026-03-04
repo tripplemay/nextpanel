@@ -8,7 +8,7 @@ import { generateSingBoxConfig, generateSsLibevConfig } from './singbox-config';
 
 export interface NodeInfo {
   id: string;
-  protocol: string;         // VMess | VLESS | TROJAN | SHADOWSOCKS | SOCKS5 | HTTP
+  protocol: string;         // VMESS | VLESS | TROJAN | SHADOWSOCKS | SOCKS5 | HTTP | HYSTERIA2
   implementation: string | null; // XRAY | V2RAY | SING_BOX | SS_LIBEV | null
   transport: string | null; // TCP | WS | GRPC | QUIC
   tls: string;              // NONE | TLS | REALITY

@@ -55,6 +55,7 @@ describe('generateSingBoxConfig – inbound types', () => {
     ['SHADOWSOCKS', 'shadowsocks'],
     ['SOCKS5', 'socks'],
     ['HTTP', 'http'],
+    ['HYSTERIA2', 'hysteria2'],
   ])('maps protocol %s → type %s', (protocol, expectedType) => {
     const cfg = parseSingBox({ ...baseNode, protocol });
     expect(cfg.inbounds[0].type).toBe(expectedType);
@@ -103,6 +104,23 @@ describe('generateSingBoxConfig – credentials', () => {
   it('HTTP without username does not set users', () => {
     const cfg = parseSingBox({ ...baseNode, protocol: 'HTTP' }, {});
     expect(cfg.inbounds[0].users).toBeUndefined();
+  });
+
+  it('HYSTERIA2 sets users with password', () => {
+    const cfg = parseSingBox({ ...baseNode, protocol: 'HYSTERIA2' });
+    expect(cfg.inbounds[0].users[0].password).toBe('pass-sing');
+  });
+
+  it('HYSTERIA2 sets tls with cert/key paths', () => {
+    const cfg = parseSingBox({ ...baseNode, protocol: 'HYSTERIA2' });
+    expect(cfg.inbounds[0].tls.enabled).toBe(true);
+    expect(cfg.inbounds[0].tls.certificate_path).toBe('/etc/nextpanel/certs/sb-1.crt');
+    expect(cfg.inbounds[0].tls.key_path).toBe('/etc/nextpanel/certs/sb-1.key');
+  });
+
+  it('HYSTERIA2 uses empty password when not provided', () => {
+    const cfg = parseSingBox({ ...baseNode, protocol: 'HYSTERIA2' }, {});
+    expect(cfg.inbounds[0].users[0].password).toBe('');
   });
 });
 

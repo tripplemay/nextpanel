@@ -59,7 +59,7 @@ describe('AgentService', () => {
 
       expect(mockPrisma.server.update).toHaveBeenCalledWith({
         where: { id: 'srv-1' },
-        data: { agentVersion: 'v2.0.0' },
+        data: expect.objectContaining({ agentVersion: 'v2.0.0' }),
       });
     });
 
@@ -67,9 +67,19 @@ describe('AgentService', () => {
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
       (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
 
+      // First call establishes the previous network baseline
       await svc.handleHeartbeat({
         agentToken: 'tok-abc', agentVersion: 'v1',
-        cpu: 55, mem: 70, disk: 40, networkIn: 1024, networkOut: 2048,
+        cpu: 0, mem: 0, disk: 0, networkIn: 0, networkOut: 0,
+      });
+      jest.clearAllMocks();
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+
+      // Second call: delta = 10240 bytes over 10s → rate = 1024 bytes/s; delta = 20480 → 2048/s
+      await svc.handleHeartbeat({
+        agentToken: 'tok-abc', agentVersion: 'v1',
+        cpu: 55, mem: 70, disk: 40, networkIn: 10240, networkOut: 20480,
       });
 
       expect(mockMetrics.record).toHaveBeenCalledWith('srv-1', 55, 70, 40, 1024, 2048);

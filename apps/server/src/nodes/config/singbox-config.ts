@@ -42,6 +42,14 @@ function singBoxInbound(node: NodeInfo, creds: NodeCredentials): unknown {
     case 'HTTP':
       if (creds.username) base.users = [{ username: creds.username, password: creds.password ?? '' }];
       break;
+    case 'HYSTERIA2':
+      base.users = [{ password: creds.password ?? '' }];
+      base.tls = {
+        enabled: true,
+        certificate_path: `/etc/nextpanel/certs/${node.id}.crt`,
+        key_path: `/etc/nextpanel/certs/${node.id}.key`,
+      };
+      break;
   }
 
   if (node.transport === 'WS') {
@@ -80,6 +88,7 @@ function singBoxType(protocol: string): string {
     SHADOWSOCKS: 'shadowsocks',
     SOCKS5: 'socks',
     HTTP: 'http',
+    HYSTERIA2: 'hysteria2',
   };
   return map[protocol] ?? protocol.toLowerCase();
 }

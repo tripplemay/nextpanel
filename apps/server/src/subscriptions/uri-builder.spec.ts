@@ -113,3 +113,86 @@ describe('buildSingboxOutbound – VLESS 非 REALITY 时不含 flow', () => {
     expect(out.flow).toBeUndefined();
   });
 });
+
+// ── Hysteria2 ─────────────────────────────────────────────────────────────────
+
+const hy2Node: NodeExportInfo = {
+  name: 'HY2-Node',
+  protocol: 'HYSTERIA2',
+  host: '5.6.7.8',
+  port: 4430,
+  transport: null,
+  tls: 'TLS',
+  domain: 'hy2.example.com',
+  credentials: { password: 'secret123' },
+};
+
+describe('buildShareUri – HYSTERIA2', () => {
+  it('returns hy2:// URI with password', () => {
+    const uri = buildShareUri(hy2Node)!;
+    expect(uri).toMatch(/^hy2:\/\//);
+    expect(uri).toContain('secret123');
+  });
+
+  it('includes sni param when domain is set', () => {
+    const uri = buildShareUri(hy2Node)!;
+    expect(uri).toContain('sni=hy2.example.com');
+  });
+
+  it('omits sni param when domain is null', () => {
+    const uri = buildShareUri({ ...hy2Node, domain: null })!;
+    expect(uri).not.toContain('sni=');
+  });
+
+  it('includes host and port', () => {
+    const uri = buildShareUri(hy2Node)!;
+    expect(uri).toContain('@5.6.7.8:4430');
+  });
+});
+
+describe('buildClashProxy – HYSTERIA2', () => {
+  it('includes type: hysteria2', () => {
+    const yaml = buildClashProxy(hy2Node)!;
+    expect(yaml).toContain('type: hysteria2');
+  });
+
+  it('includes password', () => {
+    const yaml = buildClashProxy(hy2Node)!;
+    expect(yaml).toContain('password: secret123');
+  });
+
+  it('includes sni when domain is set', () => {
+    const yaml = buildClashProxy(hy2Node)!;
+    expect(yaml).toContain('sni: hy2.example.com');
+  });
+});
+
+describe('buildSingboxOutbound – HYSTERIA2', () => {
+  it('returns type hysteria2', () => {
+    const out = buildSingboxOutbound(hy2Node) as Record<string, unknown>;
+    expect(out.type).toBe('hysteria2');
+  });
+
+  it('includes password', () => {
+    const out = buildSingboxOutbound(hy2Node) as Record<string, unknown>;
+    expect(out.password).toBe('secret123');
+  });
+
+  it('includes tls.enabled = true', () => {
+    const out = buildSingboxOutbound(hy2Node) as Record<string, unknown>;
+    const tls = out.tls as Record<string, unknown>;
+    expect(tls.enabled).toBe(true);
+  });
+
+  it('includes tls.server_name when domain is set', () => {
+    const out = buildSingboxOutbound(hy2Node) as Record<string, unknown>;
+    const tls = out.tls as Record<string, unknown>;
+    expect(tls.server_name).toBe('hy2.example.com');
+  });
+
+  it('no server_name when domain is null', () => {
+    const out = buildSingboxOutbound({ ...hy2Node, domain: null }) as Record<string, unknown>;
+    const tls = out.tls as Record<string, unknown>;
+    expect(tls.server_name).toBeUndefined();
+  });
+});

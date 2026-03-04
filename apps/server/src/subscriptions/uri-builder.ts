@@ -65,6 +65,14 @@ export function buildShareUri(node: NodeExportInfo): string | null {
       return `ss://${userInfo}@${host}:${port}#${tag}`;
     }
 
+    case 'HYSTERIA2': {
+      // hy2://password@host:port?sni=domain#name
+      const params = new URLSearchParams();
+      if (domain) params.set('sni', domain);
+      const qs = params.toString();
+      return `hy2://${encodeURIComponent(creds.password ?? '')}@${host}:${port}${qs ? '?' + qs : ''}#${tag}`;
+    }
+
     case 'SOCKS5':
       return `socks5://${host}:${port}#${tag}`;
 
@@ -170,6 +178,15 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       break;
     }
 
+    case 'HYSTERIA2': {
+      add('type', 'hysteria2');
+      add('server', host);
+      add('port', port);
+      add('password', creds.password ?? '');
+      if (domain) add('sni', domain);
+      break;
+    }
+
     case 'SOCKS5': {
       add('type', 'socks5');
       add('server', host);
@@ -262,6 +279,16 @@ export function buildSingboxOutbound(node: NodeExportInfo): Record<string, unkno
       if (creds.password) out.password = creds.password;
       return out;
     }
+
+    case 'HYSTERIA2':
+      return {
+        type: 'hysteria2',
+        tag: name,
+        server: host,
+        server_port: port,
+        password: creds.password ?? '',
+        tls: { enabled: true, ...(domain ? { server_name: domain } : {}) },
+      };
 
     case 'HTTP':
       return {

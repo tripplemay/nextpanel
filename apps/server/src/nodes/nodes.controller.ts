@@ -12,6 +12,8 @@ import {
   Sse,
   UseGuards,
   MessageEvent,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { ApiTags, ApiBearerAuth, ApiQuery, ApiOperation } from '@nestjs/swagger';
@@ -25,6 +27,7 @@ import { NodesService } from './nodes.service';
 import { NodeDeployService } from './node-deploy.service';
 import { XrayTestService } from './xray-test/xray-test.service';
 import { CreateNodeDto } from './dto/create-node.dto';
+import { CreateNodeFromPresetDto } from './dto/create-node-from-preset.dto';
 import { UpdateNodeDto } from './dto/update-node.dto';
 
 @ApiTags('nodes')
@@ -42,9 +45,20 @@ export class NodesController {
   @Post()
   @Roles('ADMIN', 'OPERATOR')
   @Audit('CREATE', 'node')
-  @ApiOperation({ summary: 'Create a new node' })
+  @ApiOperation({ summary: 'Create a new node (manual — all fields required)' })
   create(@Body() dto: CreateNodeDto) {
     return this.nodesService.create(dto);
+  }
+
+  @Post('preset')
+  @Roles('ADMIN', 'OPERATOR')
+  @Audit('CREATE', 'node')
+  @ApiOperation({ summary: 'Create a node from a protocol preset — auto-generates all config and credentials' })
+  createFromPreset(
+    @Body() dto: CreateNodeFromPresetDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.nodesService.createFromPreset(user.id, dto);
   }
 
   @Get()
@@ -114,6 +128,23 @@ export class NodesController {
   @Audit('UPDATE', 'node')
   update(@Param('id') id: string, @Body() dto: UpdateNodeDto) {
     return this.nodesService.update(id, dto);
+  }
+
+  @Patch(':id/rename')
+  @Roles('ADMIN', 'OPERATOR')
+  @Audit('UPDATE', 'node')
+  @ApiOperation({ summary: 'Rename a node (no redeploy)' })
+  rename(@Param('id') id: string, @Body('name') name: string) {
+    return this.nodesService.rename(id, name);
+  }
+
+  @Post(':id/regenerate-credentials')
+  @Roles('ADMIN', 'OPERATOR')
+  @Audit('UPDATE', 'node')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Regenerate credentials and redeploy' })
+  regenerateCredentials(@Param('id') id: string) {
+    return this.nodesService.regenerateCredentials(id);
   }
 
   @Get(':id/deploy-log')

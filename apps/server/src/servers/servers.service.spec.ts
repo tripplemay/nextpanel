@@ -1,6 +1,9 @@
 import { ServersService } from './servers.service';
 import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
+import { NodeDeployService } from '../nodes/node-deploy.service';
+import { CloudflareService } from '../cloudflare/cloudflare.service';
+import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.service';
 import { NotFoundException } from '@nestjs/common';
 
 // Mock node-ssh before importing ServersService
@@ -35,6 +38,9 @@ const mockPrisma = {
     update: jest.fn(),
     delete: jest.fn(),
   },
+  node: {
+    findMany: jest.fn().mockResolvedValue([]),
+  },
 } as unknown as PrismaService;
 
 const mockCrypto = {
@@ -42,7 +48,19 @@ const mockCrypto = {
   decrypt: jest.fn((s: string) => s.replace('enc:', '')),
 } as unknown as CryptoService;
 
-const svc = new ServersService(mockPrisma, mockCrypto);
+const mockNodeDeploy = {
+  undeploy: jest.fn().mockResolvedValue(undefined),
+} as unknown as NodeDeployService;
+
+const mockCfService = {
+  deleteRecord: jest.fn().mockResolvedValue(undefined),
+} as unknown as CloudflareService;
+
+const mockCfSettings = {
+  getDecryptedToken: jest.fn().mockResolvedValue(null),
+} as unknown as CloudflareSettingsService;
+
+const svc = new ServersService(mockPrisma, mockCrypto, mockNodeDeploy, mockCfService, mockCfSettings);
 
 const fakeServer = {
   id: 'srv-1', name: 'Test Server', ip: '1.2.3.4',

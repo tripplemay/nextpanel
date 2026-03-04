@@ -1,17 +1,25 @@
-import { Injectable, NotFoundException, MessageEvent } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, MessageEvent } from '@nestjs/common';
 import { NodeSSH } from 'node-ssh';
 import { Observable } from 'rxjs';
 import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
+import { NodeDeployService } from '../nodes/node-deploy.service';
+import { CloudflareService } from '../cloudflare/cloudflare.service';
+import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.service';
 import { connectSsh } from '../nodes/ssh/ssh.util';
 import { CreateServerDto } from './dto/create-server.dto';
 import { UpdateServerDto } from './dto/update-server.dto';
 
 @Injectable()
 export class ServersService {
+  private readonly logger = new Logger(ServersService.name);
+
   constructor(
     private prisma: PrismaService,
     private crypto: CryptoService,
+    private nodeDeploy: NodeDeployService,
+    private cfService: CloudflareService,
+    private cfSettings: CloudflareSettingsService,
   ) {}
 
   async create(dto: CreateServerDto) {
@@ -65,6 +73,42 @@ export class ServersService {
 
   async remove(id: string) {
     await this.findOne(id);
+
+    // Fetch all nodes on this server (need userId + cfDnsRecordId for cleanup)
+    const nodes = await this.prisma.node.findMany({
+      where: { serverId: id },
+      select: { id: true, userId: true, cfDnsRecordId: true },
+    });
+
+    // Undeploy all nodes via SSH (best-effort — log errors but continue)
+    await Promise.allSettled(
+      nodes.map(async (node) => {
+        try {
+          await this.nodeDeploy.undeploy(node.id);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`Server ${id}: undeploy of node ${node.id} failed during cascade: ${msg}`);
+        }
+      }),
+    );
+
+    // Clean up Cloudflare DNS records (best-effort)
+    await Promise.allSettled(
+      nodes
+        .filter((n) => n.cfDnsRecordId && n.userId)
+        .map(async (node) => {
+          const settings = await this.cfSettings.getDecryptedToken(node.userId!).catch(() => null);
+          if (!settings) return;
+          try {
+            await this.cfService.deleteRecord(settings.apiToken, settings.zoneId, node.cfDnsRecordId!);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger.warn(`Server ${id}: CF DNS cleanup for node ${node.id} failed: ${msg}`);
+          }
+        }),
+    );
+
+    // DB cascade: Node has onDelete:Cascade on Server, so all nodes are deleted automatically
     return this.prisma.server.delete({ where: { id } });
   }
 
