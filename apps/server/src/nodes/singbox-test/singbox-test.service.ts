@@ -35,10 +35,10 @@ export class SingboxTestService {
     const config = this.buildClientConfig(node, socksPort);
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
 
-    const proc = this.spawnSingbox(configPath);
+    const { proc, ready } = this.spawnSingbox(configPath);
 
     try {
-      await this.waitForPort(socksPort, SINGBOX_STARTUP_MS);
+      await this.waitForPort(socksPort, SINGBOX_STARTUP_MS, ready);
       const { reachable, latency, message } = await this.curlTest(socksPort);
       return { reachable, latency, message, testedAt };
     } catch (err) {
@@ -82,21 +82,33 @@ export class SingboxTestService {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  private spawnSingbox(configPath: string) {
+  private spawnSingbox(configPath: string): { proc: ReturnType<typeof require['child_process']['spawn']>; ready: Promise<void> } {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const child = require('child_process').spawn(
       SINGBOX_BINARY,
       ['run', '-c', configPath],
       { stdio: 'ignore', detached: false },
-    );
-    child.on('error', (err: Error) => {
-      this.logger.warn(`sing-box spawn error: ${err.message}`);
+    ) as ReturnType<typeof require['child_process']['spawn']>;
+
+    const ready = new Promise<void>((_, reject) => {
+      child.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'ENOENT') {
+          reject(new Error(`sing-box 未安装（找不到 ${SINGBOX_BINARY}）`));
+        } else {
+          reject(new Error(`sing-box 启动失败：${err.message}`));
+        }
+      });
     });
-    return child;
+
+    return { proc: child, ready };
   }
 
-  private waitForPort(port: number, timeoutMs: number): Promise<void> {
+  private waitForPort(port: number, timeoutMs: number, spawnError: Promise<void>): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     return new Promise((resolve, reject) => {
+      // If spawn fails, reject immediately with the real error
+      spawnError.catch(reject);
+
       const attempt = () => {
         if (Date.now() > deadline) {
           return reject(new Error('sing-box 启动超时'));

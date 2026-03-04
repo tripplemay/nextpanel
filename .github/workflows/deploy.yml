@@ -119,6 +119,21 @@ jobs:
               echo ">>> Xray installed: $(xray version | head -1)"
             fi
 
+            # ── 安装/检测 sing-box（Hysteria2 连通性测试客户端，幂等）────────
+            if ! command -v sing-box &>/dev/null; then
+              echo ">>> 安装 sing-box 测试客户端..."
+              apt-get install -y unzip 2>/dev/null || true
+              ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+              SB_TAG=$(curl -sf "https://api.github.com/repos/SagerNet/sing-box/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+              curl -fL "https://github.com/SagerNet/sing-box/releases/download/${SB_TAG}/sing-box-${SB_TAG#v}-linux-${ARCH}.tar.gz" \
+                -o /tmp/sing-box.tar.gz
+              tar xzf /tmp/sing-box.tar.gz -C /tmp/
+              mv /tmp/sing-box-*/sing-box /usr/local/bin/sing-box
+              chmod +x /usr/local/bin/sing-box
+              rm -rf /tmp/sing-box.tar.gz /tmp/sing-box-*/
+              echo ">>> sing-box installed: $(sing-box version | head -1)"
+            fi
+
             cd $APP_DIR
             pnpm install
             cd $APP_DIR/apps/server && pnpm exec prisma generate && cd $APP_DIR
