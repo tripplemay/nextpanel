@@ -75,8 +75,9 @@ function setupHappyPath() {
   mockConnectSsh.mockResolvedValue(mockSsh);
   mockBinaryExists.mockResolvedValue(true);
   mockExecCommand
-    .mockResolvedValueOnce({ stderr: '' })   // daemon-reload
-    .mockResolvedValueOnce({ stderr: '' })   // enable+restart
+    .mockResolvedValueOnce({ stderr: '' })    // daemon-reload
+    .mockResolvedValueOnce({ stderr: '' })    // enable+restart
+    .mockResolvedValueOnce({ stdout: '' })    // openFirewallPort
     .mockResolvedValueOnce({ stdout: 'active' }); // is-active
 }
 
@@ -88,10 +89,11 @@ beforeEach(() => {
   mockBinaryExists.mockResolvedValue(true);
   mockWhichBinary.mockResolvedValue('/usr/bin/ss-server');
   mockDetectPackageManager.mockResolvedValue('apt');
-  // Default exec: daemon-reload → enable+restart → is-active (active)
+  // Default exec: daemon-reload → enable+restart → openFirewallPort → is-active (active)
   mockExecCommand
     .mockResolvedValueOnce({ stderr: '' })
     .mockResolvedValueOnce({ stderr: '' })
+    .mockResolvedValueOnce({ stdout: '' })
     .mockResolvedValueOnce({ stdout: 'active' });
 });
 
@@ -127,9 +129,11 @@ describe('NodeDeployService', () => {
       // Override default exec: is-active returns 'failed'
       mockExecCommand.mockReset();
       mockExecCommand
-        .mockResolvedValueOnce({ stderr: '' })    // daemon-reload
-        .mockResolvedValueOnce({ stderr: '' })    // enable+restart
-        .mockResolvedValueOnce({ stdout: 'failed' }); // is-active
+        .mockResolvedValueOnce({ stderr: '' })     // daemon-reload
+        .mockResolvedValueOnce({ stderr: '' })     // enable+restart
+        .mockResolvedValueOnce({ stdout: '' })     // openFirewallPort
+        .mockResolvedValueOnce({ stdout: 'failed' }) // is-active
+        .mockResolvedValueOnce({ stdout: '' });    // journalctl (triggered when !isActive)
 
       const promise = svc.deploy('node-1');
       jest.runAllTimersAsync();
@@ -173,13 +177,14 @@ describe('NodeDeployService', () => {
       mockBinaryExists
         .mockResolvedValueOnce(false)  // first check: binary missing
         .mockResolvedValueOnce(true);  // second check: after install
-      // installXray SSH commands + daemon-reload + enable+restart + is-active
+      // installXray SSH commands + daemon-reload + enable+restart + firewall (1 call) + is-active
       mockExecCommand.mockReset();
       mockExecCommand
         .mockResolvedValueOnce({ stdout: '', stderr: '' })   // install script
         .mockResolvedValueOnce({ code: 0 })                  // test -x xray
         .mockResolvedValueOnce({ stderr: '' })               // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })               // enable+restart
+        .mockResolvedValueOnce({ stdout: '' })               // openFirewallPort (combined)
         .mockResolvedValueOnce({ stdout: 'active' });        // is-active
 
       const promise = svc.deploy('node-1');

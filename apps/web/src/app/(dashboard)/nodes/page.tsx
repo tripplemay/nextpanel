@@ -341,9 +341,10 @@ export default function NodesPage() {
       <NodePresetModal
         open={presetModalOpen}
         onClose={() => setPresetModalOpen(false)}
-        onSuccess={() => {
+        onSuccess={(node) => {
           setPresetModalOpen(false);
           qc.invalidateQueries({ queryKey: ['nodes'] });
+          openDeploy(node);
         }}
       />
 

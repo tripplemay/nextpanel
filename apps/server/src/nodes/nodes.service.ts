@@ -83,11 +83,6 @@ export class NodesService {
       await this.provisionCloudflareDns(userId, node.id, dto.serverId);
     }
 
-    this.nodeDeploy.deploy(node.id).catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Node ${node.id} deploy failed: ${msg}`);
-    });
-
     return this.findOne(node.id);
   }
 

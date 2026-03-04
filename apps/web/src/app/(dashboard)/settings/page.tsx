@@ -23,7 +23,7 @@ export default function SettingsPage() {
   const [form] = Form.useForm();
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
 
-  const { data: setting, isLoading } = useQuery({
+  const { data: setting } = useQuery({
     queryKey: ['cloudflare-settings'],
     queryFn: () => cloudflareApi.get().then((r) => r.data),
   });
@@ -76,7 +76,7 @@ export default function SettingsPage() {
   });
 
   return (
-    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }} loading={isLoading}>
+    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
       <PageHeader title="系统设置" />
 
       <Card

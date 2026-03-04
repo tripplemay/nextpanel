@@ -172,7 +172,12 @@ export class NodeDeployService {
       );
       if (startErr) log(`Start warning: ${startErr}`);
 
-      // ── 9. Verify service is active ────────────────────────────────────────
+      // ── 9. Open firewall port (best-effort) ───────────────────────────────
+      for (const proto of this.getFirewallProtocols(node.protocol)) {
+        await this.openFirewallPort(ssh, node.listenPort, proto, log);
+      }
+
+      // ── 10. Verify service is active ───────────────────────────────────────
       log(`Waiting for service to stabilize...`);
       await new Promise((r) => setTimeout(r, 2000));
       const { stdout: activeOut } = await ssh.execCommand(
@@ -270,6 +275,10 @@ export class NodeDeployService {
       await ssh.execCommand(`systemctl stop ${serviceName}`);
       trackLog('服务已停止');
 
+      for (const proto of this.getFirewallProtocols(node.protocol)) {
+        await this.closeFirewallPort(ssh, node.listenPort, proto, trackLog);
+      }
+
       trackLog('正在删除 systemd 单元和配置文件...');
       await ssh.execCommand(
         `systemctl disable ${serviceName}; ` +
@@ -342,6 +351,9 @@ export class NodeDeployService {
           `rm -f /etc/systemd/system/${serviceName}.service /etc/nextpanel/nodes/${node.id}.json; ` +
           `systemctl daemon-reload`,
       );
+      for (const proto of this.getFirewallProtocols(node.protocol)) {
+        await this.closeFirewallPort(ssh, node.listenPort, proto);
+      }
       ssh.dispose();
     } catch (err: unknown) {
       ssh?.dispose();
@@ -467,6 +479,86 @@ export class NodeDeployService {
     }
     log(`shadowsocks-libev install failed.`);
     return null;
+  }
+
+  // ── Firewall helpers ─────────────────────────────────────────────────────
+
+  /**
+   * Returns the transport protocols that need firewall rules for a given proxy protocol.
+   * - HYSTERIA2: UDP only (QUIC-based)
+   * - SHADOWSOCKS: TCP + UDP (xray: network:'tcp,udp', ss-libev: mode:'tcp_and_udp')
+   * - SOCKS5: TCP + UDP (xray: udp:true)
+   * - All others (VLESS, VMESS, TROJAN, HTTP): TCP only
+   */
+  private getFirewallProtocols(protocol: string): ('tcp' | 'udp')[] {
+    if (protocol === 'HYSTERIA2') return ['udp'];
+    if (protocol === 'SHADOWSOCKS' || protocol === 'SOCKS5') return ['tcp', 'udp'];
+    return ['tcp'];
+  }
+
+  /**
+   * Open a firewall port via ufw (preferred) or iptables.
+   * Best-effort: logs warnings but never throws.
+   */
+  private async openFirewallPort(
+    ssh: NodeSSH,
+    port: number,
+    proto: 'tcp' | 'udp',
+    log?: (msg: string) => void,
+  ): Promise<void> {
+    if (port < 1024) {
+      log?.(`Skipping firewall for privileged port ${port}/${proto} (managed by sysadmin)`);
+      return;
+    }
+    log?.(`Opening firewall port ${port}/${proto}...`);
+    try {
+      // If ufw is active, delegate entirely to ufw (mixing ufw + raw iptables breaks ufw chains).
+      // Otherwise fall back to direct iptables + netfilter-persistent for persistence.
+      await ssh.execCommand(
+        `if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then ` +
+        `  ufw allow ${port}/${proto} 2>/dev/null || true; ` +
+        `else ` +
+        `  iptables -C INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || ` +
+        `  iptables -A INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || true; ` +
+        `  command -v netfilter-persistent >/dev/null 2>&1 && netfilter-persistent save 2>/dev/null || true; ` +
+        `fi`,
+      );
+      log?.(`Firewall: port ${port}/${proto} opened`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log?.(`Firewall warning (non-fatal): ${msg}`);
+    }
+  }
+
+  /**
+   * Close a firewall port when a node is removed.
+   * Best-effort: logs warnings but never throws.
+   */
+  private async closeFirewallPort(
+    ssh: NodeSSH,
+    port: number,
+    proto: 'tcp' | 'udp',
+    log?: (msg: string) => void,
+  ): Promise<void> {
+    if (port < 1024) {
+      log?.(`Skipping firewall for privileged port ${port}/${proto} (managed by sysadmin)`);
+      return;
+    }
+    log?.(`Closing firewall port ${port}/${proto}...`);
+    try {
+      await ssh.execCommand(
+        `if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then ` +
+        `  ufw delete allow ${port}/${proto} 2>/dev/null || true; ` +
+        `else ` +
+        `  iptables -D INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || true; ` +
+        `  command -v netfilter-persistent >/dev/null 2>&1 && netfilter-persistent save 2>/dev/null || true; ` +
+        `fi`,
+      );
+      log?.(`Firewall: port ${port}/${proto} closed`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log?.(`Firewall warning (non-fatal): ${msg}`);
+    }
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────

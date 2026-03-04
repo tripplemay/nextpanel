@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { App, Modal, Form, Input, Select } from 'antd';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { nodesApi, serversApi } from '@/lib/api';
+import type { Node } from '@/types/api';
 import type { AxiosError } from 'axios';
 
 const { Option } = Select;
@@ -18,7 +19,7 @@ const PRESETS = [
 interface Props {
   open: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (node: Node) => void;
 }
 
 export default function NodePresetModal({ open, onClose, onSuccess }: Props) {
@@ -66,9 +67,8 @@ export default function NodePresetModal({ open, onClose, onSuccess }: Props) {
   const mutation = useMutation({
     mutationFn: (values: { serverId: string; preset: string; name: string }) =>
       nodesApi.createFromPreset(values),
-    onSuccess: () => {
-      message.success('节点已创建，部署中…');
-      onSuccess();
+    onSuccess: (res) => {
+      onSuccess(res.data);
     },
     onError: (err) => {
       const axiosErr = err as AxiosError<{ message: string | string[] }>;
