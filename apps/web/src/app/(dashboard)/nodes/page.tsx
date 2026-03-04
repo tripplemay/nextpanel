@@ -1,10 +1,11 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { App, Button, Table, Tag, Space, Popconfirm, Card, Spin } from 'antd';
-import { ApiOutlined, CloudUploadOutlined, ShareAltOutlined, FileTextOutlined } from '@ant-design/icons';
+import { App, Button, Table, Tag, Space, Popconfirm, Card, Spin, Modal, Input } from 'antd';
+import { ApiOutlined, CloudUploadOutlined, ShareAltOutlined, FileTextOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { nodesApi } from '@/lib/api';
+import NodePresetModal from '@/components/nodes/NodePresetModal';
 import NodeFormModal from '@/components/nodes/NodeFormModal';
 import DeployDrawer from '@/components/nodes/DeployDrawer';
 import NodeShareModal from '@/components/nodes/NodeShareModal';
@@ -18,12 +19,23 @@ import type { ColumnType } from 'antd/es/table';
 export default function NodesPage() {
   const { message } = App.useApp();
   const qc = useQueryClient();
-  const [modalOpen, setModalOpen] = useState(false);
+
+  // Modals
+  const [presetModalOpen, setPresetModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Node | null>(null);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+
+  // Rename modal
+  const [renameNode, setRenameNode] = useState<Node | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
+  // Deploy / delete drawers
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [deployingNode, setDeployingNode] = useState<Node | null>(null);
   const [deleteDrawerOpen, setDeleteDrawerOpen] = useState(false);
   const [deletingNode, setDeletingNode] = useState<Node | null>(null);
+
+  // Test state
   const [testingId, setTestingId] = useState<string | null>(null);
   const [shareNode, setShareNode] = useState<Node | null>(null);
   const [logNode, setLogNode] = useState<Node | null>(null);
@@ -62,6 +74,23 @@ export default function NodesPage() {
     },
     onError: () => message.error('测试请求失败'),
     onSettled: () => setTestingId(null),
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      nodesApi.rename(id, name).then((r) => r.data),
+    onSuccess: () => {
+      message.success('节点已重命名');
+      setRenameNode(null);
+      qc.invalidateQueries({ queryKey: ['nodes'] });
+    },
+    onError: () => message.error('重命名失败'),
+  });
+
+  const regenMutation = useMutation({
+    mutationFn: (id: string) => nodesApi.regenerateCredentials(id).then((r) => r.data),
+    onSuccess: () => message.success('凭证已更新，节点重新部署中…'),
+    onError: () => message.error('更新凭证失败'),
   });
 
   async function startBatchTest() {
@@ -166,8 +195,21 @@ export default function NodesPage() {
     setDeleteDrawerOpen(false);
   }
 
+  function openRename(node: Node) {
+    setRenameNode(node);
+    setRenameValue(node.name);
+  }
+
   const columns: ColumnType<Node>[] = [
-    { title: '名称', dataIndex: 'name' },
+    {
+      title: '名称',
+      render: (_: unknown, r) => (
+        <Space>
+          {r.name}
+          {r.source === 'AUTO' && <Tag color="geekblue" style={{ fontSize: 10 }}>AUTO</Tag>}
+        </Space>
+      ),
+    },
     {
       title: '协议',
       render: (_: unknown, r) => (
@@ -200,7 +242,7 @@ export default function NodesPage() {
     {
       title: '操作',
       render: (_: unknown, record) => (
-        <Space>
+        <Space wrap>
           <Button
             size="small"
             type="primary"
@@ -233,13 +275,33 @@ export default function NodesPage() {
           </Button>
           <Button
             size="small"
-            onClick={() => {
-              setEditTarget(record);
-              setModalOpen(true);
-            }}
+            icon={<EditOutlined />}
+            onClick={() => openRename(record)}
           >
-            编辑
+            重命名
           </Button>
+          {record.source === 'AUTO' ? (
+            <Popconfirm
+              title="重新生成凭证并重新部署？"
+              description="旧客户端配置将失效，需重新导入"
+              onConfirm={() => regenMutation.mutate(record.id)}
+              okText="确认"
+            >
+              <Button size="small" icon={<ReloadOutlined />} loading={regenMutation.isPending}>
+                更新凭证
+              </Button>
+            </Popconfirm>
+          ) : (
+            <Button
+              size="small"
+              onClick={() => {
+                setEditTarget(record);
+                setEditModalOpen(true);
+              }}
+            >
+              编辑
+            </Button>
+          )}
           <Popconfirm
             title="确认删除该节点？"
             description="将同步停止并移除代理服务器上的对应服务"
@@ -271,20 +333,53 @@ export default function NodesPage() {
       <PageHeader
         title="节点管理"
         addLabel="新增节点"
-        onAdd={() => { setEditTarget(null); setModalOpen(true); }}
+        onAdd={() => setPresetModalOpen(true)}
         extra={batchTestButton}
       />
       <Table rowKey="id" size="middle" loading={isLoading} dataSource={data} columns={columns} pagination={{ showTotal: (total) => `共 ${total} 条` }} />
 
-      <NodeFormModal
-        open={modalOpen}
-        initialValues={editTarget as Record<string, unknown> | null}
-        onClose={() => setModalOpen(false)}
+      <NodePresetModal
+        open={presetModalOpen}
+        onClose={() => setPresetModalOpen(false)}
         onSuccess={() => {
-          setModalOpen(false);
+          setPresetModalOpen(false);
           qc.invalidateQueries({ queryKey: ['nodes'] });
         }}
       />
+
+      <NodeFormModal
+        open={editModalOpen}
+        initialValues={editTarget as Record<string, unknown> | null}
+        onClose={() => setEditModalOpen(false)}
+        onSuccess={() => {
+          setEditModalOpen(false);
+          qc.invalidateQueries({ queryKey: ['nodes'] });
+        }}
+      />
+
+      <Modal
+        open={!!renameNode}
+        title="重命名节点"
+        onCancel={() => setRenameNode(null)}
+        onOk={() => {
+          if (renameNode && renameValue.trim()) {
+            renameMutation.mutate({ id: renameNode.id, name: renameValue.trim() });
+          }
+        }}
+        confirmLoading={renameMutation.isPending}
+      >
+        <Input
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          onPressEnter={() => {
+            if (renameNode && renameValue.trim()) {
+              renameMutation.mutate({ id: renameNode.id, name: renameValue.trim() });
+            }
+          }}
+          placeholder="节点名称"
+          style={{ marginTop: 8 }}
+        />
+      </Modal>
 
       <DeployDrawer
         open={drawerOpen}

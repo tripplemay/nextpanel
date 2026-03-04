@@ -12,15 +12,18 @@ import type {
   AuditLog,
   OperationLogEntry,
   OperationLogDetail,
+  CloudflareSetting,
   CreateServerDto,
   UpdateServerDto,
   CreateNodeDto,
   UpdateNodeDto,
+  CreateNodeFromPresetDto,
   CreatePipelineDto,
   UpdatePipelineDto,
   CreateTemplateDto,
   UpdateTemplateDto,
   CreateSubscriptionDto,
+  UpsertCloudflareSettingDto,
 } from '@/types/api';
 
 export const api = axios.create({
@@ -79,7 +82,10 @@ export const nodesApi = {
     api.get<Node[]>('/nodes', { params: serverId ? { serverId } : {} }),
   get: (id: string) => api.get<Node>(`/nodes/${id}`),
   create: (data: CreateNodeDto) => api.post<Node>('/nodes', data),
+  createFromPreset: (data: CreateNodeFromPresetDto) => api.post<Node>('/nodes/preset', data),
   update: (id: string, data: UpdateNodeDto) => api.patch<Node>(`/nodes/${id}`, data),
+  rename: (id: string, name: string) => api.patch<Node>(`/nodes/${id}/rename`, { name }),
+  regenerateCredentials: (id: string) => api.post<{ ok: boolean }>(`/nodes/${id}/regenerate-credentials`),
   delete: (id: string) => api.delete<void>(`/nodes/${id}`),
   credentials: (id: string) => api.get<Record<string, string>>(`/nodes/${id}/credentials`),
   deployLog: (id: string) => api.get<{ deployLog: string | null; version: number | null; createdAt: string | null }>(`/nodes/${id}/deploy-log`),
@@ -124,6 +130,13 @@ export const operationLogsApi = {
   getByCorrelationId: (correlationId: string) =>
     api.get<OperationLogDetail | null>(`/operation-logs/by-correlation/${correlationId}`),
   getLog: (logId: string) => api.get<OperationLogDetail>(`/operation-logs/${logId}`),
+};
+
+// ── Cloudflare ────────────────────────────────────────
+export const cloudflareApi = {
+  get: () => api.get<CloudflareSetting | null>('/cloudflare/settings'),
+  upsert: (data: UpsertCloudflareSettingDto) => api.put<CloudflareSetting>('/cloudflare/settings', data),
+  remove: () => api.delete<void>('/cloudflare/settings'),
 };
 
 // ── Pipelines (GitHub Actions deploy configs) ──────────

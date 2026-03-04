@@ -13,6 +13,7 @@ import {
   LogoutOutlined,
   UserOutlined,
   GithubOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/auth';
 
@@ -26,6 +27,7 @@ const menuItems = [
   { key: '/subscriptions', icon: <LinkOutlined />, label: '订阅管理' },
   { key: '/github-actions', icon: <GithubOutlined />, label: 'GitHub Actions' },
   { key: '/audit-logs', icon: <AuditOutlined />, label: '审计日志' },
+  { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {

@@ -27,6 +27,25 @@ export interface CreateNodeDto {
 
 export interface UpdateNodeDto extends Partial<Omit<CreateNodeDto, 'serverId'>> {}
 
+export interface CreateNodeFromPresetDto {
+  serverId: string;
+  name: string;
+  preset: string;
+}
+
+export interface CloudflareSetting {
+  domain: string;
+  zoneId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertCloudflareSettingDto {
+  apiToken: string;
+  zoneId: string;
+  domain: string;
+}
+
 export interface CreatePipelineDto {
   name: string;
   repoUrl: string;
