@@ -20,6 +20,11 @@ jobs:
           SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
         run: |
           sudo apt-get install -y sshpass
+          # 清空 src 目录，确保已从 git 删除的文件不残留在 VPS
+          sshpass -p "$SSH_PASSWORD" \
+            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=60 -p "$SSH_PORT" \
+            "$SSH_USER@$SSH_HOST" \
+            "rm -rf /opt/apps/nextpanel/apps/server/src /opt/apps/nextpanel/apps/web/src /opt/apps/nextpanel/apps/web/app /opt/apps/nextpanel/packages"
           tar czf - --exclude='.git' --exclude='node_modules' --exclude='.next' --exclude='dist' . | \
             sshpass -p "$SSH_PASSWORD" \
             ssh -o StrictHostKeyChecking=no -o ConnectTimeout=60 -p "$SSH_PORT" \
