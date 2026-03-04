@@ -10,8 +10,8 @@ import {
   InputNumber,
   Spin,
 } from 'antd';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { serversApi, templatesApi } from '@/lib/api';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { serversApi } from '@/lib/api';
 import type { CreateServerDto, UpdateServerDto, Server } from '@/types/api';
 
 const { Option } = Select;
@@ -53,12 +53,6 @@ export default function ServerFormModal({
   const isEdit = !!initialValues?.id;
   const [geoLoading, setGeoLoading] = useState(false);
   const [ipError, setIpError] = useState<string | undefined>(undefined);
-
-  const { data: templates = [] } = useQuery({
-    queryKey: ['templates'],
-    queryFn: () => templatesApi.list().then((r) => r.data),
-    enabled: open && !isEdit,
-  });
 
   useEffect(() => {
     if (open) {
@@ -130,20 +124,18 @@ export default function ServerFormModal({
 
   const mutation = useMutation({
     mutationFn: async (values: Record<string, unknown>) => {
-      const { templateIds: _tplIds, ...rest } = values as Record<string, unknown> & { templateIds?: string[] };
       const payload = {
-        ...rest,
-        tags: Array.isArray(rest.tags) ? rest.tags : [],
+        ...values,
+        tags: Array.isArray(values.tags) ? values.tags : [],
       };
       if (isEdit) {
         return serversApi.update(initialValues!.id as string, payload as UpdateServerDto);
       }
       return serversApi.create(payload as CreateServerDto);
     },
-    onSuccess: (res, values) => {
+    onSuccess: (res) => {
       message.success(isEdit ? '服务器已更新' : '服务器已添加');
-      const tplIds = (values as Record<string, unknown> & { templateIds?: string[] }).templateIds ?? [];
-      onSuccess(res.data as Server, tplIds);
+      onSuccess(res.data as Server, []);
     },
     onError: () => message.error('操作失败'),
   });
@@ -213,27 +205,6 @@ export default function ServerFormModal({
           <Form.Item name="notes" label="备注">
             <TextArea rows={2} />
           </Form.Item>
-          {!isEdit && (
-            <Form.Item
-              name="templateIds"
-              label="自动创建节点"
-              extra={
-                templates.length === 0
-                  ? '暂无模板，请先前往「节点模板」页面创建模板'
-                  : '创建服务器后自动安装 Agent 并按模板部署节点（可多选）'
-              }
-            >
-              <Select
-                mode="multiple"
-                placeholder="可选：选择模板自动部署节点"
-                allowClear
-                options={templates.map((t) => ({
-                  value: t.id,
-                  label: `${t.name}（${t.protocol}）`,
-                }))}
-              />
-            </Form.Item>
-          )}
         </Form>
       </Spin>
     </Modal>

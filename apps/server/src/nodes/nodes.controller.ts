@@ -138,13 +138,12 @@ export class NodesController {
     return this.nodesService.rename(id, name);
   }
 
-  @Post(':id/regenerate-credentials')
+  @Patch(':id/toggle')
   @Roles('ADMIN', 'OPERATOR')
   @Audit('UPDATE', 'node')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Regenerate credentials and redeploy' })
-  regenerateCredentials(@Param('id') id: string) {
-    return this.nodesService.regenerateCredentials(id);
+  @ApiOperation({ summary: 'Toggle node enabled state (start/stop service)' })
+  toggle(@Param('id') id: string) {
+    return this.nodesService.toggle(id);
   }
 
   @Get(':id/deploy-log')

@@ -6,13 +6,11 @@ import { Layout, Menu, Typography, Avatar, Dropdown, Space } from 'antd';
 import {
   CloudServerOutlined,
   NodeIndexOutlined,
-  FileTextOutlined,
   LinkOutlined,
   AuditOutlined,
   DashboardOutlined,
   LogoutOutlined,
   UserOutlined,
-  GithubOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/auth';
@@ -23,9 +21,7 @@ const { Text } = Typography;
 const menuItems = [
   { key: '/servers', icon: <CloudServerOutlined />, label: '服务器' },
   { key: '/nodes', icon: <NodeIndexOutlined />, label: '节点' },
-  { key: '/templates', icon: <FileTextOutlined />, label: '配置模板' },
   { key: '/subscriptions', icon: <LinkOutlined />, label: '订阅管理' },
-  { key: '/github-actions', icon: <GithubOutlined />, label: 'GitHub Actions' },
   { key: '/audit-logs', icon: <AuditOutlined />, label: '审计日志' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
 ];

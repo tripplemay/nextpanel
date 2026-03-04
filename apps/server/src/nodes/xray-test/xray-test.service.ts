@@ -51,10 +51,24 @@ export class XrayTestService {
       this.crypto.decrypt(node.credentialsEnc),
     ) as Record<string, string>;
 
+    let result: TestResult;
+
     // Hysteria2 is not supported by Xray — delegate to sing-box test
     if (node.protocol === 'HYSTERIA2') {
-      return this.withSemaphore(() =>
+      result = await this.withSemaphore(() =>
         this.singboxTest.testHysteria2({
+          host: node.server.ip,
+          port: node.listenPort,
+          domain: node.domain,
+          credentials,
+        }),
+      );
+    } else {
+      result = await this.withSemaphore(() =>
+        this.runTest({
+          protocol: node.protocol,
+          transport: node.transport,
+          tls: node.tls,
           host: node.server.ip,
           port: node.listenPort,
           domain: node.domain,
@@ -63,17 +77,20 @@ export class XrayTestService {
       );
     }
 
-    return this.withSemaphore(() =>
-      this.runTest({
-        protocol: node.protocol,
-        transport: node.transport,
-        tls: node.tls,
-        host: node.server.ip,
-        port: node.listenPort,
-        domain: node.domain,
-        credentials,
-      }),
-    );
+    // Persist result — fire-and-forget, never block the caller
+    this.prisma.node.update({
+      where: { id: nodeId },
+      data: {
+        lastReachable: result.reachable,
+        lastLatency: result.reachable ? result.latency : null,
+        lastTestedAt: new Date(result.testedAt),
+      },
+    }).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to persist test result for node ${nodeId}: ${msg}`);
+    });
+
+    return result;
   }
 
   // ── Semaphore ──────────────────────────────────────────────────────────────

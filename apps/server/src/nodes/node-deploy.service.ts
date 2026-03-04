@@ -362,6 +362,38 @@ export class NodeDeployService {
     }
   }
 
+  /** Start or stop the systemd service without touching config files */
+  async toggleService(nodeId: string, enable: boolean): Promise<void> {
+    const node = await this.prisma.node.findUnique({
+      where: { id: nodeId },
+      include: { server: true },
+    });
+    if (!node) throw new NotFoundException(`Node ${nodeId} not found`);
+
+    const sshAuth = this.crypto.decrypt(node.server.sshAuthEnc);
+    const serviceName = `nextpanel-${node.id}`;
+    const cmd = enable
+      ? `systemctl start ${serviceName}`
+      : `systemctl stop ${serviceName}`;
+
+    let ssh: NodeSSH | null = null;
+    try {
+      ssh = await connectSsh({
+        host: node.server.ip,
+        port: node.server.sshPort,
+        username: node.server.sshUser,
+        authType: node.server.sshAuthType as 'KEY' | 'PASSWORD',
+        auth: sshAuth,
+        readyTimeout: 10000,
+      });
+      await ssh.execCommand(cmd);
+      ssh.dispose();
+    } catch (err: unknown) {
+      ssh?.dispose();
+      throw err;
+    }
+  }
+
   // ── Auto-install ─────────────────────────────────────────────────────────
 
   /** Returns the resolved binary path on success, null on failure */

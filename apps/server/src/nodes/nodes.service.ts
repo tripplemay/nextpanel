@@ -181,37 +181,25 @@ export class NodesService {
     });
   }
 
-  /** Regenerate credentials and redeploy */
-  async regenerateCredentials(id: string) {
+  /** Toggle node enabled state: stop service if enabled, start if disabled */
+  async toggle(id: string) {
     const node = await this.prisma.node.findUnique({
       where: { id },
-      select: { id: true, protocol: true, tls: true },
+      select: { id: true, enabled: true },
     });
     if (!node) throw new NotFoundException(`Node ${id} not found`);
 
-    // Determine which preset generated this node by matching protocol+tls
-    const { PROTOCOL_PRESETS: presets, CREDENTIAL_GENERATORS: generators } = await import('./protocols/presets');
-    const presetKey = (Object.keys(presets) as (keyof typeof presets)[]).find(
-      (k) => presets[k].protocol === node.protocol && presets[k].tls === node.tls,
-    );
+    const nowEnabled = !node.enabled;
+    await this.nodeDeploy.toggleService(id, nowEnabled);
 
-    let newCreds: Record<string, string>;
-    if (presetKey) {
-      newCreds = generators[presetKey]();
-    } else {
-      // Fallback: generate fresh UUID/password based on protocol
-      newCreds = generateFallbackCredentials(node.protocol);
-    }
-
-    const credentialsEnc = this.crypto.encrypt(JSON.stringify(newCreds));
-    await this.prisma.node.update({ where: { id }, data: { credentialsEnc } });
-
-    this.nodeDeploy.deploy(id).catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Node ${id} redeploy after credential regeneration failed: ${msg}`);
+    return this.prisma.node.update({
+      where: { id },
+      data: {
+        enabled: nowEnabled,
+        status: nowEnabled ? 'RUNNING' : 'STOPPED',
+      },
+      select: this.safeSelect(),
     });
-
-    return { ok: true };
   }
 
   /** Build a single-node share URI (vmess://, vless://, etc.) */
@@ -321,6 +309,9 @@ export class NodesService {
       source: true,
       status: true,
       enabled: true,
+      lastReachable: true,
+      lastLatency: true,
+      lastTestedAt: true,
       createdAt: true,
       updatedAt: true,
     } as const;
@@ -332,18 +323,6 @@ export class NodesService {
  * PKCS8 DER for X25519: 48 bytes, raw key starts at offset 16.
  * SPKI  DER for X25519: 44 bytes, raw key starts at offset 12.
  */
-function generateFallbackCredentials(protocol: string): Record<string, string> {
-  switch (protocol) {
-    case 'VMESS':
-    case 'VLESS':
-      return { uuid: crypto.randomUUID() };
-    case 'SHADOWSOCKS':
-      return { password: crypto.randomBytes(32).toString('base64url').slice(0, 32), method: 'aes-256-gcm' };
-    default:
-      return { password: crypto.randomBytes(32).toString('base64url').slice(0, 32) };
-  }
-}
-
 function generateRealityKeys(): { realityPrivateKey: string; realityPublicKey: string } {
   const { privateKey, publicKey } = crypto.generateKeyPairSync('x25519');
   const privDer = privateKey.export({ type: 'pkcs8', format: 'der' }) as Buffer;

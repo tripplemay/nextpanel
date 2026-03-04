@@ -2,10 +2,7 @@ import axios from 'axios';
 import type {
   Server,
   Node,
-  Pipeline,
-  Template,
   Subscription,
-  GithubConfig,
   Metric,
   ConnectivityResult,
   PaginatedResponse,
@@ -18,10 +15,6 @@ import type {
   CreateNodeDto,
   UpdateNodeDto,
   CreateNodeFromPresetDto,
-  CreatePipelineDto,
-  UpdatePipelineDto,
-  CreateTemplateDto,
-  UpdateTemplateDto,
   CreateSubscriptionDto,
   UpsertCloudflareSettingDto,
 } from '@/types/api';
@@ -85,22 +78,13 @@ export const nodesApi = {
   createFromPreset: (data: CreateNodeFromPresetDto) => api.post<Node>('/nodes/preset', data),
   update: (id: string, data: UpdateNodeDto) => api.patch<Node>(`/nodes/${id}`, data),
   rename: (id: string, name: string) => api.patch<Node>(`/nodes/${id}/rename`, { name }),
-  regenerateCredentials: (id: string) => api.post<{ ok: boolean }>(`/nodes/${id}/regenerate-credentials`),
   delete: (id: string) => api.delete<void>(`/nodes/${id}`),
+  toggle: (id: string) => api.patch<Node>(`/nodes/${id}/toggle`),
   credentials: (id: string) => api.get<Record<string, string>>(`/nodes/${id}/credentials`),
   deployLog: (id: string) => api.get<{ deployLog: string | null; version: number | null; createdAt: string | null }>(`/nodes/${id}/deploy-log`),
   shareLink: (id: string) => api.get<{ uri: string | null }>(`/nodes/${id}/share`),
   test: (id: string) => api.post<ConnectivityResult>(`/nodes/${id}/test`),
   deploy: (id: string) => api.post<void>(`/nodes/${id}/deploy`),
-};
-
-// ── Templates ─────────────────────────────────────────
-export const templatesApi = {
-  list: () => api.get<Template[]>('/templates'),
-  get: (id: string) => api.get<Template>(`/templates/${id}`),
-  create: (data: CreateTemplateDto) => api.post<Template>('/templates', data),
-  update: (id: string, data: UpdateTemplateDto) => api.patch<Template>(`/templates/${id}`, data),
-  delete: (id: string) => api.delete<void>(`/templates/${id}`),
 };
 
 // ── Subscriptions ─────────────────────────────────────
@@ -138,14 +122,4 @@ export const cloudflareApi = {
   upsert: (data: UpsertCloudflareSettingDto) => api.put<CloudflareSetting>('/cloudflare/settings', data),
   remove: () => api.delete<void>('/cloudflare/settings'),
   verify: () => api.get<{ valid: boolean; zoneName?: string; zoneStatus?: string; message: string }>('/cloudflare/settings/verify'),
-};
-
-// ── Pipelines (GitHub Actions deploy configs) ──────────
-export const pipelinesApi = {
-  list: () => api.get<Pipeline[]>('/pipelines'),
-  get: (id: string) => api.get<Pipeline>(`/pipelines/${id}`),
-  create: (data: CreatePipelineDto) => api.post<Pipeline>('/pipelines', data),
-  update: (id: string, data: UpdatePipelineDto) => api.patch<Pipeline>(`/pipelines/${id}`, data),
-  delete: (id: string) => api.delete<void>(`/pipelines/${id}`),
-  githubConfig: (id: string) => api.get<GithubConfig>(`/pipelines/${id}/github-config`),
 };

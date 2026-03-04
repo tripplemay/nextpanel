@@ -46,30 +46,6 @@ export interface UpsertCloudflareSettingDto {
   domain: string;
 }
 
-export interface CreatePipelineDto {
-  name: string;
-  repoUrl: string;
-  branch: string;
-  workDir: string;
-  buildCommands: string[];
-  deployCommands: string[];
-  serverIds: string[];
-  githubToken?: string;
-  enabled?: boolean;
-}
-
-export interface UpdatePipelineDto extends Partial<CreatePipelineDto> {}
-
-export interface CreateTemplateDto {
-  name: string;
-  protocol: string;
-  implementation?: string;
-  content: string;
-  variables?: string[];
-}
-
-export interface UpdateTemplateDto extends Partial<CreateTemplateDto> {}
-
 export interface CreateSubscriptionDto {
   name: string;
   nodeIds: string[];
@@ -116,33 +92,11 @@ export interface Node {
   source: 'MANUAL' | 'AUTO';
   status: string;
   enabled: boolean;
+  lastReachable: boolean | null;
+  lastLatency: number | null;
+  lastTestedAt: string | null;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface Pipeline {
-  id: string;
-  name: string;
-  repoUrl: string;
-  branch: string;
-  workDir: string;
-  buildCommands: string[];
-  deployCommands: string[];
-  serverIds: string[];
-  enabled: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface Template {
-  id: string;
-  name: string;
-  protocol: string;
-  implementation: string | null;
-  content: string;
-  variables: string[];
-  createdAt: string;
-  createdBy: { username: string };
 }
 
 export interface Subscription {
@@ -174,17 +128,6 @@ export interface Metric {
   networkIn: number;
   networkOut: number;
   timestamp: string;
-}
-
-export interface GithubSecret {
-  name: string;
-  value: string;
-  description: string;
-}
-
-export interface GithubConfig {
-  yaml: string;
-  secrets: GithubSecret[];
 }
 
 export interface PaginatedResponse<T> {

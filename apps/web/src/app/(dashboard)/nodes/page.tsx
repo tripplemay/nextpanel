@@ -1,12 +1,11 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { App, Button, Table, Tag, Space, Popconfirm, Card, Spin, Modal, Input } from 'antd';
-import { ApiOutlined, CloudUploadOutlined, ShareAltOutlined, FileTextOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons';
+import { App, Button, Table, Tag, Space, Card, Spin, Modal, Input, Switch, Dropdown, Typography } from 'antd';
+import { ApiOutlined, ShareAltOutlined, FileTextOutlined, EditOutlined, CloudUploadOutlined, EllipsisOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { nodesApi } from '@/lib/api';
 import NodePresetModal from '@/components/nodes/NodePresetModal';
-import NodeFormModal from '@/components/nodes/NodeFormModal';
 import DeployDrawer from '@/components/nodes/DeployDrawer';
 import NodeShareModal from '@/components/nodes/NodeShareModal';
 import DeployLogModal from '@/components/nodes/DeployLogModal';
@@ -16,14 +15,23 @@ import { useDeployStream } from '@/hooks/useDeployStream';
 import type { Node, ConnectivityResult } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
+function formatTimeAgo(isoString: string | null): string {
+  if (!isoString) return '';
+  const diff = Date.now() - new Date(isoString).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes}分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}小时前`;
+  return `${Math.floor(hours / 24)}天前`;
+}
+
 export default function NodesPage() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const qc = useQueryClient();
 
   // Modals
   const [presetModalOpen, setPresetModalOpen] = useState(false);
-  const [editTarget, setEditTarget] = useState<Node | null>(null);
-  const [editModalOpen, setEditModalOpen] = useState(false);
 
   // Rename modal
   const [renameNode, setRenameNode] = useState<Node | null>(null);
@@ -39,8 +47,9 @@ export default function NodesPage() {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [shareNode, setShareNode] = useState<Node | null>(null);
   const [logNode, setLogNode] = useState<Node | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
-  // Connectivity test results keyed by node id
+  // Connectivity test results keyed by node id (in-session overrides persisted data)
   const [testResults, setTestResults] = useState<Record<string, ConnectivityResult>>({});
   const [batchTesting, setBatchTesting] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
@@ -71,6 +80,8 @@ export default function NodesPage() {
       setTestResults((prev) => ({ ...prev, [id]: res }));
       if (res.reachable) message.success(res.message);
       else message.error(res.message);
+      // Refresh to pick up persisted lastTestedAt
+      qc.invalidateQueries({ queryKey: ['nodes'] });
     },
     onError: () => message.error('测试请求失败'),
     onSettled: () => setTestingId(null),
@@ -87,10 +98,16 @@ export default function NodesPage() {
     onError: () => message.error('重命名失败'),
   });
 
-  const regenMutation = useMutation({
-    mutationFn: (id: string) => nodesApi.regenerateCredentials(id).then((r) => r.data),
-    onSuccess: () => message.success('凭证已更新，节点重新部署中…'),
-    onError: () => message.error('更新凭证失败'),
+  const toggleMutation = useMutation({
+    mutationFn: (id: string) => {
+      setTogglingId(id);
+      return nodesApi.toggle(id).then((r) => r.data);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['nodes'] });
+    },
+    onError: () => message.error('切换节点状态失败'),
+    onSettled: () => setTogglingId(null),
   });
 
   async function startBatchTest() {
@@ -151,6 +168,7 @@ export default function NodesPage() {
               setBatchProgress((prev) => prev ? { ...prev, done: prev.done + 1 } : null);
             } else if (event.type === 'done') {
               void message.success(`批量测试完成，共 ${event.total as number} 个节点`);
+              qc.invalidateQueries({ queryKey: ['nodes'] });
             }
           } catch {
             // ignore parse errors
@@ -203,17 +221,12 @@ export default function NodesPage() {
   const columns: ColumnType<Node>[] = [
     {
       title: '名称',
-      render: (_: unknown, r) => (
-        <Space>
-          {r.name}
-          {r.source === 'AUTO' && <Tag color="geekblue" style={{ fontSize: 10 }}>AUTO</Tag>}
-        </Space>
-      ),
+      dataIndex: 'name',
     },
     {
       title: '协议',
       render: (_: unknown, r) => (
-        <Space>
+        <Space size={4}>
           <Tag color="blue">{r.protocol}</Tag>
           {r.implementation && <Tag>{r.implementation}</Tag>}
           {r.transport && <Tag>{r.transport}</Tag>}
@@ -221,44 +234,72 @@ export default function NodesPage() {
         </Space>
       ),
     },
-    { title: '端口', dataIndex: 'listenPort' },
+    { title: '端口', dataIndex: 'listenPort', width: 80 },
     {
       title: '状态',
+      width: 90,
       render: (_: unknown, r) => <StatusTag status={r.status} enabled={r.enabled} />,
     },
     {
+      title: '启用',
+      width: 70,
+      render: (_: unknown, r) => (
+        <Switch
+          size="small"
+          checked={r.enabled}
+          loading={togglingId === r.id}
+          onChange={() => toggleMutation.mutate(r.id)}
+        />
+      ),
+    },
+    {
       title: '连通性',
-      width: 100,
+      width: 130,
       render: (_: unknown, r) => {
-        if (testingId === r.id || (batchTesting && !testResults[r.id])) {
-          return <Spin size="small" />;
+        // In-session test result takes priority over persisted data
+        const sessionResult = testResults[r.id];
+        const isTestingThis = testingId === r.id || (batchTesting && !sessionResult);
+
+        if (isTestingThis) return <Spin size="small" />;
+
+        if (sessionResult) {
+          if (sessionResult.reachable) {
+            return (
+              <Space size={4}>
+                <Tag color="green" style={{ marginRight: 0 }}>{sessionResult.latency}ms</Tag>
+                <Typography.Text type="secondary" style={{ fontSize: 11 }}>{formatTimeAgo(sessionResult.testedAt)}</Typography.Text>
+              </Space>
+            );
+          }
+          return <Tag color="red">失败</Tag>;
         }
-        const result = testResults[r.id];
-        if (!result) return <Tag>-</Tag>;
-        if (result.reachable) return <Tag color="green">{result.latency}ms</Tag>;
-        return <Tag color="red">失败</Tag>;
+
+        // Fall back to persisted data
+        if (r.lastTestedAt) {
+          if (r.lastReachable) {
+            return (
+              <Space size={4}>
+                <Tag color="green" style={{ marginRight: 0 }}>{r.lastLatency}ms</Tag>
+                <Typography.Text type="secondary" style={{ fontSize: 11 }}>{formatTimeAgo(r.lastTestedAt)}</Typography.Text>
+              </Space>
+            );
+          }
+          return (
+            <Space size={4}>
+              <Tag color="red" style={{ marginRight: 0 }}>失败</Tag>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>{formatTimeAgo(r.lastTestedAt)}</Typography.Text>
+            </Space>
+          );
+        }
+
+        return <Tag>未测试</Tag>;
       },
     },
     {
       title: '操作',
+      width: 160,
       render: (_: unknown, record) => (
-        <Space wrap>
-          <Button
-            size="small"
-            type="primary"
-            icon={<CloudUploadOutlined />}
-            onClick={() => openDeploy(record)}
-          >
-            部署
-          </Button>
-          <Button
-            size="small"
-            icon={<ApiOutlined />}
-            loading={testingId === record.id}
-            onClick={() => testMutation.mutate(record.id)}
-          >
-            测试
-          </Button>
+        <Space size={4}>
           <Button
             size="small"
             icon={<ShareAltOutlined />}
@@ -268,49 +309,56 @@ export default function NodesPage() {
           </Button>
           <Button
             size="small"
-            icon={<FileTextOutlined />}
-            onClick={() => setLogNode(record)}
+            icon={<ApiOutlined />}
+            loading={testingId === record.id}
+            onClick={() => testMutation.mutate(record.id)}
           >
-            日志
+            测试
           </Button>
-          <Button
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => openRename(record)}
+          <Dropdown
+            menu={{
+              items: [
+                {
+                  key: 'deploy',
+                  icon: <CloudUploadOutlined />,
+                  label: '部署',
+                  onClick: () => openDeploy(record),
+                },
+                {
+                  key: 'log',
+                  icon: <FileTextOutlined />,
+                  label: '日志',
+                  onClick: () => setLogNode(record),
+                },
+                {
+                  key: 'rename',
+                  icon: <EditOutlined />,
+                  label: '重命名',
+                  onClick: () => openRename(record),
+                },
+                { type: 'divider' },
+                {
+                  key: 'delete',
+                  icon: <DeleteOutlined />,
+                  label: '删除',
+                  danger: true,
+                  onClick: () => {
+                    modal.confirm({
+                      title: '确认删除该节点？',
+                      content: '将同步停止并移除代理服务器上的对应服务',
+                      okText: '删除',
+                      okType: 'danger',
+                      cancelText: '取消',
+                      onOk: () => openDelete(record),
+                    });
+                  },
+                },
+              ],
+            }}
+            trigger={['click']}
           >
-            重命名
-          </Button>
-          {record.source === 'AUTO' ? (
-            <Popconfirm
-              title="重新生成凭证并重新部署？"
-              description="旧客户端配置将失效，需重新导入"
-              onConfirm={() => regenMutation.mutate(record.id)}
-              okText="确认"
-            >
-              <Button size="small" icon={<ReloadOutlined />} loading={regenMutation.isPending}>
-                更新凭证
-              </Button>
-            </Popconfirm>
-          ) : (
-            <Button
-              size="small"
-              onClick={() => {
-                setEditTarget(record);
-                setEditModalOpen(true);
-              }}
-            >
-              编辑
-            </Button>
-          )}
-          <Popconfirm
-            title="确认删除该节点？"
-            description="将同步停止并移除代理服务器上的对应服务"
-            onConfirm={() => openDelete(record)}
-            okText="删除"
-            okType="danger"
-          >
-            <Button size="small" danger>删除</Button>
-          </Popconfirm>
+            <Button size="small" icon={<EllipsisOutlined />} />
+          </Dropdown>
         </Space>
       ),
     },
@@ -345,16 +393,6 @@ export default function NodesPage() {
           setPresetModalOpen(false);
           qc.invalidateQueries({ queryKey: ['nodes'] });
           openDeploy(node);
-        }}
-      />
-
-      <NodeFormModal
-        open={editModalOpen}
-        initialValues={editTarget as Record<string, unknown> | null}
-        onClose={() => setEditModalOpen(false)}
-        onSuccess={() => {
-          setEditModalOpen(false);
-          qc.invalidateQueries({ queryKey: ['nodes'] });
         }}
       />
 
