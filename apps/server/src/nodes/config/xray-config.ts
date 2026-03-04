@@ -1,4 +1,5 @@
 import type { NodeInfo, NodeCredentials } from './config-generator';
+import { REALITY_DEFAULT_SNI, REALITY_FLOW } from '../protocols/reality';
 
 // ─── Xray / V2Ray ────────────────────────────────────────────────────────────
 
@@ -41,7 +42,7 @@ function xraySettings(protocol: string, creds: NodeCredentials, tls?: string): u
       return { clients: [{ id: creds.uuid ?? '', alterId: 0 }] };
     case 'VLESS':
       return {
-        clients: [{ id: creds.uuid ?? '', flow: tls === 'REALITY' ? 'xtls-rprx-vision' : '' }],
+        clients: [{ id: creds.uuid ?? '', flow: tls === 'REALITY' ? REALITY_FLOW : '' }],
         decryption: 'none',
       };
     case 'TROJAN':
@@ -95,8 +96,8 @@ function xrayStreamSettings(
   } else if (tls === 'REALITY') {
     base.security = 'reality';
     base.realitySettings = {
-      dest: `${domain ?? 'www.google.com'}:443`,
-      serverNames: [domain ?? 'www.google.com'],
+      dest: `${domain ?? REALITY_DEFAULT_SNI}:443`,
+      serverNames: [domain ?? REALITY_DEFAULT_SNI],
       privateKey: creds.realityPrivateKey ?? '',
       shortIds: [''],
     };

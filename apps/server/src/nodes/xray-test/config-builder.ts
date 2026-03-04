@@ -9,6 +9,8 @@
  * the node can actually proxy traffic through the GFW.
  */
 
+import { REALITY_DEFAULT_SNI, REALITY_FLOW } from '../protocols/reality';
+
 export interface NodeTestInfo {
   protocol: string;      // VMESS | VLESS | TROJAN | SHADOWSOCKS
   transport: string | null;
@@ -87,7 +89,7 @@ function clientSettings(node: NodeTestInfo): unknown {
                 id: c.uuid ?? '',
                 encryption: 'none',
                 // vision flow required for REALITY
-                flow: tls === 'REALITY' ? 'xtls-rprx-vision' : '',
+                flow: tls === 'REALITY' ? REALITY_FLOW : '',
               },
             ],
           },
@@ -141,7 +143,7 @@ function clientStreamSettings(node: NodeTestInfo): unknown {
   } else if (tls === 'REALITY') {
     base.security = 'reality';
     base.realitySettings = {
-      serverName: domain ?? 'www.google.com',
+      serverName: domain ?? REALITY_DEFAULT_SNI,
       fingerprint: 'chrome',
       publicKey: c.realityPublicKey ?? '',
       shortId: '',

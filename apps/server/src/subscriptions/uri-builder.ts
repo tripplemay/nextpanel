@@ -14,8 +14,7 @@ export interface NodeExportInfo {
   credentials: Record<string, string>;
 }
 
-/** Default SNI used by the Xray server when no domain is configured (must match xray-config.ts). */
-const REALITY_DEFAULT_SNI = 'www.google.com';
+import { REALITY_DEFAULT_SNI, REALITY_FLOW } from '../nodes/protocols/reality';
 
 // ─── Share URI (vmess://, vless://, etc.) ────────────────────────────────────
 
@@ -46,7 +45,7 @@ export function buildShareUri(node: NodeExportInfo): string | null {
 
     case 'VLESS': {
       const params = new URLSearchParams({ encryption: 'none' });
-      if (tls === 'REALITY') params.set('flow', 'xtls-rprx-vision');
+      if (tls === 'REALITY') params.set('flow', REALITY_FLOW);
       addTransportParams(params, net, domain);
       addTlsParams(params, tls, domain, creds);
       return `vless://${creds.uuid ?? ''}@${host}:${port}?${params.toString()}#${tag}`;
@@ -127,7 +126,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       add('port', port);
       add('uuid', creds.uuid ?? '');
       add('network', net);
-      if (tls === 'REALITY') add('flow', 'xtls-rprx-vision');
+      if (tls === 'REALITY') add('flow', REALITY_FLOW);
       if (tlsEnabled) add('tls', true);
       if (sni) add('servername', sni);
       if (net === 'ws') {
@@ -225,7 +224,7 @@ export function buildSingboxOutbound(node: NodeExportInfo): Record<string, unkno
         server: host,
         server_port: port,
         uuid: creds.uuid ?? '',
-        ...(tls === 'REALITY' ? { flow: 'xtls-rprx-vision' } : {}),
+        ...(tls === 'REALITY' ? { flow: REALITY_FLOW } : {}),
         ...(transportObj ? { transport: transportObj } : {}),
         ...(tlsObj ? { tls: tlsObj } : {}),
       };

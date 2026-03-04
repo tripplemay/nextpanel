@@ -83,6 +83,21 @@ describe('generateXrayConfig – inbound settings', () => {
     expect(cfg.inbounds[0].settings.decryption).toBe('none');
   });
 
+  it('VLESS+REALITY 服务端 client 必须包含 flow:xtls-rprx-vision', () => {
+    const cfg = parse({ ...baseNode, protocol: 'VLESS', tls: 'REALITY' });
+    expect(cfg.inbounds[0].settings.clients[0].flow).toBe('xtls-rprx-vision');
+  });
+
+  it('VLESS+TLS 服务端 client flow 为空字符串', () => {
+    const cfg = parse({ ...baseNode, protocol: 'VLESS', tls: 'TLS' });
+    expect(cfg.inbounds[0].settings.clients[0].flow).toBe('');
+  });
+
+  it('VLESS+NONE 服务端 client flow 为空字符串', () => {
+    const cfg = parse({ ...baseNode, protocol: 'VLESS', tls: 'NONE' });
+    expect(cfg.inbounds[0].settings.clients[0].flow).toBe('');
+  });
+
   it('TROJAN includes password in clients', () => {
     const cfg = parse({ ...baseNode, protocol: 'TROJAN' });
     expect(cfg.inbounds[0].settings.clients[0].password).toBe('secret');
