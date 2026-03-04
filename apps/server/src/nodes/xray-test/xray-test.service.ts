@@ -6,6 +6,7 @@ import { execFile } from 'child_process';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
+import { SingboxTestService } from '../singbox-test/singbox-test.service';
 import { buildXrayClientConfig } from './config-builder';
 
 export interface TestResult {
@@ -36,6 +37,7 @@ export class XrayTestService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly crypto: CryptoService,
+    private readonly singboxTest: SingboxTestService,
   ) {}
 
   async testNode(nodeId: string): Promise<TestResult> {
@@ -48,6 +50,18 @@ export class XrayTestService {
     const credentials = JSON.parse(
       this.crypto.decrypt(node.credentialsEnc),
     ) as Record<string, string>;
+
+    // Hysteria2 is not supported by Xray — delegate to sing-box test
+    if (node.protocol === 'HYSTERIA2') {
+      return this.withSemaphore(() =>
+        this.singboxTest.testHysteria2({
+          host: node.server.ip,
+          port: node.listenPort,
+          domain: node.domain,
+          credentials,
+        }),
+      );
+    }
 
     return this.withSemaphore(() =>
       this.runTest({
