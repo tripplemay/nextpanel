@@ -4,6 +4,135 @@
 
 ---
 
+## [未发布] — 2026-03-04（二）
+
+### 修复：开发/生产数据库隔离
+
+#### 问题
+
+本地开发和生产环境均连接旧库 `nextpanel`，数据未隔离——本地操作直接影响生产数据。
+
+#### 修复
+
+- 为 `nextpanel_dev_user` 和 `nextpanel_prod_user` 重置密码
+- 将旧库 `nextpanel` 数据完整迁移至 `nextpanel_prod` 和 `nextpanel_dev`
+- 更新生产 `.env`：`DATABASE_URL` 指向 `nextpanel_prod`，重启 PM2
+- 更新本地 `.env`：`DATABASE_URL` 指向 `nextpanel_dev`（经 SSH 隧道 5433）
+- 旧库 `nextpanel` 保留为备份，不再使用
+
+---
+
+## [未发布] — 2026-03-04
+
+### 节点连通性测试全面升级：TCP 检测 → Xray 端到端代理验证
+
+#### 背景
+
+原有测试仅做 TCP 端口连通检测（`net.createConnection`），只能确认端口"开着"，无法验证 Xray/sing-box 进程是否正常、协议握手是否成功、代理是否真的能让用户翻墙。本次将测试升级为端到端（E2E）验证：在面板服务器本地启动 Xray 客户端，通过 SOCKS5 代理发起真实 HTTP 请求，以 HTTP 204 响应为成功标准。
+
+---
+
+#### 一、CI/CD — 自动部署 Xray 测试客户端
+
+**文件：`.github/workflows/deploy.yml`**
+
+- 在"每次部署都执行"阶段新增幂等 Xray 安装步骤：
+  - 检测 `xray` 命令是否已存在，不重复安装
+  - 自动识别服务器架构（`x86_64` / `aarch64`），下载对应预编译包
+  - 安装至 `/usr/local/bin/xray` 并验证版本
+- 本地开发环境：通过 `brew install xray` 安装（`/opt/homebrew/bin/xray`）
+
+---
+
+#### 二、后端 — Xray 测试服务（新增模块）
+
+**新文件：`apps/server/src/nodes/xray-test/config-builder.ts`**
+
+构建 Xray 客户端配置的纯函数模块，支持全部协议组合：
+
+| 协议 | 传输方式 | TLS 模式 |
+|------|---------|---------|
+| VLESS、VMess、Trojan、Shadowsocks | TCP、WebSocket、gRPC | NONE、TLS（allowInsecure）、REALITY |
+
+- VLESS + REALITY 自动添加 `xtls-rprx-vision` flow
+- REALITY 从节点凭证中读取 `realityPublicKey`，使用 `chrome` 指纹
+
+**新文件：`apps/server/src/nodes/xray-test/xray-test.service.ts`**
+
+核心测试服务，完整流程：
+
+1. **信号量**：最多 5 个 Xray 进程并发，超出排队等待
+2. **端口分配**：随机选取 20000–29999 范围内的可用 TCP 端口
+3. **配置生成**：调用 `buildXrayClientConfig`，写入 `/tmp/xray-test-<uuid>.json`
+4. **启动 Xray**：`spawn` 子进程，`stdio: ignore`，异常写入日志
+5. **等待就绪**：每 100ms 轮询 SOCKS5 端口，最长等待 1500ms
+6. **curl 测试**：`curl --socks5-hostname 127.0.0.1:<port>` 访问 `http://www.gstatic.com/generate_204`，判断响应码是否为 204，记录延迟
+7. **清理**：`finally` 块 `SIGKILL` 进程 + 删除临时配置文件
+
+返回结构：`{ reachable, latency, message, testedAt }`
+
+---
+
+#### 三、后端 — 接口改造
+
+**`apps/server/src/nodes/nodes.module.ts`**
+
+- 注册 `XrayTestService` 为 providers
+
+**`apps/server/src/nodes/nodes.service.ts`**
+
+- 删除基于 `net.createConnection` 的旧 `testConnectivity()` 方法及 `net` 模块引入
+
+**`apps/server/src/nodes/nodes.controller.ts`**
+
+- `POST /api/nodes/:id/test`：改为调用 `XrayTestService.testNode()`，接口描述更新为"端到端代理验证"
+- 新增 `GET /api/nodes/test-all`（SSE）：
+  - 可选 query 参数 `ids`（逗号分隔节点 ID），省略时测试全部节点
+  - 事件格式：`{ type: 'result', nodeId, reachable, latency, message, testedAt }` 和 `{ type: 'done', total }`
+  - 所有节点测试并发启动，结果实时流式推送，顺序由哪个先完成决定
+
+**`apps/server/src/nodes/nodes.service.spec.ts`**
+
+- 移除已废弃的 `testConnectivity` 测试块及 `net` mock
+
+---
+
+#### 四、前端 — 批量测试 UI
+
+**`apps/web/src/types/api.ts`**
+
+- `ConnectivityResult` 新增 `testedAt: string` 字段
+
+**`apps/web/src/app/(dashboard)/nodes/page.tsx`**
+
+- 表格新增"**连通性**"列：
+  - 未测试：灰色 `—`
+  - 测试中：`<Spin size="small" />`
+  - 成功：绿色 Tag 显示延迟，如 `204ms`
+  - 失败：红色 Tag `失败`
+- 头部新增"**批量测试**"按钮：
+  - 点击启动 SSE 连接至 `/api/nodes/test-all`
+  - 按钮文案实时更新为进度，如 `测试中 3/10`
+  - 完成后提示"批量测试完成，共 N 个节点"
+- 单节点"测试"按钮结果也写入连通性列，与批量共享同一状态
+- SSE 流使用与 `useDeployStream` 相同的 `fetch` + `Authorization` header 模式
+
+---
+
+#### 五、错误提示优化
+
+将 curl 原始错误（`Command failed: curl ...`）映射为可读消息：
+
+| curl 退出码 | 显示文案 |
+|------------|---------|
+| 7 | 节点不可达（代理连接被拒绝或认证失败） |
+| 28 | 连接超时（节点无响应） |
+| 97 | SOCKS5 代理不可用（Xray 异常退出） |
+| 56 | 代理连接被重置 |
+| string | curl 启动失败（ENOENT 等） |
+
+---
+
 ## [未发布] — 2026-03-02（二）
 
 ### 前端视觉统一与布局间距优化

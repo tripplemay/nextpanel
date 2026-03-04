@@ -23,6 +23,7 @@ import { Audit } from '../common/decorators/audit.decorator';
 import { AuditService } from '../audit/audit.service';
 import { NodesService } from './nodes.service';
 import { NodeDeployService } from './node-deploy.service';
+import { XrayTestService } from './xray-test/xray-test.service';
 import { CreateNodeDto } from './dto/create-node.dto';
 import { UpdateNodeDto } from './dto/update-node.dto';
 
@@ -34,6 +35,7 @@ export class NodesController {
   constructor(
     private nodesService: NodesService,
     private nodeDeploy: NodeDeployService,
+    private xrayTest: XrayTestService,
     private auditService: AuditService,
   ) {}
 
@@ -50,6 +52,56 @@ export class NodesController {
   @ApiOperation({ summary: 'List nodes, optionally filter by serverId' })
   findAll(@Query('serverId') serverId?: string) {
     return this.nodesService.findAll(serverId);
+  }
+
+  @Sse('test-all')
+  @Roles('ADMIN', 'OPERATOR')
+  @ApiQuery({ name: 'ids', required: false, description: 'Comma-separated node IDs. Omit to test all nodes.' })
+  @ApiOperation({ summary: 'Batch-test nodes via Xray and stream results as SSE' })
+  testAllStream(@Query('ids') ids?: string): Observable<MessageEvent> {
+    return new Observable((subscriber) => {
+      const run = async () => {
+        let nodeIds: string[];
+        if (ids) {
+          nodeIds = ids.split(',').filter(Boolean);
+        } else {
+          const nodes = await this.nodesService.findAll();
+          nodeIds = nodes.map((n) => n.id);
+        }
+
+        if (nodeIds.length === 0) {
+          subscriber.next({ data: JSON.stringify({ type: 'done', total: 0 }) } as MessageEvent);
+          subscriber.complete();
+          return;
+        }
+
+        let completed = 0;
+        const total = nodeIds.length;
+
+        await Promise.allSettled(
+          nodeIds.map(async (nodeId) => {
+            let result: { reachable: boolean; latency: number; message: string; testedAt: string };
+            try {
+              result = await this.xrayTest.testNode(nodeId);
+            } catch (err) {
+              result = {
+                reachable: false,
+                latency: -1,
+                message: err instanceof Error ? err.message : String(err),
+                testedAt: new Date().toISOString(),
+              };
+            }
+            subscriber.next({ data: JSON.stringify({ type: 'result', nodeId, ...result }) } as MessageEvent);
+            if (++completed === total) {
+              subscriber.next({ data: JSON.stringify({ type: 'done', total }) } as MessageEvent);
+              subscriber.complete();
+            }
+          }),
+        );
+      };
+
+      run().catch((err) => subscriber.error(err));
+    });
   }
 
   @Get(':id')
@@ -93,9 +145,9 @@ export class NodesController {
 
   @Post(':id/test')
   @Roles('ADMIN', 'OPERATOR')
-  @ApiOperation({ summary: 'Test node TCP connectivity' })
-  testConnectivity(@Param('id') id: string) {
-    return this.nodesService.testConnectivity(id);
+  @ApiOperation({ summary: 'Test node proxy connectivity via Xray (end-to-end)' })
+  testNode(@Param('id') id: string) {
+    return this.xrayTest.testNode(id);
   }
 
   @Post(':id/deploy')

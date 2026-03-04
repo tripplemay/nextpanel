@@ -1,12 +1,9 @@
-import * as net from 'net';
 import { NodesService } from './nodes.service';
 import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { NodeDeployService } from './node-deploy.service';
 import { NotFoundException } from '@nestjs/common';
 import type { CreateNodeDto } from './dto/create-node.dto';
-
-jest.mock('net');
 
 const mockPrisma = {
   node: {
@@ -151,78 +148,6 @@ describe('NodesService', () => {
 
       await expect(svc.remove('node-1')).rejects.toThrow('undeploy fail');
       expect(mockPrisma.node.delete).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('testConnectivity', () => {
-    function makeMockSocket(event: 'connect' | 'error' | 'timeout') {
-      const handlers: Record<string, (arg?: unknown) => void> = {};
-      const socket = {
-        setTimeout: jest.fn(),
-        destroy: jest.fn(),
-        once: jest.fn((ev: string, cb: (arg?: unknown) => void) => {
-          handlers[ev] = cb;
-        }),
-      };
-      // Trigger the event after setup
-      setImmediate(() => {
-        if (event === 'timeout') {
-          handlers['timeout']?.();
-        } else if (event === 'error') {
-          handlers['error']?.(new Error('ECONNREFUSED'));
-        } else {
-          handlers['connect']?.();
-        }
-      });
-      return socket;
-    }
-
-    beforeEach(() => {
-      jest.clearAllMocks();
-      (mockDeploy.deploy as jest.Mock).mockResolvedValue({ success: true, log: '' });
-      (mockDeploy.undeploy as jest.Mock).mockResolvedValue(undefined);
-    });
-
-    it('returns reachable=true on successful connection', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({
-        ...fakeNode, listenPort: 10086, server: { ip: '1.2.3.4' },
-      });
-      (net.createConnection as jest.Mock).mockReturnValue(makeMockSocket('connect'));
-
-      const result = await svc.testConnectivity('node-1');
-
-      expect(result.reachable).toBe(true);
-      expect(result.latency).toBeGreaterThanOrEqual(0);
-    });
-
-    it('returns reachable=false on connection error', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({
-        ...fakeNode, listenPort: 10086, server: { ip: '1.2.3.4' },
-      });
-      (net.createConnection as jest.Mock).mockReturnValue(makeMockSocket('error'));
-
-      const result = await svc.testConnectivity('node-1');
-
-      expect(result.reachable).toBe(false);
-      expect(result.message).toBe('ECONNREFUSED');
-    });
-
-    it('returns reachable=false on timeout', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({
-        ...fakeNode, listenPort: 10086, server: { ip: '1.2.3.4' },
-      });
-      (net.createConnection as jest.Mock).mockReturnValue(makeMockSocket('timeout'));
-
-      const result = await svc.testConnectivity('node-1');
-
-      expect(result.reachable).toBe(false);
-      expect(result.message).toContain('超时');
-    });
-
-    it('throws NotFoundException when node is missing', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(null);
-
-      await expect(svc.testConnectivity('bad')).rejects.toThrow(NotFoundException);
     });
   });
 

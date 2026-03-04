@@ -1,4 +1,3 @@
-import * as net from 'net';
 import * as crypto from 'crypto';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
@@ -113,37 +112,6 @@ export class NodesService {
       throw err;
     });
     return this.prisma.node.delete({ where: { id } });
-  }
-
-  async testConnectivity(id: string): Promise<{ reachable: boolean; latency: number; message: string }> {
-    const node = await this.prisma.node.findUnique({
-      where: { id },
-      include: { server: { select: { ip: true } } },
-    });
-    if (!node) throw new NotFoundException(`Node ${id} not found`);
-
-    const host = node.server.ip;
-    const port = node.listenPort;
-    const start = Date.now();
-
-    return new Promise((resolve) => {
-      const socket = net.createConnection({ host, port });
-      socket.setTimeout(5000);
-
-      socket.once('connect', () => {
-        const latency = Date.now() - start;
-        socket.destroy();
-        resolve({ reachable: true, latency, message: `连接成功，延迟 ${latency}ms` });
-      });
-
-      const fail = (err: Error) => {
-        socket.destroy();
-        resolve({ reachable: false, latency: -1, message: err.message });
-      };
-
-      socket.once('error', fail);
-      socket.once('timeout', () => fail(new Error('连接超时（5s）')));
-    });
   }
 
   /** Build a single-node share URI (vmess://, vless://, etc.) */

@@ -101,6 +101,19 @@ jobs:
             # 先停服务，释放内存供构建使用
             pm2 stop all 2>/dev/null || true
 
+            # ── 安装/检测 Xray（节点连通性测试客户端，幂等）────────────────
+            if ! command -v xray &>/dev/null; then
+              echo ">>> 安装 Xray 测试客户端..."
+              apt-get install -y unzip 2>/dev/null || true
+              ARCH=$(uname -m | sed 's/x86_64/64/;s/aarch64/arm64-v8a/')
+              curl -fL "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${ARCH}.zip" \
+                -o /tmp/xray.zip
+              unzip -o /tmp/xray.zip xray -d /usr/local/bin/
+              chmod +x /usr/local/bin/xray
+              rm /tmp/xray.zip
+              echo ">>> Xray installed: $(xray version | head -1)"
+            fi
+
             cd $APP_DIR
             pnpm install
             cd $APP_DIR/apps/server && pnpm exec prisma generate && cd $APP_DIR

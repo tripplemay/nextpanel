@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { App, Button, Table, Tag, Space, Popconfirm, Card, Modal, Typography } from 'antd';
+import { useRef, useState } from 'react';
+import { App, Button, Table, Tag, Space, Popconfirm, Card, Spin } from 'antd';
 import { ApiOutlined, CloudUploadOutlined, ShareAltOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { nodesApi } from '@/lib/api';
@@ -12,7 +12,7 @@ import DeployLogModal from '@/components/nodes/DeployLogModal';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
 import { useDeployStream } from '@/hooks/useDeployStream';
-import type { Node } from '@/types/api';
+import type { Node, ConnectivityResult } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
 export default function NodesPage() {
@@ -27,6 +27,12 @@ export default function NodesPage() {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [shareNode, setShareNode] = useState<Node | null>(null);
   const [logNode, setLogNode] = useState<Node | null>(null);
+
+  // Connectivity test results keyed by node id
+  const [testResults, setTestResults] = useState<Record<string, ConnectivityResult>>({});
+  const [batchTesting, setBatchTesting] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
+  const abortBatchRef = useRef<AbortController | null>(null);
 
   const { logLines, deployStatus, startStream, abort, reset } = useDeployStream();
   const {
@@ -49,13 +55,88 @@ export default function NodesPage() {
       setTestingId(id);
       return nodesApi.test(id).then((r) => r.data);
     },
-    onSuccess: (res) => {
+    onSuccess: (res, id) => {
+      setTestResults((prev) => ({ ...prev, [id]: res }));
       if (res.reachable) message.success(res.message);
       else message.error(res.message);
     },
     onError: () => message.error('测试请求失败'),
     onSettled: () => setTestingId(null),
   });
+
+  async function startBatchTest() {
+    if (batchTesting) {
+      abortBatchRef.current?.abort();
+      return;
+    }
+
+    const nodes = data ?? [];
+    if (nodes.length === 0) return;
+
+    setBatchTesting(true);
+    setBatchProgress({ done: 0, total: nodes.length });
+    setTestResults({});
+    abortBatchRef.current = new AbortController();
+
+    const token = typeof window !== 'undefined' ? (localStorage.getItem('access_token') ?? '') : '';
+
+    try {
+      const res = await fetch('/api/nodes/test-all', {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: abortBatchRef.current.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        void message.error('批量测试请求失败');
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split('\n\n');
+        buffer = chunks.pop() ?? '';
+
+        for (const chunk of chunks) {
+          const dataLine = chunk.split('\n').find((l) => l.startsWith('data:'));
+          if (!dataLine) continue;
+          try {
+            const event = JSON.parse(dataLine.slice(5).trim()) as Record<string, unknown>;
+            if (event.type === 'result') {
+              const nodeId = event.nodeId as string;
+              setTestResults((prev) => ({
+                ...prev,
+                [nodeId]: {
+                  reachable: event.reachable as boolean,
+                  latency: event.latency as number,
+                  message: event.message as string,
+                  testedAt: event.testedAt as string,
+                },
+              }));
+              setBatchProgress((prev) => prev ? { ...prev, done: prev.done + 1 } : null);
+            } else if (event.type === 'done') {
+              void message.success(`批量测试完成，共 ${event.total as number} 个节点`);
+            }
+          } catch {
+            // ignore parse errors
+          }
+        }
+      }
+    } catch (err: unknown) {
+      if ((err as Error).name !== 'AbortError') {
+        void message.error('批量测试连接中断');
+      }
+    } finally {
+      setBatchTesting(false);
+      setBatchProgress(null);
+    }
+  }
 
   function openDeploy(node: Node) {
     reset();
@@ -102,6 +183,19 @@ export default function NodesPage() {
     {
       title: '状态',
       render: (_: unknown, r) => <StatusTag status={r.status} enabled={r.enabled} />,
+    },
+    {
+      title: '连通性',
+      width: 100,
+      render: (_: unknown, r) => {
+        if (testingId === r.id || (batchTesting && !testResults[r.id])) {
+          return <Spin size="small" />;
+        }
+        const result = testResults[r.id];
+        if (!result) return <Tag>-</Tag>;
+        if (result.reachable) return <Tag color="green">{result.latency}ms</Tag>;
+        return <Tag color="red">失败</Tag>;
+      },
     },
     {
       title: '操作',
@@ -160,12 +254,25 @@ export default function NodesPage() {
     },
   ];
 
+  const batchTestButton = (
+    <Button
+      icon={<ApiOutlined />}
+      loading={batchTesting}
+      onClick={() => void startBatchTest()}
+    >
+      {batchTesting && batchProgress
+        ? `测试中 ${batchProgress.done}/${batchProgress.total}`
+        : '批量测试'}
+    </Button>
+  );
+
   return (
     <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
       <PageHeader
         title="节点管理"
         addLabel="新增节点"
         onAdd={() => { setEditTarget(null); setModalOpen(true); }}
+        extra={batchTestButton}
       />
       <Table rowKey="id" size="middle" loading={isLoading} dataSource={data} columns={columns} pagination={{ showTotal: (total) => `共 ${total} 条` }} />
 

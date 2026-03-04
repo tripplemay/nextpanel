@@ -179,6 +179,7 @@ export interface ConnectivityResult {
   reachable: boolean;
   latency: number;
   message: string;
+  testedAt: string;
 }
 
 export interface OperationLogEntry {
