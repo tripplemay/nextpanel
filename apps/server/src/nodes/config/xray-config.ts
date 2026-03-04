@@ -12,7 +12,7 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
           port: node.listenPort,
           listen: '0.0.0.0',
           protocol: xrayProtocol(node.protocol),
-          settings: xraySettings(node.protocol, creds),
+          settings: xraySettings(node.protocol, creds, node.tls),
           streamSettings: xrayStreamSettings(node.transport, node.tls, node.domain, creds),
         },
       ],
@@ -35,12 +35,15 @@ function xrayProtocol(protocol: string): string {
   return map[protocol] ?? protocol.toLowerCase();
 }
 
-function xraySettings(protocol: string, creds: NodeCredentials): unknown {
+function xraySettings(protocol: string, creds: NodeCredentials, tls?: string): unknown {
   switch (protocol) {
     case 'VMESS':
       return { clients: [{ id: creds.uuid ?? '', alterId: 0 }] };
     case 'VLESS':
-      return { clients: [{ id: creds.uuid ?? '', flow: '' }], decryption: 'none' };
+      return {
+        clients: [{ id: creds.uuid ?? '', flow: tls === 'REALITY' ? 'xtls-rprx-vision' : '' }],
+        decryption: 'none',
+      };
     case 'TROJAN':
       return { clients: [{ password: creds.password ?? '' }] };
     case 'SHADOWSOCKS':

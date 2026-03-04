@@ -195,6 +195,8 @@ export class XrayTestService {
               reason = '节点不可达（代理连接被拒绝或认证失败）';
             } else if (exitCode === 28) {
               reason = '连接超时（节点无响应）';
+            } else if (exitCode === 52) {
+              reason = '服务端无响应（REALITY 握手失败或密钥不匹配）';
             } else if (exitCode === 97) {
               reason = 'SOCKS5 代理不可用（Xray 异常退出）';
             } else if (exitCode === 56) {

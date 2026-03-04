@@ -4,6 +4,29 @@
 
 ---
 
+## [未发布] — 2026-03-04（三）
+
+### 修复：VLESS+REALITY 节点测试返回 curl 退出码 52
+
+#### 问题
+
+对 VLESS+REALITY 节点执行连通性测试时，提示"代理错误（curl 退出码 52）"，即服务端返回空响应。
+
+#### 根因
+
+服务端 Xray 配置（`xray-config.ts`）为 VLESS 客户端生成的 `flow` 字段为 `''`（空），而 REALITY 协议要求客户端与服务端均使用 `xtls-rprx-vision` 流控。测试客户端配置已正确设置 `flow: 'xtls-rprx-vision'`，但服务端拒绝了该流控类型，导致握手失败（空响应）。
+
+#### 修复
+
+- `xray-config.ts`：将 `xraySettings()` 添加 `tls` 参数；VLESS + REALITY 时将服务端 client 的 `flow` 设为 `'xtls-rprx-vision'`
+- `xray-test.service.ts`：将 curl 退出码 52 映射为"服务端无响应（REALITY 握手失败或密钥不匹配）"
+
+#### 影响
+
+已部署的 VLESS+REALITY 节点需重新部署以生效。
+
+---
+
 ## [未发布] — 2026-03-04（二）
 
 ### 修复：开发/生产数据库隔离
