@@ -137,6 +137,7 @@ export const cloudflareApi = {
   get: () => api.get<CloudflareSetting | null>('/cloudflare/settings'),
   upsert: (data: UpsertCloudflareSettingDto) => api.put<CloudflareSetting>('/cloudflare/settings', data),
   remove: () => api.delete<void>('/cloudflare/settings'),
+  verify: () => api.get<{ valid: boolean; zoneName?: string; zoneStatus?: string; message: string }>('/cloudflare/settings/verify'),
 };
 
 // ── Pipelines (GitHub Actions deploy configs) ──────────

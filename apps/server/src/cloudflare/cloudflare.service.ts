@@ -16,6 +16,13 @@ export interface CfDnsRecord {
   content: string;
 }
 
+export interface CfVerifyResult {
+  valid: boolean;
+  zoneName?: string;
+  zoneStatus?: string;
+  message: string;
+}
+
 @Injectable()
 export class CloudflareService {
   private readonly logger = new Logger(CloudflareService.name);
@@ -83,6 +90,37 @@ export class CloudflareService {
     }
 
     this.logger.log(`Deleted DNS record ${recordId}`);
+  }
+
+  /**
+   * Verify that apiToken can access the given zoneId.
+   * Returns zone name and status on success, or an error message on failure.
+   */
+  async verifyZoneAccess(apiToken: string, zoneId: string): Promise<CfVerifyResult> {
+    const url = `${CF_API}/zones/${zoneId}`;
+    try {
+      const res = await fetch(url, { headers: this.headers(apiToken) });
+      const data = (await res.json()) as {
+        success: boolean;
+        errors: { message: string; code: number }[];
+        result?: { name: string; status: string };
+      };
+
+      if (!data.success) {
+        const msg = data.errors.map((e) => e.message).join('; ');
+        return { valid: false, message: `验证失败：${msg}` };
+      }
+
+      return {
+        valid: true,
+        zoneName: data.result?.name,
+        zoneStatus: data.result?.status,
+        message: `验证成功：${data.result?.name ?? zoneId}（${data.result?.status ?? 'unknown'}）`,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { valid: false, message: `请求失败：${msg}` };
+    }
   }
 
   private headers(apiToken: string): Record<string, string> {

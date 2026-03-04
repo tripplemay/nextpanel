@@ -18,6 +18,12 @@ export class CloudflareSettingsController {
     return this.settingsService.findByUser(user.id);
   }
 
+  @Get('verify')
+  @ApiOperation({ summary: 'Verify stored Cloudflare credentials against the API' })
+  verify(@CurrentUser() user: { id: string }) {
+    return this.settingsService.verify(user.id);
+  }
+
   @Put()
   @ApiOperation({ summary: 'Create or update Cloudflare settings for current user' })
   upsert(@CurrentUser() user: { id: string }, @Body() dto: UpsertCloudflareSettingDto) {
