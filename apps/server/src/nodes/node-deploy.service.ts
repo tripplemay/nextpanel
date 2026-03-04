@@ -133,19 +133,35 @@ export class NodeDeployService {
         log(`Binary OK: ${bin}`);
       }
 
-      // ── 5. Upload config file (base64 to avoid shell escaping issues) ──────
+      // ── 5. Generate self-signed TLS cert if node uses TLS mode ───────────
+      if (node.tls === 'TLS') {
+        const certDir = '/etc/nextpanel/certs';
+        const certFile = `${certDir}/${node.id}.crt`;
+        const keyFile  = `${certDir}/${node.id}.key`;
+        const cn = node.domain ?? node.server.ip;
+        log(`Ensuring TLS certificate at ${certFile}...`);
+        const { stderr: certErr } = await ssh.execCommand(
+          `mkdir -p ${certDir} && ` +
+          `[ -f ${certFile} ] || openssl req -x509 -newkey rsa:2048 ` +
+          `-keyout ${keyFile} -out ${certFile} -days 3650 -nodes -subj "/CN=${cn}" 2>&1`,
+        );
+        if (certErr) log(`TLS cert warning: ${certErr}`);
+        else log(`TLS certificate ready`);
+      }
+
+      // ── 6. Upload config file (base64 to avoid shell escaping issues) ──────
       log(`Uploading config to ${configPath}...`);
       await uploadText(ssh, configJson, configPath);
       log(`Config uploaded to ${configPath}`);
 
-      // ── 6. Write systemd unit ──────────────────────────────────────────────
+      // ── 7. Write systemd unit ──────────────────────────────────────────────
       const unitContent = buildSystemdUnit(node.name, bin, args);
       const unitPath = `/etc/systemd/system/${serviceName}.service`;
       log(`Writing systemd unit to ${unitPath}...`);
       await uploadText(ssh, unitContent, unitPath);
       log(`Systemd unit written`);
 
-      // ── 7. Enable & restart service ────────────────────────────────────────
+      // ── 8. Enable & restart service ────────────────────────────────────────
       log(`Reloading systemd daemon...`);
       const { stderr: reloadErr } = await ssh.execCommand('systemctl daemon-reload');
       if (reloadErr) log(`daemon-reload warning: ${reloadErr}`);
@@ -156,7 +172,7 @@ export class NodeDeployService {
       );
       if (startErr) log(`Start warning: ${startErr}`);
 
-      // ── 8. Verify service is active ────────────────────────────────────────
+      // ── 9. Verify service is active ────────────────────────────────────────
       log(`Waiting for service to stabilize...`);
       await new Promise((r) => setTimeout(r, 2000));
       const { stdout: activeOut } = await ssh.execCommand(

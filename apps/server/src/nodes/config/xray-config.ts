@@ -14,7 +14,7 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
           listen: '0.0.0.0',
           protocol: xrayProtocol(node.protocol),
           settings: xraySettings(node.protocol, creds, node.tls),
-          streamSettings: xrayStreamSettings(node.transport, node.tls, node.domain, creds),
+          streamSettings: xrayStreamSettings(node.id, node.transport, node.tls, node.domain, creds),
         },
       ],
       outbounds: [{ protocol: 'freedom', tag: 'direct' }],
@@ -73,6 +73,7 @@ function xraySettings(protocol: string, creds: NodeCredentials, tls?: string): u
 }
 
 function xrayStreamSettings(
+  nodeId: string,
   transport: string | null,
   tls: string,
   domain: string | null,
@@ -91,7 +92,12 @@ function xrayStreamSettings(
     base.security = 'tls';
     base.tlsSettings = {
       serverName: domain ?? '',
-      certificates: [],
+      certificates: [
+        {
+          certificateFile: `/etc/nextpanel/certs/${nodeId}.crt`,
+          keyFile: `/etc/nextpanel/certs/${nodeId}.key`,
+        },
+      ],
     };
   } else if (tls === 'REALITY') {
     base.security = 'reality';

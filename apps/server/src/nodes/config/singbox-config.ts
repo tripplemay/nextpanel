@@ -51,7 +51,12 @@ function singBoxInbound(node: NodeInfo, creds: NodeCredentials): unknown {
   }
 
   if (node.tls === 'TLS') {
-    base.tls = { enabled: true, server_name: node.domain ?? '', certificate_path: '', key_path: '' };
+    base.tls = {
+      enabled: true,
+      server_name: node.domain ?? '',
+      certificate_path: `/etc/nextpanel/certs/${node.id}.crt`,
+      key_path: `/etc/nextpanel/certs/${node.id}.key`,
+    };
   } else if (node.tls === 'REALITY') {
     base.tls = {
       enabled: true,

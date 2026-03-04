@@ -215,6 +215,14 @@ describe('generateXrayConfig – TLS', () => {
     expect(ss.tlsSettings.serverName).toBe('example.com');
   });
 
+  it('TLS mode includes cert/key file paths derived from node id', () => {
+    const cfg = parse({ ...baseNode, tls: 'TLS', domain: 'example.com' });
+    const certs = cfg.inbounds[0].streamSettings.tlsSettings.certificates;
+    expect(certs).toHaveLength(1);
+    expect(certs[0].certificateFile).toBe('/etc/nextpanel/certs/n1.crt');
+    expect(certs[0].keyFile).toBe('/etc/nextpanel/certs/n1.key');
+  });
+
   it('TLS mode falls back to empty string when domain is null', () => {
     const cfg = parse({ ...baseNode, tls: 'TLS', domain: null });
     expect(cfg.inbounds[0].streamSettings.tlsSettings.serverName).toBe('');
