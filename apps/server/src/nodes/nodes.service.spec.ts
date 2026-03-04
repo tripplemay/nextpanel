@@ -151,6 +151,31 @@ describe('NodesService', () => {
     });
   });
 
+  describe('create – protocol+TLS validation', () => {
+    it.each([
+      ['VMESS', 'REALITY'],
+      ['TROJAN', 'REALITY'],
+      ['SHADOWSOCKS', 'REALITY'],
+    ])('%s+REALITY 创建时应抛出 BadRequestException', async (protocol, tls) => {
+      const dto = { serverId: 's', name: 'N', protocol, tls, listenPort: 443, credentials: {} } as any;
+      await expect(svc.create(dto)).rejects.toThrow('REALITY 仅支持 VLESS 协议');
+    });
+
+    it('update 时切换为非法组合（TROJAN+REALITY）应抛出 BadRequestException', async () => {
+      const existing = { ...fakeNode, protocol: 'TROJAN', tls: 'NONE', credentialsEnc: 'enc:{}' };
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(existing);
+      await expect(svc.update('node-1', { tls: 'REALITY' as any } as any))
+        .rejects.toThrow('REALITY 仅支持 VLESS 协议');
+    });
+
+    it('update 时把协议改为非 VLESS 且已有 REALITY TLS 应抛出 BadRequestException', async () => {
+      const existing = { ...fakeNode, protocol: 'VLESS', tls: 'REALITY', credentialsEnc: 'enc:{"realityPrivateKey":"pk","realityPublicKey":"pub"}' };
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(existing);
+      await expect(svc.update('node-1', { protocol: 'TROJAN' as any } as any))
+        .rejects.toThrow('REALITY 仅支持 VLESS 协议');
+    });
+  });
+
   describe('create – REALITY key generation', () => {
     it('auto-generates REALITY keys when tls is REALITY and credentials have no keys', async () => {
       (mockPrisma.node.create as jest.Mock).mockResolvedValue(fakeNode);
@@ -193,7 +218,7 @@ describe('NodesService', () => {
 
   describe('update – REALITY credentials', () => {
     it('generates REALITY keys when update switches tls to REALITY without existing keys', async () => {
-      const nodeWithCreds = { ...fakeNode, tls: 'NONE', credentialsEnc: 'enc:{"uuid":"u1"}' };
+      const nodeWithCreds = { ...fakeNode, protocol: 'VLESS', tls: 'NONE', credentialsEnc: 'enc:{"uuid":"u1"}' };
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(nodeWithCreds);
       (mockPrisma.node.update as jest.Mock).mockResolvedValue(fakeNode);
 
@@ -207,7 +232,7 @@ describe('NodesService', () => {
     });
 
     it('merges incoming credentials with existing when updating REALITY node', async () => {
-      const nodeWithCreds = { ...fakeNode, tls: 'REALITY', credentialsEnc: 'enc:{"realityPrivateKey":"pk","realityPublicKey":"pub"}' };
+      const nodeWithCreds = { ...fakeNode, protocol: 'VLESS', tls: 'REALITY', credentialsEnc: 'enc:{"realityPrivateKey":"pk","realityPublicKey":"pub"}' };
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(nodeWithCreds);
       (mockPrisma.node.update as jest.Mock).mockResolvedValue(fakeNode);
 

@@ -1,5 +1,5 @@
 import * as crypto from 'crypto';
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { NodeDeployService } from './node-deploy.service';
@@ -18,6 +18,9 @@ export class NodesService {
   ) {}
 
   async create(dto: CreateNodeDto) {
+    if (dto.tls === 'REALITY' && dto.protocol !== 'VLESS') {
+      throw new BadRequestException('REALITY 仅支持 VLESS 协议');
+    }
     const creds = { ...dto.credentials };
     if (dto.tls === 'REALITY' && !creds.realityPrivateKey) {
       Object.assign(creds, generateRealityKeys());
@@ -66,12 +69,17 @@ export class NodesService {
   async update(id: string, dto: UpdateNodeDto) {
     const existing = await this.prisma.node.findUnique({
       where: { id },
-      select: { tls: true, credentialsEnc: true },
+      select: { protocol: true, tls: true, credentialsEnc: true },
     });
     if (!existing) throw new NotFoundException(`Node ${id} not found`);
 
     const data: Record<string, unknown> = { ...dto };
+    const effectiveProtocol = dto.protocol ?? existing.protocol;
     const effectiveTls = dto.tls ?? existing.tls;
+
+    if (effectiveTls === 'REALITY' && effectiveProtocol !== 'VLESS') {
+      throw new BadRequestException('REALITY 仅支持 VLESS 协议');
+    }
 
     if (effectiveTls === 'REALITY') {
       // Decrypt current creds, merge with incoming, then ensure reality keys exist

@@ -80,7 +80,7 @@ export default function NodeFormModal({ open, initialValues, onClose, onSuccess 
   const showCreds    = showUuid || showUsername || showPassword;
   const passwordRequired = ['TROJAN', 'SHADOWSOCKS'].includes(protocol ?? '');
 
-  const realityAllowed = ['VLESS', 'TROJAN'].includes(protocol ?? '');
+  const realityAllowed = protocol === 'VLESS';
   const tlsOptions = realityAllowed ? ['NONE', 'TLS', 'REALITY'] : ['NONE', 'TLS'];
   const implOptions = protocol ? (IMPL_OPTIONS[protocol] ?? ALL_IMPLS) : ALL_IMPLS;
   const domainLabel = isReality ? '伪装域名（SNI）' : '域名';
@@ -222,8 +222,8 @@ export default function NodeFormModal({ open, initialValues, onClose, onSuccess 
         const valid = IMPL_OPTIONS[proto] ?? ALL_IMPLS;
         const preferred = IMPL_MAP[proto] ?? 'XRAY';
         updates.implementation = valid.includes(preferred) ? preferred : valid[0];
-        // REALITY is only valid for VLESS / TROJAN — reset TLS if incompatible
-        if (!['VLESS', 'TROJAN'].includes(proto) && form.getFieldValue('tls') === 'REALITY') {
+        // REALITY is only valid for VLESS — reset TLS if incompatible
+        if (proto !== 'VLESS' && form.getFieldValue('tls') === 'REALITY') {
           updates.tls = 'NONE';
         }
       }
