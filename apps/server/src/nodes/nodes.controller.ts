@@ -29,6 +29,7 @@ import { XrayTestService } from './xray-test/xray-test.service';
 import { CreateNodeDto } from './dto/create-node.dto';
 import { CreateNodeFromPresetDto } from './dto/create-node-from-preset.dto';
 import { UpdateNodeDto } from './dto/update-node.dto';
+import { PROTOCOL_PRESETS, SUPPORTED_PROTOCOLS } from './protocols/presets';
 
 @ApiTags('nodes')
 @ApiBearerAuth()
@@ -51,6 +52,15 @@ export class NodesController {
     @CurrentUser() user: { id: string },
   ) {
     return this.nodesService.create(dto, user.id);
+  }
+
+  @Get('presets')
+  @ApiOperation({ summary: 'List all available protocol presets' })
+  listPresets() {
+    return SUPPORTED_PROTOCOLS.map((key) => ({
+      value: key,
+      ...PROTOCOL_PRESETS[key],
+    }));
   }
 
   @Post('preset')

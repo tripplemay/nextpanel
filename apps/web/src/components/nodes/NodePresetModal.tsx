@@ -9,14 +9,6 @@ import type { AxiosError } from 'axios';
 
 const { Option } = Select;
 
-const PRESETS = [
-  { value: 'VLESS_REALITY',  label: 'VLESS + REALITY（推荐，隐蔽性强）' },
-  { value: 'VLESS_WS_TLS',   label: 'VLESS + WS + TLS（CDN 友好）' },
-  { value: 'VLESS_TCP_TLS',  label: 'VLESS + TCP + TLS（直连，真实证书）' },
-  { value: 'HYSTERIA2',      label: 'Hysteria2（高速 UDP）' },
-  { value: 'SHADOWSOCKS',    label: 'Shadowsocks（通用）' },
-];
-
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -27,6 +19,12 @@ export default function NodePresetModal({ open, onClose, onSuccess }: Props) {
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const [serverId, setServerId] = useState<string | undefined>(undefined);
+
+  const { data: presets } = useQuery({
+    queryKey: ['node-presets'],
+    queryFn: () => nodesApi.listPresets().then((r) => r.data),
+    staleTime: Infinity, // presets never change at runtime
+  });
 
   const { data: servers } = useQuery({
     queryKey: ['servers'],
@@ -104,7 +102,7 @@ export default function NodePresetModal({ open, onClose, onSuccess }: Props) {
 
         <Form.Item name="preset" label="协议预设" rules={[{ required: true, message: '请选择协议预设' }]}>
           <Select placeholder="选择协议预设">
-            {PRESETS.map((p) => <Option key={p.value} value={p.value}>{p.label}</Option>)}
+            {presets?.map((p) => <Option key={p.value} value={p.value}>{p.label}</Option>)}
           </Select>
         </Form.Item>
 
