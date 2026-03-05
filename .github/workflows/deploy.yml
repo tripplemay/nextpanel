@@ -103,6 +103,14 @@ jobs:
             fi
 
             # ── 每次部署都执行 ─────────────────────────────────────────────
+            # 同步面板配置（PANEL_URL / GITHUB_REPO 可能随部署变更）
+            grep -q '^PANEL_URL=' $APP_DIR/apps/server/.env \
+              && sed -i "s|^PANEL_URL=.*|PANEL_URL=https://$DOMAIN|" $APP_DIR/apps/server/.env \
+              || echo "PANEL_URL=https://$DOMAIN" >> $APP_DIR/apps/server/.env
+            grep -q '^GITHUB_REPO=' $APP_DIR/apps/server/.env \
+              && sed -i 's|^GITHUB_REPO=.*|GITHUB_REPO=tripplemay/nextpanel-releases|' $APP_DIR/apps/server/.env \
+              || echo 'GITHUB_REPO=tripplemay/nextpanel-releases' >> $APP_DIR/apps/server/.env
+
             # 先停服务，释放内存供构建使用
             pm2 stop all 2>/dev/null || true
 
