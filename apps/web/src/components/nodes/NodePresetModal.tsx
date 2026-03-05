@@ -10,10 +10,11 @@ import type { AxiosError } from 'axios';
 const { Option } = Select;
 
 const PRESETS = [
-  { value: 'VLESS_REALITY', label: 'VLESS + REALITY（推荐，隐蔽性强）' },
-  { value: 'VLESS_WS_TLS', label: 'VLESS + WS + TLS（CDN 友好）' },
-  { value: 'HYSTERIA2',    label: 'Hysteria2（高速 UDP）' },
-  { value: 'SHADOWSOCKS',  label: 'Shadowsocks（通用）' },
+  { value: 'VLESS_REALITY',  label: 'VLESS + REALITY（推荐，隐蔽性强）' },
+  { value: 'VLESS_WS_TLS',   label: 'VLESS + WS + TLS（CDN 友好）' },
+  { value: 'VLESS_TCP_TLS',  label: 'VLESS + TCP + TLS（直连，真实证书）' },
+  { value: 'HYSTERIA2',      label: 'Hysteria2（高速 UDP）' },
+  { value: 'SHADOWSOCKS',    label: 'Shadowsocks（通用）' },
 ];
 
 interface Props {
