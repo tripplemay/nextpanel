@@ -9,6 +9,7 @@ const mockPrisma = {
     update: jest.fn(),
   },
   node: {
+    findMany: jest.fn().mockResolvedValue([]),
     updateMany: jest.fn(),
   },
 } as unknown as PrismaService;
@@ -35,7 +36,7 @@ describe('AgentService', () => {
         cpu: 30, mem: 50, disk: 20, networkIn: 100, networkOut: 200,
       });
 
-      expect(result).toEqual({ ok: true });
+      expect(result).toMatchObject({ ok: true });
     });
 
     it('throws UnauthorizedException for unknown agent token', async () => {

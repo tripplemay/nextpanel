@@ -37,50 +37,69 @@ export class ServersController {
   @Roles('ADMIN', 'OPERATOR')
   @Audit('CREATE', 'server')
   @ApiOperation({ summary: 'Add a new server asset' })
-  create(@Body() dto: CreateServerDto) {
-    return this.serversService.create(dto);
+  create(
+    @Body() dto: CreateServerDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.serversService.create(dto, user.id);
   }
 
   @Get()
   @ApiOperation({ summary: 'List all servers' })
-  findAll() {
-    return this.serversService.findAll();
+  findAll(@CurrentUser() user: { id: string }) {
+    return this.serversService.findAll(user.id);
   }
 
   @Get('check-ip')
   @ApiOperation({ summary: 'Check if an IP already exists' })
-  checkIp(@Query('ip') ip: string) {
-    return this.serversService.checkIp(ip);
+  checkIp(
+    @Query('ip') ip: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.serversService.checkIp(ip, user.id);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a server by ID' })
-  findOne(@Param('id') id: string) {
-    return this.serversService.findOne(id);
+  findOne(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.serversService.findOne(id, user.id);
   }
 
   @Patch(':id')
   @Roles('ADMIN', 'OPERATOR')
   @Audit('UPDATE', 'server')
   @ApiOperation({ summary: 'Update server info' })
-  update(@Param('id') id: string, @Body() dto: UpdateServerDto) {
-    return this.serversService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateServerDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.serversService.update(id, dto, user.id);
   }
 
   @Delete(':id')
   @Roles('ADMIN')
   @Audit('DELETE', 'server')
   @ApiOperation({ summary: 'Delete a server' })
-  remove(@Param('id') id: string) {
-    return this.serversService.remove(id);
+  remove(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.serversService.remove(id, user.id);
   }
 
   @Post(':id/test-ssh')
   @Roles('ADMIN', 'OPERATOR')
   @Audit('SSH_TEST', 'server')
   @ApiOperation({ summary: 'Test SSH connectivity to a server' })
-  testSsh(@Param('id') id: string) {
-    return this.serversService.testSsh(id);
+  testSsh(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.serversService.testSsh(id, user.id);
   }
 
   @Sse(':id/install-agent')

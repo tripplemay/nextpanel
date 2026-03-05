@@ -48,8 +48,8 @@ export class SubscriptionsService {
     });
   }
 
-  async remove(id: string) {
-    const sub = await this.prisma.subscription.findUnique({ where: { id } });
+  async remove(id: string, ownerId: string) {
+    const sub = await this.prisma.subscription.findFirst({ where: { id, ownerId } });
     if (!sub) throw new NotFoundException(`Subscription ${id} not found`);
     return this.prisma.subscription.delete({ where: { id } });
   }
@@ -144,7 +144,7 @@ export class SubscriptionsService {
 
     for (const { node } of sub.nodes as SubscriptionNode[]) {
       if (!node.enabled || node.status !== 'RUNNING') continue;
-      const credentials = await this.nodesService.getCredentials(node.id);
+      const credentials = await this.nodesService.getCredentials(node.id, sub.ownerId);
       result.push({
         name: node.name,
         protocol: node.protocol,

@@ -42,8 +42,11 @@ export class SubscriptionsController {
   @Delete(':id')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  remove(@Param('id') id: string) {
-    return this.subscriptionsService.remove(id);
+  remove(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.subscriptionsService.remove(id, user.id);
   }
 
   /** Public — Base64 universal subscription (V2Ray / Xray compatible) */

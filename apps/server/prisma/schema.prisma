@@ -34,9 +34,8 @@ enum UserRole {
 
 model Server {
   id           String       @id @default(cuid())
-  /// Resource owner — nullable during migration, required once multi-tenancy is enforced
-  owner        User?        @relation(fields: [userId], references: [id])
-  userId       String?
+  owner        User         @relation(fields: [userId], references: [id])
+  userId       String
   name         String
   region       String
   provider     String
@@ -85,9 +84,8 @@ model Node {
   id             String          @id @default(cuid())
   server         Server          @relation(fields: [serverId], references: [id], onDelete: Cascade)
   serverId       String
-  /// Resource owner — nullable during migration, required once multi-tenancy is enforced
-  owner          User?           @relation(fields: [userId], references: [id])
-  userId         String?
+  owner          User            @relation(fields: [userId], references: [id])
+  userId         String
   name           String
   protocol       Protocol
   implementation Implementation?

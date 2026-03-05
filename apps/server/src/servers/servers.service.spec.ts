@@ -34,6 +34,7 @@ const mockPrisma = {
   server: {
     create: jest.fn(),
     findMany: jest.fn(),
+    findFirst: jest.fn(),
     findUnique: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
@@ -87,7 +88,7 @@ describe('ServersService', () => {
       await svc.create({
         name: 'Test', ip: '1.2.3.4', sshAuth: 'mypassword',
         sshAuthType: 'PASSWORD' as any,
-      } as any);
+      } as any, 'user-id-1');
 
       expect(mockCrypto.encrypt).toHaveBeenCalledWith('mypassword');
       expect(mockPrisma.server.create).toHaveBeenCalled();
@@ -96,7 +97,7 @@ describe('ServersService', () => {
     it('defaults sshPort to 22 when not provided', async () => {
       (mockPrisma.server.create as jest.Mock).mockResolvedValue(fakeServer);
 
-      await svc.create({ name: 'T', ip: '1.2.3.4', sshAuth: 'pw', sshAuthType: 'PASSWORD' as any } as any);
+      await svc.create({ name: 'T', ip: '1.2.3.4', sshAuth: 'pw', sshAuthType: 'PASSWORD' as any } as any, 'user-id-1');
 
       const data = (mockPrisma.server.create as jest.Mock).mock.calls[0][0].data;
       expect(data.sshPort).toBe(22);
@@ -105,7 +106,7 @@ describe('ServersService', () => {
     it('defaults sshUser to root when not provided', async () => {
       (mockPrisma.server.create as jest.Mock).mockResolvedValue(fakeServer);
 
-      await svc.create({ name: 'T', ip: '1.2.3.4', sshAuth: 'pw', sshAuthType: 'PASSWORD' as any } as any);
+      await svc.create({ name: 'T', ip: '1.2.3.4', sshAuth: 'pw', sshAuthType: 'PASSWORD' as any } as any, 'user-id-1');
 
       const data = (mockPrisma.server.create as jest.Mock).mock.calls[0][0].data;
       expect(data.sshUser).toBe('root');
@@ -114,7 +115,7 @@ describe('ServersService', () => {
     it('defaults tags to empty array when not provided', async () => {
       (mockPrisma.server.create as jest.Mock).mockResolvedValue(fakeServer);
 
-      await svc.create({ name: 'T', ip: '1.2.3.4', sshAuth: 'pw', sshAuthType: 'PASSWORD' as any } as any);
+      await svc.create({ name: 'T', ip: '1.2.3.4', sshAuth: 'pw', sshAuthType: 'PASSWORD' as any } as any, 'user-id-1');
 
       const data = (mockPrisma.server.create as jest.Mock).mock.calls[0][0].data;
       expect(data.tags).toEqual([]);
@@ -125,7 +126,7 @@ describe('ServersService', () => {
     it('returns all servers ordered by createdAt desc', async () => {
       (mockPrisma.server.findMany as jest.Mock).mockResolvedValue([fakeServer]);
 
-      const result = await svc.findAll();
+      const result = await svc.findAll('user-id-1');
 
       expect(result).toHaveLength(1);
       const call = (mockPrisma.server.findMany as jest.Mock).mock.calls[0][0];
@@ -135,79 +136,79 @@ describe('ServersService', () => {
 
   describe('findOne', () => {
     it('returns server when found', async () => {
-      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
 
-      const result = await svc.findOne('srv-1');
+      const result = await svc.findOne('srv-1', 'user-id-1');
 
       expect(result).toBe(fakeServer);
     });
 
     it('throws NotFoundException when server is missing', async () => {
-      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(null);
 
-      await expect(svc.findOne('bad')).rejects.toThrow(NotFoundException);
+      await expect(svc.findOne('bad', 'user-id-1')).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('update', () => {
     it('re-encrypts sshAuth when provided', async () => {
-      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
       (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
 
-      await svc.update('srv-1', { sshAuth: 'newpassword' } as any);
+      await svc.update('srv-1', { sshAuth: 'newpassword' } as any, 'user-id-1');
 
       expect(mockCrypto.encrypt).toHaveBeenCalledWith('newpassword');
     });
 
     it('does not encrypt when sshAuth not in update payload', async () => {
-      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
       (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
 
-      await svc.update('srv-1', { name: 'Renamed' } as any);
+      await svc.update('srv-1', { name: 'Renamed' } as any, 'user-id-1');
 
       expect(mockCrypto.encrypt).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException for missing server', async () => {
-      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(null);
 
-      await expect(svc.update('bad', {} as any)).rejects.toThrow(NotFoundException);
+      await expect(svc.update('bad', {} as any, 'user-id-1')).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('remove', () => {
     it('deletes the server after verifying it exists', async () => {
-      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
       (mockPrisma.server.delete as jest.Mock).mockResolvedValue(fakeServer);
 
-      await svc.remove('srv-1');
+      await svc.remove('srv-1', 'user-id-1');
 
       expect(mockPrisma.server.delete).toHaveBeenCalledWith({ where: { id: 'srv-1' } });
     });
 
     it('throws NotFoundException when server is missing', async () => {
-      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(null);
 
-      await expect(svc.remove('bad')).rejects.toThrow(NotFoundException);
+      await expect(svc.remove('bad', 'user-id-1')).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('testSsh', () => {
     it('returns success=true when echo ok succeeds', async () => {
-      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
 
-      const result = await svc.testSsh('srv-1');
+      const result = await svc.testSsh('srv-1', 'user-id-1');
 
       expect(result.success).toBe(true);
       expect(result.message).toBe('SSH connection successful');
     });
 
     it('connects with password when sshAuthType is PASSWORD', async () => {
-      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue({
         ...fakeServer, sshAuthType: 'PASSWORD', sshAuthEnc: 'enc:mypassword',
       });
 
-      await svc.testSsh('srv-1');
+      await svc.testSsh('srv-1', 'user-id-1');
 
       expect(mockConnect).toHaveBeenCalledWith(
         expect.objectContaining({ password: 'mypassword' }),
@@ -215,11 +216,11 @@ describe('ServersService', () => {
     });
 
     it('connects with privateKey when sshAuthType is KEY', async () => {
-      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue({
         ...fakeServer, sshAuthType: 'KEY', sshAuthEnc: 'enc:-----BEGIN RSA',
       });
 
-      await svc.testSsh('srv-1');
+      await svc.testSsh('srv-1', 'user-id-1');
 
       expect(mockConnect).toHaveBeenCalledWith(
         expect.objectContaining({ privateKey: '-----BEGIN RSA' }),
@@ -227,35 +228,35 @@ describe('ServersService', () => {
     });
 
     it('returns success=false when stdout is not "ok"', async () => {
-      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
       mockExecCommand.mockResolvedValue({ stdout: 'something else', stderr: '' });
 
-      const result = await svc.testSsh('srv-1');
+      const result = await svc.testSsh('srv-1', 'user-id-1');
 
       expect(result.success).toBe(false);
     });
 
     it('returns success=false with error message on connection failure', async () => {
-      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
       mockConnect.mockRejectedValue(new Error('Connection refused'));
 
-      const result = await svc.testSsh('srv-1');
+      const result = await svc.testSsh('srv-1', 'user-id-1');
 
       expect(result.success).toBe(false);
       expect(result.message).toBe('Connection refused');
     });
 
     it('throws NotFoundException when server is missing', async () => {
-      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(null);
 
-      await expect(svc.testSsh('bad')).rejects.toThrow(NotFoundException);
+      await expect(svc.testSsh('bad', 'user-id-1')).rejects.toThrow(NotFoundException);
     });
 
     it('handles non-Error thrown objects gracefully', async () => {
-      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
       mockConnect.mockRejectedValue('string error');
 
-      const result = await svc.testSsh('srv-1');
+      const result = await svc.testSsh('srv-1', 'user-id-1');
 
       expect(result.success).toBe(false);
       expect(result.message).toBe('Connection failed');
@@ -330,7 +331,17 @@ describe('ServersService', () => {
       process.env.PANEL_URL = 'https://panel.test';
       process.env.GITHUB_REPO = 'org/repo';
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
-      mockSsh.execCommand.mockResolvedValueOnce({ code: 0, stdout: 'active', stderr: '' });
+      mockSsh.execCommand
+        .mockResolvedValueOnce({ code: 0, stdout: 'active', stderr: '' })   // is-active (already installed)
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })          // BBR check (not supported)
+        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })             // uname -m
+        .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' }) // github release
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })          // stop service (alreadyInstalled)
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })          // download binary
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                   // mkdir
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                   // write config
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })          // start service
+        .mockResolvedValueOnce({ stdout: 'active', stderr: '' });            // status check
 
       const events = await collectEvents('srv-1');
 
@@ -366,6 +377,7 @@ describe('ServersService', () => {
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
       mockSsh.execCommand
         .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })       // is-active
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })       // BBR check (not supported)
         .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })          // uname -m
         .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' }) // curl github release
         .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })       // download
@@ -393,6 +405,7 @@ describe('ServersService', () => {
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
       mockSsh.execCommand
         .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })       // is-active
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })       // BBR check (not supported)
         .mockResolvedValueOnce({ stdout: 'aarch64', stderr: '' })         // uname -m
         .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' }) // github release
         .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })       // download

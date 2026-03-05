@@ -22,10 +22,11 @@ export class ServersService {
     private cfSettings: CloudflareSettingsService,
   ) {}
 
-  async create(dto: CreateServerDto) {
+  async create(dto: CreateServerDto, userId: string) {
     const sshAuthEnc = this.crypto.encrypt(dto.sshAuth);
     return this.prisma.server.create({
       data: {
+        userId,
         name: dto.name,
         region: dto.region,
         provider: dto.provider,
@@ -41,24 +42,25 @@ export class ServersService {
     });
   }
 
-  async findAll() {
+  async findAll(userId: string) {
     return this.prisma.server.findMany({
+      where: { userId },
       select: this.safeSelect(),
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async findOne(id: string) {
-    const server = await this.prisma.server.findUnique({
-      where: { id },
+  async findOne(id: string, userId: string) {
+    const server = await this.prisma.server.findFirst({
+      where: { id, userId },
       select: this.safeSelect(),
     });
     if (!server) throw new NotFoundException(`Server ${id} not found`);
     return server;
   }
 
-  async update(id: string, dto: UpdateServerDto) {
-    await this.findOne(id);
+  async update(id: string, dto: UpdateServerDto, userId: string) {
+    await this.findOne(id, userId);
     const data: Record<string, unknown> = { ...dto };
     if (dto.sshAuth) {
       data.sshAuthEnc = this.crypto.encrypt(dto.sshAuth);
@@ -71,8 +73,8 @@ export class ServersService {
     });
   }
 
-  async remove(id: string) {
-    await this.findOne(id);
+  async remove(id: string, userId: string) {
+    await this.findOne(id, userId);
 
     // Fetch all nodes on this server (need userId + cfDnsRecordId for cleanup)
     const nodes = await this.prisma.node.findMany({
@@ -112,13 +114,13 @@ export class ServersService {
     return this.prisma.server.delete({ where: { id } });
   }
 
-  async checkIp(ip: string): Promise<{ exists: boolean }> {
-    const server = await this.prisma.server.findFirst({ where: { ip } });
+  async checkIp(ip: string, userId: string): Promise<{ exists: boolean }> {
+    const server = await this.prisma.server.findFirst({ where: { ip, userId } });
     return { exists: !!server };
   }
 
-  async testSsh(id: string): Promise<{ success: boolean; message: string }> {
-    const server = await this.prisma.server.findUnique({ where: { id } });
+  async testSsh(id: string, userId: string): Promise<{ success: boolean; message: string }> {
+    const server = await this.prisma.server.findFirst({ where: { id, userId } });
     if (!server) throw new NotFoundException(`Server ${id} not found`);
 
     const sshAuth = this.crypto.decrypt(server.sshAuthEnc);

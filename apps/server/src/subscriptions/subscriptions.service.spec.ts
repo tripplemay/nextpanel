@@ -8,6 +8,7 @@ const mockPrisma = {
     create: jest.fn(),
     findMany: jest.fn(),
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     delete: jest.fn(),
   },
 } as unknown as PrismaService;
@@ -198,15 +199,15 @@ describe('SubscriptionsService – CRUD', () => {
   });
 
   it('remove throws NotFoundException when subscription does not exist', async () => {
-    (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue(null);
-    await expect(svc.remove('bad-id')).rejects.toThrow(NotFoundException);
+    (mockPrisma.subscription.findFirst as jest.Mock).mockResolvedValue(null);
+    await expect(svc.remove('bad-id', 'user-id-1')).rejects.toThrow(NotFoundException);
   });
 
   it('remove deletes and returns result when subscription exists', async () => {
     const fakeSub = { id: 'sub-1' };
-    (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue(fakeSub);
+    (mockPrisma.subscription.findFirst as jest.Mock).mockResolvedValue(fakeSub);
     (mockPrisma.subscription.delete as jest.Mock).mockResolvedValue(fakeSub);
-    const result = await svc.remove('sub-1');
+    const result = await svc.remove('sub-1', 'user-id-1');
     expect(result).toBe(fakeSub);
   });
 });

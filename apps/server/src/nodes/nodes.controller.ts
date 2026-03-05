@@ -46,8 +46,11 @@ export class NodesController {
   @Roles('ADMIN', 'OPERATOR')
   @Audit('CREATE', 'node')
   @ApiOperation({ summary: 'Create a new node (manual — all fields required)' })
-  create(@Body() dto: CreateNodeDto) {
-    return this.nodesService.create(dto);
+  create(
+    @Body() dto: CreateNodeDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.nodesService.create(dto, user.id);
   }
 
   @Post('preset')
@@ -64,22 +67,31 @@ export class NodesController {
   @Get()
   @ApiQuery({ name: 'serverId', required: false })
   @ApiOperation({ summary: 'List nodes, optionally filter by serverId' })
-  findAll(@Query('serverId') serverId?: string) {
-    return this.nodesService.findAll(serverId);
+  findAll(
+    @CurrentUser() user: { id: string },
+    @Query('serverId') serverId?: string,
+  ) {
+    return this.nodesService.findAll(user.id, serverId);
   }
 
   @Sse('test-all')
   @Roles('ADMIN', 'OPERATOR')
   @ApiQuery({ name: 'ids', required: false, description: 'Comma-separated node IDs. Omit to test all nodes.' })
   @ApiOperation({ summary: 'Batch-test nodes via Xray and stream results as SSE' })
-  testAllStream(@Query('ids') ids?: string): Observable<MessageEvent> {
+  testAllStream(
+    @CurrentUser() user: { id: string },
+    @Query('ids') ids?: string,
+  ): Observable<MessageEvent> {
     return new Observable((subscriber) => {
       const run = async () => {
         let nodeIds: string[];
         if (ids) {
-          nodeIds = ids.split(',').filter(Boolean);
+          // Filter provided IDs to only those owned by the current user
+          const ownedNodes = await this.nodesService.findAll(user.id);
+          const ownedIds = new Set(ownedNodes.map((n) => n.id));
+          nodeIds = ids.split(',').filter((id) => ownedIds.has(id));
         } else {
-          const nodes = await this.nodesService.findAll();
+          const nodes = await this.nodesService.findAll(user.id);
           nodeIds = nodes.map((n) => n.id);
         }
 
@@ -119,37 +131,55 @@ export class NodesController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.nodesService.findOne(id);
+  findOne(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.nodesService.findOne(id, user.id);
   }
 
   @Patch(':id')
   @Roles('ADMIN', 'OPERATOR')
   @Audit('UPDATE', 'node')
-  update(@Param('id') id: string, @Body() dto: UpdateNodeDto) {
-    return this.nodesService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateNodeDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.nodesService.update(id, dto, user.id);
   }
 
   @Patch(':id/rename')
   @Roles('ADMIN', 'OPERATOR')
   @Audit('UPDATE', 'node')
   @ApiOperation({ summary: 'Rename a node (no redeploy)' })
-  rename(@Param('id') id: string, @Body('name') name: string) {
-    return this.nodesService.rename(id, name);
+  rename(
+    @Param('id') id: string,
+    @Body('name') name: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.nodesService.rename(id, name, user.id);
   }
 
   @Patch(':id/toggle')
   @Roles('ADMIN', 'OPERATOR')
   @Audit('UPDATE', 'node')
   @ApiOperation({ summary: 'Toggle node enabled state (start/stop service)' })
-  toggle(@Param('id') id: string) {
-    return this.nodesService.toggle(id);
+  toggle(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.nodesService.toggle(id, user.id);
   }
 
   @Get(':id/deploy-log')
   @Roles('ADMIN', 'OPERATOR')
   @ApiOperation({ summary: 'Get the latest deployment log for a node' })
-  async getDeployLog(@Param('id') id: string) {
+  async getDeployLog(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    await this.nodesService.findOne(id, user.id);
     const snapshot = await this.nodesService.getLatestSnapshot(id);
     return {
       deployLog: snapshot?.deployLog ?? null,
@@ -161,22 +191,32 @@ export class NodesController {
   @Get(':id/credentials')
   @Roles('ADMIN', 'OPERATOR')
   @ApiOperation({ summary: 'Get decrypted credentials for a node (edit use only)' })
-  getCredentials(@Param('id') id: string) {
-    return this.nodesService.getCredentials(id);
+  getCredentials(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.nodesService.getCredentials(id, user.id);
   }
 
   @Get(':id/share')
   @Roles('ADMIN', 'OPERATOR')
   @ApiOperation({ summary: 'Get single-node share URI (vmess://, vless://, etc.)' })
-  async getShareLink(@Param('id') id: string) {
-    const uri = await this.nodesService.getShareLink(id);
+  async getShareLink(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    const uri = await this.nodesService.getShareLink(id, user.id);
     return { uri };
   }
 
   @Post(':id/test')
   @Roles('ADMIN', 'OPERATOR')
   @ApiOperation({ summary: 'Test node proxy connectivity via Xray (end-to-end)' })
-  testNode(@Param('id') id: string) {
+  async testNode(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    await this.nodesService.findOne(id, user.id);
     return this.xrayTest.testNode(id);
   }
 
@@ -184,7 +224,12 @@ export class NodesController {
   @Roles('ADMIN', 'OPERATOR')
   @Audit('DEPLOY', 'node')
   @ApiOperation({ summary: 'Deploy node config to server via SSH' })
-  deploy(@Param('id') id: string, @Req() req: { correlationId?: string }) {
+  async deploy(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+    @Req() req: { correlationId?: string },
+  ) {
+    await this.nodesService.findOne(id, user.id);
     return this.nodeDeploy.deploy(id, undefined, undefined, req.correlationId);
   }
 
@@ -229,7 +274,10 @@ export class NodesController {
   @Delete(':id')
   @Roles('ADMIN')
   @Audit('DELETE', 'node')
-  remove(@Param('id') id: string) {
-    return this.nodesService.remove(id);
+  remove(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.nodesService.remove(id, user.id);
   }
 }

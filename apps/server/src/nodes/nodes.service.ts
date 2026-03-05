@@ -23,7 +23,7 @@ export class NodesService {
     private cfSettings: CloudflareSettingsService,
   ) {}
 
-  async create(dto: CreateNodeDto) {
+  async create(dto: CreateNodeDto, userId: string) {
     if (dto.tls === 'REALITY' && dto.protocol !== 'VLESS') {
       throw new BadRequestException('REALITY 仅支持 VLESS 协议');
     }
@@ -35,6 +35,7 @@ export class NodesService {
     const node = await this.prisma.node.create({
       data: {
         serverId: dto.serverId,
+        userId,
         name: dto.name,
         protocol: dto.protocol,
         implementation: dto.implementation,
@@ -83,29 +84,29 @@ export class NodesService {
       await this.provisionCloudflareDns(userId, node.id, dto.serverId);
     }
 
-    return this.findOne(node.id);
+    return this.findOne(node.id, userId);
   }
 
-  async findAll(serverId?: string) {
+  async findAll(userId: string, serverId?: string) {
     return this.prisma.node.findMany({
-      where: serverId ? { serverId } : undefined,
+      where: serverId ? { userId, serverId } : { userId },
       select: this.safeSelect(),
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async findOne(id: string) {
-    const node = await this.prisma.node.findUnique({
-      where: { id },
+  async findOne(id: string, userId: string) {
+    const node = await this.prisma.node.findFirst({
+      where: { id, userId },
       select: this.safeSelect(),
     });
     if (!node) throw new NotFoundException(`Node ${id} not found`);
     return node;
   }
 
-  async update(id: string, dto: UpdateNodeDto) {
-    const existing = await this.prisma.node.findUnique({
-      where: { id },
+  async update(id: string, dto: UpdateNodeDto, userId: string) {
+    const existing = await this.prisma.node.findFirst({
+      where: { id, userId },
       select: { protocol: true, tls: true, credentialsEnc: true },
     });
     if (!existing) throw new NotFoundException(`Node ${id} not found`);
@@ -148,9 +149,9 @@ export class NodesService {
     return node;
   }
 
-  async remove(id: string) {
-    const node = await this.prisma.node.findUnique({
-      where: { id },
+  async remove(id: string, userId: string) {
+    const node = await this.prisma.node.findFirst({
+      where: { id, userId },
       select: { id: true, userId: true, cfDnsRecordId: true },
     });
     if (!node) throw new NotFoundException(`Node ${id} not found`);
@@ -171,8 +172,8 @@ export class NodesService {
   }
 
   /** Rename a node without triggering a redeploy */
-  async rename(id: string, name: string) {
-    const node = await this.prisma.node.findUnique({ where: { id } });
+  async rename(id: string, name: string, userId: string) {
+    const node = await this.prisma.node.findFirst({ where: { id, userId } });
     if (!node) throw new NotFoundException(`Node ${id} not found`);
     return this.prisma.node.update({
       where: { id },
@@ -182,9 +183,9 @@ export class NodesService {
   }
 
   /** Toggle node enabled state: stop service if enabled, start if disabled */
-  async toggle(id: string) {
-    const node = await this.prisma.node.findUnique({
-      where: { id },
+  async toggle(id: string, userId: string) {
+    const node = await this.prisma.node.findFirst({
+      where: { id, userId },
       select: { id: true, enabled: true },
     });
     if (!node) throw new NotFoundException(`Node ${id} not found`);
@@ -203,13 +204,13 @@ export class NodesService {
   }
 
   /** Build a single-node share URI (vmess://, vless://, etc.) */
-  async getShareLink(id: string): Promise<string | null> {
-    const node = await this.prisma.node.findUnique({
-      where: { id },
+  async getShareLink(id: string, userId: string): Promise<string | null> {
+    const node = await this.prisma.node.findFirst({
+      where: { id, userId },
       include: { server: { select: { ip: true } } },
     });
     if (!node) throw new NotFoundException(`Node ${id} not found`);
-    const credentials = await this.getCredentials(id);
+    const credentials = await this.getCredentials(id, userId);
     return buildShareUri({
       name: node.name,
       protocol: node.protocol,
@@ -231,9 +232,9 @@ export class NodesService {
   }
 
   /** Decrypt credentials — only use when generating subscription / deploying */
-  async getCredentials(id: string): Promise<Record<string, string>> {
-    const node = await this.prisma.node.findUnique({
-      where: { id },
+  async getCredentials(id: string, userId: string): Promise<Record<string, string>> {
+    const node = await this.prisma.node.findFirst({
+      where: { id, userId },
       select: { credentialsEnc: true },
     });
     if (!node) throw new NotFoundException(`Node ${id} not found`);

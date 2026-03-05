@@ -11,7 +11,7 @@ const mockPrisma = {
   node: {
     create: jest.fn(),
     findMany: jest.fn(),
-    findUnique: jest.fn(),
+    findFirst: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
   },
@@ -57,7 +57,7 @@ describe('NodesService', () => {
         implementation: 'XRAY' as any, transport: 'TCP' as any, tls: 'NONE' as any,
         listenPort: 10086, credentials: { uuid: 'abc' }, enabled: true,
       };
-      await svc.create(dto);
+      await svc.create(dto, 'user-id-1');
       expect(mockCrypto.encrypt).toHaveBeenCalledWith(JSON.stringify({ uuid: 'abc' }));
       // deploy is fire-and-forget; just verify it was called
       expect(mockDeploy.deploy).toHaveBeenCalledWith('node-1');
@@ -66,7 +66,7 @@ describe('NodesService', () => {
     it('defaults enabled to true when not provided', async () => {
       (mockPrisma.node.create as jest.Mock).mockResolvedValue(fakeNode);
       const dto = { serverId: 's', name: 'N', protocol: 'VMESS', listenPort: 80, credentials: {} } as any;
-      await svc.create(dto);
+      await svc.create(dto, 'user-id-1');
       const data = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
       expect(data.enabled).toBe(true);
     });
@@ -74,7 +74,7 @@ describe('NodesService', () => {
     it('defaults tls to NONE when not provided', async () => {
       (mockPrisma.node.create as jest.Mock).mockResolvedValue(fakeNode);
       const dto = { serverId: 's', name: 'N', protocol: 'VMESS', listenPort: 80, credentials: {} } as any;
-      await svc.create(dto);
+      await svc.create(dto, 'user-id-1');
       const data = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
       expect(data.tls).toBe('NONE');
     });
@@ -83,56 +83,56 @@ describe('NodesService', () => {
   describe('findAll', () => {
     it('returns all nodes when no serverId filter', async () => {
       (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([fakeNode]);
-      const result = await svc.findAll();
+      const result = await svc.findAll('user-id-1');
       expect(result).toHaveLength(1);
-      expect((mockPrisma.node.findMany as jest.Mock).mock.calls[0][0].where).toBeUndefined();
+      expect((mockPrisma.node.findMany as jest.Mock).mock.calls[0][0].where).toEqual({ userId: 'user-id-1' });
     });
 
     it('filters by serverId when provided', async () => {
       (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([fakeNode]);
-      await svc.findAll('srv-1');
-      expect((mockPrisma.node.findMany as jest.Mock).mock.calls[0][0].where).toEqual({ serverId: 'srv-1' });
+      await svc.findAll('user-id-1', 'srv-1');
+      expect((mockPrisma.node.findMany as jest.Mock).mock.calls[0][0].where).toEqual({ userId: 'user-id-1', serverId: 'srv-1' });
     });
   });
 
   describe('findOne', () => {
     it('returns the node when found', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
-      await expect(svc.findOne('node-1')).resolves.toBe(fakeNode);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(fakeNode);
+      await expect(svc.findOne('node-1', 'user-id-1')).resolves.toBe(fakeNode);
     });
 
     it('throws NotFoundException when node is missing', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(null);
-      await expect(svc.findOne('missing')).rejects.toThrow(NotFoundException);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(null);
+      await expect(svc.findOne('missing', 'user-id-1')).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('update', () => {
     it('re-encrypts credentials when provided in update', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(fakeNode);
       (mockPrisma.node.update as jest.Mock).mockResolvedValue(fakeNode);
-      await svc.update('node-1', { credentials: { uuid: 'new-uuid' } } as any);
+      await svc.update('node-1', { credentials: { uuid: 'new-uuid' } } as any, 'user-id-1');
       expect(mockCrypto.encrypt).toHaveBeenCalledWith(JSON.stringify({ uuid: 'new-uuid' }));
     });
 
     it('does not re-encrypt when credentials not provided', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(fakeNode);
       (mockPrisma.node.update as jest.Mock).mockResolvedValue(fakeNode);
-      await svc.update('node-1', { name: 'Renamed' } as any);
+      await svc.update('node-1', { name: 'Renamed' } as any, 'user-id-1');
       expect(mockCrypto.encrypt).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException for missing node', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(null);
-      await expect(svc.update('bad', {} as any)).rejects.toThrow(NotFoundException);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(null);
+      await expect(svc.update('bad', {} as any, 'user-id-1')).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('remove', () => {
     it('calls undeploy and then deletes', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(fakeNode);
       (mockPrisma.node.delete as jest.Mock).mockResolvedValue(fakeNode);
-      await svc.remove('node-1');
+      await svc.remove('node-1', 'user-id-1');
       expect(mockDeploy.undeploy).toHaveBeenCalledWith('node-1');
       expect(mockPrisma.node.delete).toHaveBeenCalledWith({ where: { id: 'node-1' } });
     });
@@ -140,11 +140,11 @@ describe('NodesService', () => {
 
   describe('update – redeploy error logging', () => {
     it('logs error when redeploy rejects', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(fakeNode);
       (mockPrisma.node.update as jest.Mock).mockResolvedValue(fakeNode);
       (mockDeploy.deploy as jest.Mock).mockRejectedValue(new Error('ssh fail'));
 
-      await svc.update('node-1', { name: 'Renamed' } as any);
+      await svc.update('node-1', { name: 'Renamed' } as any, 'user-id-1');
       // flush microtasks so the catch callback runs
       await new Promise((r) => setTimeout(r, 0));
 
@@ -154,11 +154,11 @@ describe('NodesService', () => {
 
   describe('remove – undeploy error propagation', () => {
     it('throws and aborts deletion when undeploy rejects (SSH-first pattern)', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(fakeNode);
       (mockPrisma.node.delete as jest.Mock).mockResolvedValue(fakeNode);
       (mockDeploy.undeploy as jest.Mock).mockRejectedValue(new Error('undeploy fail'));
 
-      await expect(svc.remove('node-1')).rejects.toThrow('undeploy fail');
+      await expect(svc.remove('node-1', 'user-id-1')).rejects.toThrow('undeploy fail');
       expect(mockPrisma.node.delete).not.toHaveBeenCalled();
     });
   });
@@ -170,20 +170,20 @@ describe('NodesService', () => {
       ['SHADOWSOCKS', 'REALITY'],
     ])('%s+REALITY 创建时应抛出 BadRequestException', async (protocol, tls) => {
       const dto = { serverId: 's', name: 'N', protocol, tls, listenPort: 443, credentials: {} } as any;
-      await expect(svc.create(dto)).rejects.toThrow('REALITY 仅支持 VLESS 协议');
+      await expect(svc.create(dto, 'user-id-1')).rejects.toThrow('REALITY 仅支持 VLESS 协议');
     });
 
     it('update 时切换为非法组合（TROJAN+REALITY）应抛出 BadRequestException', async () => {
       const existing = { ...fakeNode, protocol: 'TROJAN', tls: 'NONE', credentialsEnc: 'enc:{}' };
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(existing);
-      await expect(svc.update('node-1', { tls: 'REALITY' as any } as any))
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(existing);
+      await expect(svc.update('node-1', { tls: 'REALITY' as any } as any, 'user-id-1'))
         .rejects.toThrow('REALITY 仅支持 VLESS 协议');
     });
 
     it('update 时把协议改为非 VLESS 且已有 REALITY TLS 应抛出 BadRequestException', async () => {
       const existing = { ...fakeNode, protocol: 'VLESS', tls: 'REALITY', credentialsEnc: 'enc:{"realityPrivateKey":"pk","realityPublicKey":"pub"}' };
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(existing);
-      await expect(svc.update('node-1', { protocol: 'TROJAN' as any } as any))
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(existing);
+      await expect(svc.update('node-1', { protocol: 'TROJAN' as any } as any, 'user-id-1'))
         .rejects.toThrow('REALITY 仅支持 VLESS 协议');
     });
   });
@@ -196,7 +196,7 @@ describe('NodesService', () => {
         serverId: 's', name: 'N', protocol: 'VLESS', tls: 'REALITY',
         listenPort: 443, credentials: {}, enabled: true,
       } as any;
-      await svc.create(dto);
+      await svc.create(dto, 'user-id-1');
       const encArg = (mockCrypto.encrypt as jest.Mock).mock.calls[0][0];
       const parsed = JSON.parse(encArg) as Record<string, string>;
       expect(parsed.realityPrivateKey).toBeDefined();
@@ -210,7 +210,7 @@ describe('NodesService', () => {
         serverId: 's', name: 'N', protocol: 'VLESS', tls: 'REALITY',
         listenPort: 443, credentials: { realityPrivateKey: 'mykey', realityPublicKey: 'mypub' }, enabled: true,
       } as any;
-      await svc.create(dto);
+      await svc.create(dto, 'user-id-1');
       const encArg = (mockCrypto.encrypt as jest.Mock).mock.calls[0][0];
       const parsed = JSON.parse(encArg) as Record<string, string>;
       expect(parsed.realityPrivateKey).toBe('mykey');
@@ -222,7 +222,7 @@ describe('NodesService', () => {
       (mockPrisma.node.create as jest.Mock).mockResolvedValue(fakeNode);
       (mockDeploy.deploy as jest.Mock).mockRejectedValue(new Error('ssh connect failed'));
       const dto = { serverId: 's', name: 'N', protocol: 'VMESS', listenPort: 80, credentials: {} } as any;
-      await svc.create(dto);
+      await svc.create(dto, 'user-id-1');
       await new Promise((r) => setTimeout(r, 0));
       // Error is caught and logged; no throw propagated to caller
     });
@@ -231,10 +231,10 @@ describe('NodesService', () => {
   describe('update – REALITY credentials', () => {
     it('generates REALITY keys when update switches tls to REALITY without existing keys', async () => {
       const nodeWithCreds = { ...fakeNode, protocol: 'VLESS', tls: 'NONE', credentialsEnc: 'enc:{"uuid":"u1"}' };
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(nodeWithCreds);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(nodeWithCreds);
       (mockPrisma.node.update as jest.Mock).mockResolvedValue(fakeNode);
 
-      await svc.update('node-1', { tls: 'REALITY' as any } as any);
+      await svc.update('node-1', { tls: 'REALITY' as any } as any, 'user-id-1');
 
       const encArg = (mockCrypto.encrypt as jest.Mock).mock.calls[0][0];
       const parsed = JSON.parse(encArg) as Record<string, string>;
@@ -245,10 +245,10 @@ describe('NodesService', () => {
 
     it('merges incoming credentials with existing when updating REALITY node', async () => {
       const nodeWithCreds = { ...fakeNode, protocol: 'VLESS', tls: 'REALITY', credentialsEnc: 'enc:{"realityPrivateKey":"pk","realityPublicKey":"pub"}' };
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(nodeWithCreds);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(nodeWithCreds);
       (mockPrisma.node.update as jest.Mock).mockResolvedValue(fakeNode);
 
-      await svc.update('node-1', { tls: 'REALITY' as any, credentials: { uuid: 'new-uuid' } } as any);
+      await svc.update('node-1', { tls: 'REALITY' as any, credentials: { uuid: 'new-uuid' } } as any, 'user-id-1');
 
       const encArg = (mockCrypto.encrypt as jest.Mock).mock.calls[0][0];
       const parsed = JSON.parse(encArg) as Record<string, string>;
@@ -261,7 +261,7 @@ describe('NodesService', () => {
     it('creates node with auto-generated credentials for VLESS_REALITY', async () => {
       (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]); // no existing ports
       (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-preset' });
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-preset' });
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-preset' });
 
       const result = await svc.createFromPreset('user-1', {
         serverId: 'srv-1',
@@ -284,7 +284,7 @@ describe('NodesService', () => {
 
     it('uses fixed port 443 for VLESS_WS_TLS', async () => {
       (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-ws' });
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-ws' });
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-ws' });
 
       await svc.createFromPreset('user-1', {
         serverId: 'srv-1',
@@ -300,37 +300,37 @@ describe('NodesService', () => {
   describe('getShareLink', () => {
     it('returns a share URI for a VMESS node', async () => {
       const fakeNodeWithServer = { ...fakeNode, protocol: 'VMESS', transport: 'TCP', tls: 'NONE', domain: null, server: { ip: '1.2.3.4' } };
-      (mockPrisma.node.findUnique as jest.Mock)
+      (mockPrisma.node.findFirst as jest.Mock)
         .mockResolvedValueOnce(fakeNodeWithServer)
         .mockResolvedValueOnce({ credentialsEnc: 'enc:{"uuid":"test-uuid"}' });
 
-      const uri = await svc.getShareLink('node-1');
+      const uri = await svc.getShareLink('node-1', 'user-id-1');
       expect(uri).not.toBeNull();
       expect(uri).toContain('vmess://');
     });
 
     it('returns null for an unsupported protocol', async () => {
       const fakeNodeWithServer = { ...fakeNode, protocol: 'UNKNOWN', domain: null, server: { ip: '1.2.3.4' } };
-      (mockPrisma.node.findUnique as jest.Mock)
+      (mockPrisma.node.findFirst as jest.Mock)
         .mockResolvedValueOnce(fakeNodeWithServer)
         .mockResolvedValueOnce({ credentialsEnc: 'enc:{}' });
 
-      const uri = await svc.getShareLink('node-1');
+      const uri = await svc.getShareLink('node-1', 'user-id-1');
       expect(uri).toBeNull();
     });
 
     it('throws NotFoundException when node is missing', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(null);
-      await expect(svc.getShareLink('bad')).rejects.toThrow(NotFoundException);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(null);
+      await expect(svc.getShareLink('bad', 'user-id-1')).rejects.toThrow(NotFoundException);
     });
 
     it('always uses server IP as host (domain is only SNI, not the connection target)', async () => {
       const fakeNodeWithDomain = { ...fakeNode, protocol: 'VLESS', transport: 'TCP', tls: 'NONE', domain: 'cdn.example.com', server: { ip: '1.2.3.4' } };
-      (mockPrisma.node.findUnique as jest.Mock)
+      (mockPrisma.node.findFirst as jest.Mock)
         .mockResolvedValueOnce(fakeNodeWithDomain)
         .mockResolvedValueOnce({ credentialsEnc: 'enc:{"uuid":"u1"}' });
 
-      const uri = await svc.getShareLink('node-1');
+      const uri = await svc.getShareLink('node-1', 'user-id-1');
       expect(uri).toContain('1.2.3.4');
       expect(uri).not.toContain('cdn.example.com@');
     });
@@ -339,24 +339,24 @@ describe('NodesService', () => {
   describe('getCredentials', () => {
     it('decrypts and parses credentials', async () => {
       const encrypted = 'enc:{"uuid":"abc-123"}';
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ credentialsEnc: encrypted });
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ credentialsEnc: encrypted });
       (mockCrypto.decrypt as jest.Mock).mockReturnValue('{"uuid":"abc-123"}');
-      const creds = await svc.getCredentials('node-1');
+      const creds = await svc.getCredentials('node-1', 'user-id-1');
       expect(creds).toEqual({ uuid: 'abc-123' });
     });
 
     it('throws NotFoundException when node is missing', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(null);
-      await expect(svc.getCredentials('bad')).rejects.toThrow(NotFoundException);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(null);
+      await expect(svc.getCredentials('bad', 'user-id-1')).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('rename', () => {
     it('updates the node name and returns updated node', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(fakeNode);
       (mockPrisma.node.update as jest.Mock).mockResolvedValue({ ...fakeNode, name: 'New Name' });
 
-      const result = await svc.rename('node-1', 'New Name');
+      const result = await svc.rename('node-1', 'New Name', 'user-id-1');
 
       expect(mockPrisma.node.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'node-1' }, data: { name: 'New Name' } }),
@@ -365,17 +365,17 @@ describe('NodesService', () => {
     });
 
     it('throws NotFoundException when node is missing', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(null);
-      await expect(svc.rename('bad', 'X')).rejects.toThrow(NotFoundException);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(null);
+      await expect(svc.rename('bad', 'X', 'user-id-1')).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('toggle', () => {
     it('disables an enabled node and sets status to STOPPED', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ id: 'node-1', enabled: true });
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ id: 'node-1', enabled: true });
       (mockPrisma.node.update as jest.Mock).mockResolvedValue({ ...fakeNode, enabled: false, status: 'STOPPED' });
 
-      const result = await svc.toggle('node-1');
+      const result = await svc.toggle('node-1', 'user-id-1');
 
       expect(mockDeploy.toggleService).toHaveBeenCalledWith('node-1', false);
       expect(mockPrisma.node.update).toHaveBeenCalledWith(
@@ -385,10 +385,10 @@ describe('NodesService', () => {
     });
 
     it('enables a disabled node and sets status to RUNNING', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ id: 'node-1', enabled: false });
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ id: 'node-1', enabled: false });
       (mockPrisma.node.update as jest.Mock).mockResolvedValue({ ...fakeNode, enabled: true, status: 'RUNNING' });
 
-      await svc.toggle('node-1');
+      await svc.toggle('node-1', 'user-id-1');
 
       expect(mockDeploy.toggleService).toHaveBeenCalledWith('node-1', true);
       expect(mockPrisma.node.update).toHaveBeenCalledWith(
@@ -397,8 +397,8 @@ describe('NodesService', () => {
     });
 
     it('throws NotFoundException when node is missing', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(null);
-      await expect(svc.toggle('bad')).rejects.toThrow(NotFoundException);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(null);
+      await expect(svc.toggle('bad', 'user-id-1')).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -409,23 +409,23 @@ describe('NodesService', () => {
 
     it('cleans up Cloudflare DNS record when cfDnsRecordId is set', async () => {
       const nodeWithCf = { id: 'node-1', userId: 'user-1', cfDnsRecordId: 'rec-abc' };
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(nodeWithCf);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(nodeWithCf);
       (mockPrisma.node.delete as jest.Mock).mockResolvedValue(nodeWithCf);
       (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
         apiToken: 'token', domain: 'example.com', zoneId: 'zone-1',
       });
 
-      await svc.remove('node-1');
+      await svc.remove('node-1', 'user-id-1');
 
       expect(mockCfService.deleteRecord).toHaveBeenCalledWith('token', 'zone-1', 'rec-abc');
     });
 
     it('skips Cloudflare cleanup when cfDnsRecordId is null', async () => {
       const nodeNoCf = { id: 'node-1', userId: 'user-1', cfDnsRecordId: null };
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(nodeNoCf);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(nodeNoCf);
       (mockPrisma.node.delete as jest.Mock).mockResolvedValue(nodeNoCf);
 
-      await svc.remove('node-1');
+      await svc.remove('node-1', 'user-id-1');
 
       expect(mockCfService.deleteRecord).not.toHaveBeenCalled();
     });
@@ -448,7 +448,7 @@ describe('NodesService', () => {
   describe('createFromPreset — Cloudflare DNS provisioning', () => {
     it('provisions Cloudflare DNS when preset is VLESS_WS_TLS and CF settings exist', async () => {
       (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-ws' });
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-ws' });
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-ws' });
       (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
         apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
       });
