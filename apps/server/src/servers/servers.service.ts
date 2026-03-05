@@ -216,6 +216,29 @@ export class ServersService {
       const alreadyInstalled = activeCode === 0;
       if (alreadyInstalled) onLog('检测到已安装旧版 Agent，将升级到最新版本...');
 
+      // BBR 网络优化（best-effort，失败不中断安装）
+      onLog('检测 BBR 支持...');
+      const { code: bbrCheckCode } = await ssh.execCommand(
+        'grep -q bbr /proc/sys/net/ipv4/tcp_available_congestion_control',
+      );
+      if (bbrCheckCode === 0) {
+        const { code: bbrApplyCode } = await ssh.execCommand(
+          'grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf' +
+          ' || (printf "net.core.default_qdisc=fq\\nnet.ipv4.tcp_congestion_control=bbr\\n" >> /etc/sysctl.conf)' +
+          ' && sysctl -p >/dev/null 2>&1',
+        );
+        if (bbrApplyCode === 0) {
+          const { stdout: activeAlgo } = await ssh.execCommand(
+            'sysctl -n net.ipv4.tcp_congestion_control',
+          );
+          onLog(`BBR 已启用（当前拥塞控制算法: ${activeAlgo.trim()}）`);
+        } else {
+          onLog('⚠ BBR 配置失败（可能为容器环境限制），已跳过');
+        }
+      } else {
+        onLog('⚠ 当前系统不支持 BBR（内核版本 < 4.9 或容器环境限制），已跳过');
+      }
+
       // 检测架构
       onLog('检测系统架构...');
       const { stdout: arch } = await ssh.execCommand('uname -m');
