@@ -1,495 +1,354 @@
-# NextPanel
+<div align="center">
 
-一站式多协议代理服务器管理面板。
+<h1>NextPanel</h1>
 
-An all-in-one multi-protocol proxy server management panel with deployment automation, monitoring, and audit logging.
+<p>轻量化代理节点管理面板，一站式部署、监控、订阅导出</p>
+<p><em>A lightweight proxy node management panel — deploy, monitor, and export subscriptions in one place</em></p>
 
-## Quick Links
+[![License](https://img.shields.io/github/license/tripplemay/nextpanel)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/tripplemay/nextpanel)](https://github.com/tripplemay/nextpanel/stargazers)
+[![Release](https://img.shields.io/github/v/release/tripplemay/nextpanel)](https://github.com/tripplemay/nextpanel/releases)
 
-- **Getting Started**: See [RUNBOOK.md](./docs/RUNBOOK.md) for quick start
-- **Contributing**: See [CONTRIBUTING.md](./docs/CONTRIBUTING.md) for development setup
-- **API Docs**: http://localhost:3001/api/docs (when running)
+[中文](#中文) · [English](#english)
 
-## Tech Stack
-
-| Layer | Technology | Version |
-|-------|-----------|---------|
-| Frontend | Next.js + Ant Design + TanStack Query | 15.1.3 + 5.22.7 + 5.62.16 |
-| Backend | NestJS + Prisma | 10.4.15 + 5.22.0 |
-| Database | PostgreSQL | 16 |
-| Package Manager | pnpm workspace | 9+ |
-
-## Features
-
-### Core Capabilities
-
-- **Server Management** — Register and manage multiple proxy servers
-  - SSH connection (key or password auth)
-  - Server health monitoring (CPU, RAM, disk, network)
-  - Real-time agent heartbeats
-  - Tags and metadata
-
-- **Node Configuration** — Configure proxy nodes with multiple protocols
-  - Supported protocols: VMess, VLESS, Trojan, Shadowsocks, SOCKS5, HTTP
-  - Implementations: XRay, V2Ray, Sing-Box, SS-Libev
-  - Transports: TCP, WebSocket, gRPC, QUIC
-  - TLS modes: None, TLS, Reality
-
-- **Configuration Templates** — Reusable deployment templates
-  - Template variables for configuration customization
-  - JSON-based configuration format
-  - Version control via ConfigSnapshot
-
-- **Release Management** — Deploy configurations to servers
-  - Release strategies: Single, Batch, Canary
-  - Audit trail for all deployments
-  - Rollback support
-  - Real-time status tracking
-
-- **Subscriptions** — Distribute node configurations
-  - Create subscription feeds for client applications
-  - Token-based access control
-  - Include/exclude specific nodes
-
-- **Metrics & Monitoring** — Track server performance
-  - CPU, memory, disk, network metrics
-  - Historical data aggregation
-  - Dashboard overview
-
-- **Audit Logging** — Complete action history
-  - Login, logout, deployment actions
-  - SSH testing, configuration changes
-  - Diff tracking for updates
-
-- **User Management** — Role-based access control
-  - Admin — Full access
-  - Operator — Deploy and manage
-  - Viewer — Read-only access
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Frontend (Next.js 15)                     │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ Pages (Servers, Nodes, Templates, Releases, Metrics) │   │
-│  │ Components (Forms, Lists, Details, Charts)           │   │
-│  │ State: Zustand (auth) + TanStack Query (server data) │   │
-│  │ HTTP Client: Axios with JWT middleware               │   │
-│  └──────────────────────────────────────────────────────┘   │
-│  Port: 3000                                                  │
-└─────────────────────┬──────────────────────────────────────┘
-                      │ HTTP/REST API
-┌─────────────────────▼──────────────────────────────────────┐
-│                Backend (NestJS 10)                           │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ Modules:                                             │   │
-│  │ • AuthModule — JWT authentication & authorization    │   │
-│  │ • ServersModule — Server CRUD & health              │   │
-│  │ • NodesModule — Node configuration & deployment     │   │
-│  │ • TemplatesModule — Template management             │   │
-│  │ • ReleasesModule — Release orchestration            │   │
-│  │ • SubscriptionsModule — Subscription feeds          │   │
-│  │ • MetricsModule — Metrics collection & aggregation  │   │
-│  │ • AgentModule — Remote agent heartbeat receiver     │   │
-│  │ • AuditModule — Action logging                      │   │
-│  └──────────────────────────────────────────────────────┘   │
-│  Middleware: JWT validation, CORS, logging                  │
-│  Port: 3001                                                  │
-└─────────────────────┬──────────────────────────────────────┘
-                      │ Prisma ORM
-┌─────────────────────▼──────────────────────────────────────┐
-│            Database (PostgreSQL 16)                          │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ Tables:                                              │   │
-│  │ • User (with roles)                                  │   │
-│  │ • Server (with agent tokens & health metrics)        │   │
-│  │ • Node (with encrypted credentials)                  │   │
-│  │ • Template (with variable placeholders)              │   │
-│  │ • Release + ReleaseStep (deployment tracking)        │   │
-│  │ • ConfigSnapshot (version history)                   │   │
-│  │ • ServerMetric (time-series metrics)                 │   │
-│  │ • Subscription + SubscriptionNode (distributions)    │   │
-│  │ • AuditLog (compliance & debugging)                  │   │
-│  └──────────────────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────────────────┐
-│         Remote Agents (on target servers)                     │
-│  ┌──────────────────────────────────────────────────────┐    │
-│  │ Lightweight agent process                            │    │
-│  │ • Polls for pending releases                         │    │
-│  │ • Executes deployment commands                       │    │
-│  │ • Reports heartbeat (metrics, node status)           │    │
-│  │ • Updates Server entity with latest status           │    │
-│  └──────────────────────────────────────────────────────┘    │
-│                                                               │
-│  API Endpoints:                                              │
-│  • GET /api/releases/pending (agent polls)                   │
-│  • POST /api/agent/heartbeat (agent reports)                 │
-│  • PUT /api/releases/{id}/step/{id} (report step status)     │
-└──────────────────────────────────────────────────────────────┘
-```
-
-## Data Models
-
-### Key Relationships
-
-```
-User (id, username, role)
-  ├─→ auditLogs (who did what)
-  ├─→ releases (who deployed)
-  ├─→ templates (who created)
-  └─→ subscriptions (who owns)
-
-Server (id, name, ip, sshAuth)
-  ├─→ nodes (what proxies run here)
-  ├─→ releaseSteps (deployment history)
-  ├─→ metrics (performance data)
-  └─→ agentToken (unique identity for agent)
-
-Node (id, protocol, credentials)
-  ├─→ snapshots (config versions)
-  └─→ subscriptionNodes (included in which feeds)
-
-Template (id, protocol, content)
-  └─→ releases (deployed from this template)
-
-Release (id, template, variables, strategy)
-  └─→ releaseSteps (execution per server)
-
-Subscription (id, token)
-  └─→ subscriptionNodes (which nodes to distribute)
-
-AuditLog (action, resource, diff)
-  └─→ Track all changes for compliance
-```
-
-## API Overview
-
-<!-- AUTO-GENERATED: Core endpoints from architecture -->
-
-### Authentication
-
-```
-POST   /api/auth/login                 # Login with username/password
-GET    /api/auth/me                    # Get current user info
-```
-
-### Servers
-
-```
-GET    /api/servers                    # List all servers (paginated)
-POST   /api/servers                    # Create new server
-GET    /api/servers/:id                # Get server details
-PATCH  /api/servers/:id                # Update server
-DELETE /api/servers/:id                # Delete server
-POST   /api/servers/:id/test-ssh       # Test SSH connectivity
-```
-
-### Nodes
-
-```
-GET    /api/nodes                      # List all nodes (paginated)
-POST   /api/nodes                      # Create node on server
-GET    /api/nodes/:id                  # Get node details
-PATCH  /api/nodes/:id                  # Update node
-DELETE /api/nodes/:id                  # Delete node
-```
-
-### Templates
-
-```
-GET    /api/templates                  # List all templates
-POST   /api/templates                  # Create new template
-GET    /api/templates/:id              # Get template details
-PATCH  /api/templates/:id              # Update template
-DELETE /api/templates/:id              # Delete template
-```
-
-### Releases
-
-```
-GET    /api/releases                   # List all releases
-POST   /api/releases                   # Create and deploy release
-GET    /api/releases/:id               # Get release details
-GET    /api/releases/pending           # Agent polls for pending releases
-```
-
-### Metrics & Monitoring
-
-```
-GET    /api/metrics/overview           # Dashboard stats
-GET    /api/metrics/servers/:id        # Server metrics history
-```
-
-### Agent Endpoints
-
-```
-POST   /api/agent/heartbeat            # Agent sends heartbeat
-```
-
-### Subscriptions
-
-```
-GET    /api/subscriptions              # List subscriptions
-POST   /api/subscriptions              # Create subscription
-GET    /api/subscriptions/:token/nodes # Get nodes for subscription
-```
-
-### Audit
-
-```
-GET    /api/audit-logs                 # List audit logs
-```
-
-<!-- END AUTO-GENERATED -->
-
-Full API documentation available at http://localhost:3001/api/docs (Swagger UI)
-
-## Quick Start
-
-### 1. Install Dependencies
-
-```bash
-pnpm install
-```
-
-### 2. Database Setup
-
-```bash
-# Start PostgreSQL (with Docker)
-docker-compose up -d
-
-# Or use local PostgreSQL instance
-```
-
-### 3. Environment Configuration
-
-```bash
-cp apps/server/.env.example apps/server/.env
-```
-
-Edit `apps/server/.env` and update:
-- `DATABASE_URL` — PostgreSQL connection string
-- `JWT_SECRET` — Run `openssl rand -hex 32`
-- `ENCRYPTION_KEY` — Run `openssl rand -hex 32`
-
-### 4. Initialize Database
-
-```bash
-cd apps/server
-pnpm exec prisma migrate dev --name init
-pnpm exec prisma db seed  # Optional: creates admin user
-```
-
-### 5. Start Development
-
-```bash
-cd /path/to/nextpannel
-pnpm dev
-```
-
-Access:
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:3001/api
-- API Docs: http://localhost:3001/api/docs
-
-## Documentation
-
-- **[RUNBOOK.md](./docs/RUNBOOK.md)** — How to run, troubleshoot, and deploy
-- **[CONTRIBUTING.md](./docs/CONTRIBUTING.md)** — Development setup and workflow
-- **API Docs** — http://localhost:3001/api/docs (Swagger)
-- **Database Schema** — `apps/server/prisma/schema.prisma`
-- **Shared Types** — `packages/shared/src/`
-
-## Project Structure
-
-```
-nextpannel/
-├── apps/
-│   ├── server/                 # NestJS backend
-│   │   ├── src/
-│   │   │   ├── auth/          # JWT authentication
-│   │   │   ├── servers/       # Server management
-│   │   │   ├── nodes/         # Node deployment
-│   │   │   ├── templates/     # Configuration templates
-│   │   │   ├── releases/      # Release orchestration
-│   │   │   ├── subscriptions/ # Subscription distribution
-│   │   │   ├── metrics/       # Monitoring & metrics
-│   │   │   ├── agent/         # Agent heartbeat receiver
-│   │   │   ├── audit/         # Audit logging
-│   │   │   └── main.ts        # Entry point
-│   │   ├── prisma/
-│   │   │   ├── schema.prisma  # Database schema
-│   │   │   └── seed.ts        # Database seeding
-│   │   └── package.json
-│   ├── web/                    # Next.js frontend
-│   │   ├── src/
-│   │   │   ├── app/           # App Router pages
-│   │   │   ├── components/    # React components
-│   │   │   ├── lib/           # Utilities & API client
-│   │   │   └── store/         # Zustand stores
-│   │   └── package.json
-│   └── docker-compose.yml     # Local development
-├── packages/
-│   └── shared/                # Shared types & enums
-│       ├── src/
-│       │   ├── enums.ts       # Shared enums
-│       │   └── types.ts       # Shared interfaces
-│       └── package.json
-├── docs/
-│   ├── CONTRIBUTING.md        # Development guide
-│   └── RUNBOOK.md             # Operations guide
-├── pnpm-workspace.yaml
-└── README.md
-```
-
-## Development Scripts
-
-```bash
-# Root level
-pnpm dev      # Start all services
-pnpm build    # Build all packages
-pnpm lint     # Lint all packages
-
-# Backend (cd apps/server)
-pnpm dev      # Start with watch
-pnpm build    # Build
-pnpm lint     # Lint
-
-# Frontend (cd apps/web)
-pnpm dev      # Start dev server
-pnpm build    # Build for production
-pnpm lint     # Lint
-```
-
-## Environment Variables
-
-<!-- AUTO-GENERATED: From .env.example -->
-
-Located in `apps/server/.env`:
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `DATABASE_URL` | ✓ | — | PostgreSQL connection string |
-| `JWT_SECRET` | ✓ | — | JWT signing key (64 hex chars) |
-| `JWT_EXPIRES_IN` | | `7d` | Token expiration |
-| `ENCRYPTION_KEY` | ✓ | — | AES-256 encryption key (64 hex chars) |
-| `PORT` | | `3001` | Server port |
-| `ALLOWED_ORIGIN` | | — | CORS origin (e.g., http://localhost:3000) |
-
-Generate secure keys:
-```bash
-openssl rand -hex 32
-```
-
-<!-- END AUTO-GENERATED -->
-
-## Security Considerations
-
-- **Credentials Encryption** — SSH credentials and node credentials stored encrypted with AES-GCM
-- **JWT Authentication** — All API endpoints require valid JWT (except login & health)
-- **CORS Protection** — Frontend origin validated server-side
-- **Audit Logging** — All actions logged with actor, resource, and diff
-- **Agent Authentication** — Each server has unique `agentToken` for identification
-- **Password Hashing** — User passwords hashed with bcrypt
-
-## Common Tasks
-
-### Add a New Server
-
-```bash
-# Backend API
-curl -X POST http://localhost:3001/api/servers \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "prod-1",
-    "ip": "1.2.3.4",
-    "sshUser": "ubuntu",
-    "sshPort": 22,
-    "sshAuthType": "key",
-    "sshAuth": "-----BEGIN RSA PRIVATE KEY-----\n..."
-  }'
-```
-
-### Deploy Configuration
-
-```bash
-# Create release (renders template with variables)
-curl -X POST http://localhost:3001/api/releases \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "templateId": "<id>",
-    "targets": ["<server-id>"],
-    "strategy": "single",
-    "variables": {
-      "port": "443",
-      "domain": "example.com"
-    }
-  }'
-```
-
-### View Metrics
-
-Frontend dashboard shows:
-- Server health (CPU, RAM, disk, network)
-- Node status
-- Recent deployments
-- Failed operations
-
-## Troubleshooting
-
-See [RUNBOOK.md — Common Problems & Solutions](./docs/RUNBOOK.md#common-problems--solutions)
-
-Common issues:
-- **Port in use** — Kill existing process or change port
-- **DB connection** — Check `DATABASE_URL` and PostgreSQL running
-- **JWT errors** — Regenerate `JWT_SECRET` with `openssl rand -hex 32`
-- **Migration fails** — Run `prisma migrate reset --force` (deletes data)
-
-## Development Notes
-
-### Code Organization
-
-- **Backend** — NestJS modules by feature (auth, servers, nodes, etc.)
-- **Frontend** — Next.js App Router with collocated components
-- **Shared** — TypeScript types and enums in workspace package
-
-### Testing
-
-Currently no automated tests configured. This is a great area for contribution!
-
-### Performance
-
-- Database queries optimized with indexes
-- React Query caching on frontend
-- Prisma client reused across modules
-- Agent heartbeats aggregated for efficiency
-
-## Contributing
-
-See [CONTRIBUTING.md](./docs/CONTRIBUTING.md) for:
-- Development environment setup
-- Code style guidelines
-- Git workflow
-- Testing procedures
-- Common development tasks
-
-## License
-
-<!-- Specify your license here -->
-
-## Support
-
-- Check [RUNBOOK.md](./docs/RUNBOOK.md) for troubleshooting
-- Review [CONTRIBUTING.md](./docs/CONTRIBUTING.md) for development help
-- API documentation: http://localhost:3001/api/docs
+</div>
 
 ---
 
-**Last Updated**: 2026-02-28
+## 中文
 
-Generated documentation. See individual doc files for detailed information.
+### 功能特性
+
+| 功能 | 说明 |
+|------|------|
+| **多协议节点管理** | 支持 VLESS、VMess、Trojan、Shadowsocks、Hysteria2、SOCKS5、HTTP |
+| **一键部署** | 通过 SSH 自动部署节点服务，实时查看终端日志 |
+| **服务器监控** | CPU、内存、磁盘、网络实时监控，历史图表 |
+| **流量统计** | 统计每个节点自上次部署以来的累计上传/下载流量 |
+| **订阅导出** | 一键生成 V2Ray / Clash / Sing-Box 格式订阅链接 |
+| **Cloudflare 集成** | 自动创建 DNS 记录，支持 VLESS+WS+TLS 节点 |
+| **连通性测试** | 端到端测试节点可达性与延迟，支持批量测试 |
+| **轻量 Agent** | 安装到服务器后自动上报状态，无需手动维护 |
+| **审计日志** | 所有操作均记录，可追溯部署历史 |
+| **多用户权限** | Admin / Operator / Viewer 三级权限控制 |
+
+### 界面预览
+
+> 截图持续更新中，欢迎 Star 关注 ✨
+
+| 节点管理 | 服务器监控 |
+|---------|-----------|
+| ![节点列表](docs/screenshots/nodes.png) | ![服务器监控](docs/screenshots/monitor.png) |
+
+| 部署日志 | 订阅管理 |
+|---------|---------|
+| ![部署日志](docs/screenshots/deploy.png) | ![订阅](docs/screenshots/subscriptions.png) |
+
+### 部署教程
+
+NextPanel 通过 GitHub Actions 自动部署到你的 VPS，整个过程只需配置一次。
+
+#### 准备工作
+
+- 一台 VPS（推荐 Ubuntu 22.04，内存 ≥ 1GB）
+- 一个域名，并将 A 记录指向你的 VPS IP
+- 一个 GitHub 账号
+
+#### 步骤一：Fork 仓库
+
+点击右上角 **Fork** 按钮，将本仓库 Fork 到你自己的 GitHub 账号下。
+
+#### 步骤二：修改域名
+
+打开 `.github/workflows/deploy.yml`，将第 45 行的域名替换为你自己的：
+
+```yaml
+DOMAIN="你的域名"   # 例如 panel.example.com
+```
+
+#### 步骤三：配置 GitHub Secrets
+
+进入你 Fork 后的仓库 → **Settings → Secrets and variables → Actions**，添加以下 Secret：
+
+| Secret 名称 | 说明 |
+|------------|------|
+| `SSH_HOST` | VPS 的 IP 地址 |
+| `SSH_USER` | SSH 用户名（通常为 `root`） |
+| `SSH_PORT` | SSH 端口（通常为 `22`） |
+| `SSH_PASSWORD` | SSH 密码 |
+| `CERTBOT_EMAIL` | 用于申请 SSL 证书的邮箱地址 |
+
+#### 步骤四：触发部署
+
+将代码推送到 `main` 分支即可自动触发部署：
+
+```bash
+git commit --allow-empty -m "trigger deploy"
+git push origin main
+```
+
+GitHub Actions 将自动完成：安装环境 → 构建项目 → 迁移数据库 → 启动服务。
+
+首次部署约需 5～10 分钟，完成后访问 `https://你的域名` 即可使用。
+
+#### 步骤五：初始化管理员账号
+
+部署完成后，SSH 登录 VPS 执行：
+
+```bash
+cd /opt/apps/nextpanel/apps/server
+pnpm exec prisma db seed
+```
+
+默认账号：`admin` / `admin123`（首次登录后请立即修改密码）
+
+#### 安装 Agent（可选）
+
+面板部署完成后，若需要监控服务器实时状态，在目标服务器上执行：
+
+```bash
+# 替换为你的面板地址和 Agent Token（在面板「服务器」页面查看）
+curl -fsSL https://github.com/tripplemay/nextpanel/releases/latest/download/agent-linux-amd64 \
+  -o /usr/local/bin/nextpanel-agent && chmod +x /usr/local/bin/nextpanel-agent
+
+# 创建配置文件
+mkdir -p /etc/nextpanel
+cat > /etc/nextpanel/agent.json <<EOF
+{
+  "serverUrl": "https://你的域名",
+  "agentToken": "在面板页面复制的 Token"
+}
+EOF
+
+# 启动 Agent
+nextpanel-agent
+```
+
+### 常见问题
+
+<details>
+<summary><b>支持哪些代理协议和客户端？</b></summary>
+
+支持协议：VLESS、VMess、Trojan、Shadowsocks、Hysteria2、SOCKS5、HTTP
+
+支持的代理内核：Xray、V2Ray、Sing-Box、shadowsocks-libev
+
+导出的订阅格式支持 V2Ray、Clash、Sing-Box，可直接导入主流客户端。
+
+</details>
+
+<details>
+<summary><b>部署时是否必须有域名？</b></summary>
+
+推荐使用域名，这样面板可以通过 HTTPS 访问，且支持 Cloudflare 集成。
+
+若暂时没有域名，可以用 IP 直接访问（HTTP），但 SSL 证书申请会跳过。
+
+</details>
+
+<details>
+<summary><b>面板如何更新？</b></summary>
+
+将你的 Fork 与上游同步后，推送到 main 分支即可自动触发更新部署：
+
+```bash
+git fetch upstream
+git merge upstream/main
+git push origin main
+```
+
+数据库迁移会自动执行，无需手动操作。
+
+</details>
+
+<details>
+<summary><b>流量统计是实时的吗？</b></summary>
+
+流量数据每 10 秒更新一次（Agent 心跳周期）。统计的是节点自上次部署以来的累计流量，重新部署后清零。
+
+目前仅支持 Xray / V2Ray 节点，Hysteria2（Sing-Box）节点暂不统计，显示为 `-`。
+
+</details>
+
+<details>
+<summary><b>忘记管理员密码怎么办？</b></summary>
+
+SSH 登录 VPS，执行以下命令重置密码：
+
+```bash
+cd /opt/apps/nextpanel/apps/server
+pnpm exec prisma db execute --stdin <<EOF
+UPDATE "User" SET "passwordHash" = '$2b$10$替换为新的bcrypt哈希' WHERE username = 'admin';
+EOF
+```
+
+或直接通过 `prisma studio` 可视化修改。
+
+</details>
+
+---
+
+## English
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Multi-protocol Nodes** | VLESS, VMess, Trojan, Shadowsocks, Hysteria2, SOCKS5, HTTP |
+| **One-click Deploy** | SSH-based auto-deployment with real-time terminal logs |
+| **Server Monitoring** | Real-time CPU, memory, disk, network metrics with history charts |
+| **Traffic Statistics** | Cumulative upload/download per node since last deploy |
+| **Subscription Export** | Generate V2Ray / Clash / Sing-Box subscription links instantly |
+| **Cloudflare Integration** | Auto DNS record creation for VLESS+WS+TLS nodes |
+| **Connectivity Test** | End-to-end latency testing with batch support |
+| **Lightweight Agent** | Install once, auto-reports server status continuously |
+| **Audit Logs** | Full operation history with deployment traceability |
+| **Role-based Access** | Admin / Operator / Viewer permission levels |
+
+### Screenshots
+
+> Screenshots are updated continuously. Star the repo to stay updated ✨
+
+| Node Management | Server Monitoring |
+|----------------|------------------|
+| ![Nodes](docs/screenshots/nodes.png) | ![Monitor](docs/screenshots/monitor.png) |
+
+| Deploy Logs | Subscriptions |
+|------------|---------------|
+| ![Deploy](docs/screenshots/deploy.png) | ![Subscriptions](docs/screenshots/subscriptions.png) |
+
+### Deployment Guide
+
+NextPanel auto-deploys to your VPS via GitHub Actions. One-time setup, automated ever after.
+
+#### Prerequisites
+
+- A VPS (Ubuntu 22.04 recommended, ≥ 1GB RAM)
+- A domain name with an A record pointing to your VPS IP
+- A GitHub account
+
+#### Step 1: Fork this repository
+
+Click the **Fork** button in the top right corner.
+
+#### Step 2: Set your domain
+
+Edit `.github/workflows/deploy.yml`, line 45:
+
+```yaml
+DOMAIN="your.domain.com"
+```
+
+#### Step 3: Configure GitHub Secrets
+
+Go to your forked repo → **Settings → Secrets and variables → Actions**, and add:
+
+| Secret | Description |
+|--------|-------------|
+| `SSH_HOST` | Your VPS IP address |
+| `SSH_USER` | SSH username (usually `root`) |
+| `SSH_PORT` | SSH port (usually `22`) |
+| `SSH_PASSWORD` | SSH password |
+| `CERTBOT_EMAIL` | Email for SSL certificate registration |
+
+#### Step 4: Trigger deployment
+
+Push to `main` to start auto-deployment:
+
+```bash
+git commit --allow-empty -m "trigger deploy"
+git push origin main
+```
+
+GitHub Actions will handle everything: install dependencies → build → migrate database → start services.
+
+First deployment takes ~5–10 minutes. Once done, visit `https://your.domain.com`.
+
+#### Step 5: Create admin account
+
+SSH into your VPS and run:
+
+```bash
+cd /opt/apps/nextpanel/apps/server
+pnpm exec prisma db seed
+```
+
+Default credentials: `admin` / `admin123` — **change the password immediately after first login**.
+
+#### Install Agent (optional)
+
+To monitor server metrics in real time, run this on each target server:
+
+```bash
+curl -fsSL https://github.com/tripplemay/nextpanel/releases/latest/download/agent-linux-amd64 \
+  -o /usr/local/bin/nextpanel-agent && chmod +x /usr/local/bin/nextpanel-agent
+
+mkdir -p /etc/nextpanel
+cat > /etc/nextpanel/agent.json <<EOF
+{
+  "serverUrl": "https://your.domain.com",
+  "agentToken": "copy from panel server page"
+}
+EOF
+
+nextpanel-agent
+```
+
+### FAQ
+
+<details>
+<summary><b>Which proxy protocols and clients are supported?</b></summary>
+
+Protocols: VLESS, VMess, Trojan, Shadowsocks, Hysteria2, SOCKS5, HTTP
+
+Proxy cores: Xray, V2Ray, Sing-Box, shadowsocks-libev
+
+Subscription formats: V2Ray, Clash, Sing-Box — importable into all major clients.
+
+</details>
+
+<details>
+<summary><b>Is a domain name required?</b></summary>
+
+A domain is recommended for HTTPS access and Cloudflare integration.
+
+Without a domain, you can access the panel via IP over HTTP, but SSL certificate issuance will be skipped.
+
+</details>
+
+<details>
+<summary><b>How do I update the panel?</b></summary>
+
+Sync your fork with upstream, then push to trigger auto-deployment:
+
+```bash
+git fetch upstream
+git merge upstream/main
+git push origin main
+```
+
+Database migrations run automatically — no manual steps needed.
+
+</details>
+
+<details>
+<summary><b>Is traffic statistics real-time?</b></summary>
+
+Traffic data updates every 10 seconds (agent heartbeat interval). Statistics are cumulative since the last node deployment and reset when the node is redeployed.
+
+Currently supported for Xray / V2Ray nodes only. Hysteria2 (Sing-Box) nodes show `-`.
+
+</details>
+
+<details>
+<summary><b>I forgot my admin password. How do I reset it?</b></summary>
+
+SSH into your VPS and use `prisma studio` to update the password hash directly, or run a SQL update via `prisma db execute`.
+
+</details>
+
+---
+
+## License
+
+[MIT](LICENSE)
