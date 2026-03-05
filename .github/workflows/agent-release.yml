@@ -2,8 +2,8 @@ name: Release Agent
 
 on:
   push:
-    tags:
-      - 'agent/v*'
+    branches: [main]
+    paths: ['apps/agent/**']
 
 jobs:
   build:
@@ -19,7 +19,27 @@ jobs:
           go-version-file: apps/agent/go.mod
           cache-dependency-path: apps/agent/go.sum
 
+      - name: Extract agent version
+        id: version
+        run: |
+          VERSION=$(grep -E '^\s+version\s*=' apps/agent/main.go | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG=agent/v$VERSION" >> $GITHUB_OUTPUT
+          echo "Detected agent version: $VERSION"
+
+      - name: Check if release already exists
+        id: tag_check
+        run: |
+          if git ls-remote --tags origin "refs/tags/${{ steps.version.outputs.TAG }}" | grep -q .; then
+            echo "EXISTS=true" >> $GITHUB_OUTPUT
+            echo "Tag ${{ steps.version.outputs.TAG }} already exists — skipping release"
+          else
+            echo "EXISTS=false" >> $GITHUB_OUTPUT
+            echo "Tag ${{ steps.version.outputs.TAG }} is new — will create release"
+          fi
+
       - name: Build binaries
+        if: steps.tag_check.outputs.EXISTS == 'false'
         run: |
           cd apps/agent
           go mod tidy
@@ -27,8 +47,10 @@ jobs:
           GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o agent-linux-arm64 .
 
       - name: Create GitHub Release
+        if: steps.tag_check.outputs.EXISTS == 'false'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.TAG }}
           files: |
             apps/agent/agent-linux-amd64
             apps/agent/agent-linux-arm64
