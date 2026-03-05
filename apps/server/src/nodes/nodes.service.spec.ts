@@ -4,7 +4,7 @@ import { CryptoService } from '../common/crypto/crypto.service';
 import { NodeDeployService } from './node-deploy.service';
 import { CloudflareService } from '../cloudflare/cloudflare.service';
 import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.service';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { CreateNodeDto } from './dto/create-node.dto';
 
 const mockPrisma = {
@@ -35,6 +35,7 @@ const mockCfService = {
 
 const mockCfSettings = {
   getDecryptedToken: jest.fn().mockResolvedValue(null),
+  verify: jest.fn().mockResolvedValue({ valid: true, zoneStatus: 'active' }),
 } as unknown as CloudflareSettingsService;
 
 const svc = new NodesService(mockPrisma, mockCrypto, mockDeploy, mockCfService, mockCfSettings);
@@ -447,6 +448,7 @@ describe('NodesService', () => {
 
   describe('createFromPreset — Cloudflare DNS provisioning', () => {
     it('provisions Cloudflare DNS when preset is VLESS_WS_TLS and CF settings exist', async () => {
+      (mockCfSettings.verify as jest.Mock).mockResolvedValue({ valid: true, zoneStatus: 'active' });
       (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-ws' });
       (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-ws' });
       (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
@@ -462,6 +464,22 @@ describe('NodesService', () => {
       expect(mockCfService.createARecord).toHaveBeenCalledWith(
         'cf-token', 'zone-1', expect.stringContaining('example.com'), '1.2.3.4',
       );
+    });
+
+    it('throws BadRequestException when CF not configured', async () => {
+      (mockCfSettings.verify as jest.Mock).mockResolvedValue({ valid: false, message: '未配置 Cloudflare 设置' });
+
+      await expect(
+        svc.createFromPreset('user-1', { serverId: 'srv-1', name: 'WS Node', preset: 'VLESS_WS_TLS' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when CF zone is not active', async () => {
+      (mockCfSettings.verify as jest.Mock).mockResolvedValue({ valid: true, zoneStatus: 'pending' });
+
+      await expect(
+        svc.createFromPreset('user-1', { serverId: 'srv-1', name: 'WS Node', preset: 'VLESS_WS_TLS' }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

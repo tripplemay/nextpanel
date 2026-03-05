@@ -57,6 +57,19 @@ export class NodesService {
   }
 
   async createFromPreset(userId: string, dto: CreateNodeFromPresetDto) {
+    // VLESS+WS+TLS requires an active Cloudflare zone to provision the DNS record
+    if (dto.preset === 'VLESS_WS_TLS') {
+      const cf = await this.cfSettings.verify(userId);
+      if (!cf.valid) {
+        throw new BadRequestException(`无法创建 CDN 友好节点：${cf.message}`);
+      }
+      if (cf.zoneStatus !== 'active') {
+        throw new BadRequestException(
+          `Cloudflare Zone 尚未生效（当前状态：${cf.zoneStatus ?? 'unknown'}），请等待 DNS 传播完成后重试`,
+        );
+      }
+    }
+
     const preset = PROTOCOL_PRESETS[dto.preset as SupportedProtocol];
     const credentials = CREDENTIAL_GENERATORS[dto.preset as SupportedProtocol]();
     const listenPort = await this.pickPort(dto.serverId, preset.fixedPort);
