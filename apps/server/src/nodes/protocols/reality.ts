@@ -16,5 +16,9 @@ export const REALITY_FLOW = 'xtls-rprx-vision';
 /**
  * 未配置自定义 domain 时的默认 REALITY SNI。
  * 必须与 xray-config.ts 中 serverNames 保持一致。
+ *
+ * 注意：www.google.com 在中国被 GFW 屏蔽，且 GFW 会对"SNI=google.com 但目标 IP
+ * 不是 Google IP"的连接注入 RST，导致 REALITY 从中国无法连通。
+ * 改用在中国可访问、且与代理服务器所在 CDN 吻合的域名。
  */
-export const REALITY_DEFAULT_SNI = 'www.google.com';
+export const REALITY_DEFAULT_SNI = 'addons.mozilla.org';
