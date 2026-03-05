@@ -98,7 +98,7 @@ describe('SubscriptionsService – generateContent', () => {
     expect(decoded).toContain(prefix);
   });
 
-  it('always uses server IP as host (domain is only SNI, not the connection target)', async () => {
+  it('uses domain as host when domain is set (CDN node connects via domain)', async () => {
     const sub = makeSubWithNode('VLESS', {});
     sub.nodes[0].node.domain = 'cdn.example.com';
     (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue(sub);
@@ -106,8 +106,8 @@ describe('SubscriptionsService – generateContent', () => {
 
     const result = await svc.generateContent('tok');
     const decoded = Buffer.from(result, 'base64').toString();
-    expect(decoded).toContain('1.2.3.4');
-    expect(decoded).not.toContain('cdn.example.com@');
+    expect(decoded).toContain('cdn.example.com');
+    expect(decoded).not.toContain('1.2.3.4');
   });
 });
 

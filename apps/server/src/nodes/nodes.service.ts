@@ -227,7 +227,7 @@ export class NodesService {
     return buildShareUri({
       name: node.name,
       protocol: node.protocol,
-      host: node.server.ip,
+      host: node.domain ?? node.server.ip,
       port: node.listenPort,
       transport: node.transport,
       tls: node.tls,
