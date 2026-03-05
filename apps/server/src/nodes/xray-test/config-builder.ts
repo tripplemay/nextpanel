@@ -137,8 +137,6 @@ function clientStreamSettings(node: NodeTestInfo): unknown {
     base.security = 'tls';
     base.tlsSettings = {
       serverName: domain ?? '',
-      // Allow insecure for self-signed certs on test nodes
-      allowInsecure: true,
     };
   } else if (tls === 'REALITY') {
     base.security = 'reality';

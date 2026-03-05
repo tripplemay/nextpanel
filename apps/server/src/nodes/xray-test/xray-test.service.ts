@@ -57,7 +57,7 @@ export class XrayTestService {
     if (node.protocol === 'HYSTERIA2') {
       result = await this.withSemaphore(() =>
         this.singboxTest.testHysteria2({
-          host: node.server.ip,
+          host: node.domain ?? node.server.ip,
           port: node.listenPort,
           domain: node.domain,
           credentials,
@@ -69,7 +69,7 @@ export class XrayTestService {
           protocol: node.protocol,
           transport: node.transport,
           tls: node.tls,
-          host: node.server.ip,
+          host: node.domain ?? node.server.ip,
           port: node.listenPort,
           domain: node.domain,
           credentials,
