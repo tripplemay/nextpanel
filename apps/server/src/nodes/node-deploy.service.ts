@@ -419,18 +419,33 @@ export class NodeDeployService {
   }
 
   private async installXray(ssh: NodeSSH, log: (msg: string) => void): Promise<boolean> {
-    log(`Installing Xray via official script...`);
-    // Ensure unzip is available — required by the Xray install script
-    await ssh.execCommand(
-      `DEBIAN_FRONTEND=noninteractive apt-get install -y unzip 2>/dev/null || yum install -y unzip 2>/dev/null; true`,
+    log(`Installing Xray...`);
+
+    // Detect architecture
+    const { stdout: uname } = await ssh.execCommand(`uname -m`);
+    const archMap: Record<string, string> = { x86_64: '64', aarch64: 'arm64-v8a', armv7l: 'arm32-v7a' };
+    const arch = archMap[uname.trim()] ?? '64';
+
+    // Fetch latest release tag from GitHub
+    const { stdout: apiOut } = await ssh.execCommand(
+      `curl -sf "https://api.github.com/repos/XTLS/Xray-core/releases/latest"`,
     );
-    // Download to tmp file first to avoid process substitution (<()) which sh/dash don't support
-    const { stdout, stderr } = await ssh.execCommand(
-      `curl -sL https://github.com/XTLS/Xray-install/raw/main/install-release.sh -o /tmp/install-xray.sh && ` +
-      `bash /tmp/install-xray.sh install 2>&1; rm -f /tmp/install-xray.sh`,
+    const tagMatch = apiOut.match(/"tag_name"\s*:\s*"([^"]+)"/);
+    if (!tagMatch) { log(`Failed to fetch Xray release info.`); return false; }
+    const tag = tagMatch[1];
+    log(`Latest Xray version: ${tag}, arch: ${arch}`);
+
+    // Download zip and extract with python3 — no unzip or apt-get required
+    const zipName = `Xray-linux-${arch}.zip`;
+    const { stderr } = await ssh.execCommand(
+      `curl -fsSL -o /tmp/${zipName} "https://github.com/XTLS/Xray-core/releases/download/${tag}/${zipName}" && ` +
+      `python3 -c "import zipfile; zipfile.ZipFile('/tmp/${zipName}').extract('xray', '/tmp/xray_extract')" && ` +
+      `mv /tmp/xray_extract/xray /usr/local/bin/xray && ` +
+      `chmod +x /usr/local/bin/xray && ` +
+      `rm -rf /tmp/${zipName} /tmp/xray_extract`,
     );
-    if (stdout) log(stdout.trim());
     if (stderr) log(stderr.trim());
+
     const { code } = await ssh.execCommand(`test -x /usr/local/bin/xray`);
     if (code === 0) { log(`Xray installed successfully.`); return true; }
     log(`Xray install failed.`);

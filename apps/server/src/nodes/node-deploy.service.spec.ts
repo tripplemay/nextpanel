@@ -183,13 +183,14 @@ describe('NodeDeployService', () => {
       // installXray SSH commands + daemon-reload + enable+restart + firewall (1 call) + is-active
       mockExecCommand.mockReset();
       mockExecCommand
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })   // apt-get/yum install unzip
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })   // install script
-        .mockResolvedValueOnce({ code: 0 })                  // test -x xray
-        .mockResolvedValueOnce({ stderr: '' })               // daemon-reload
-        .mockResolvedValueOnce({ stderr: '' })               // enable+restart
-        .mockResolvedValueOnce({ stdout: '' })               // openFirewallPort (combined)
-        .mockResolvedValueOnce({ stdout: 'active' });        // is-active
+        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })                      // uname -m
+        .mockResolvedValueOnce({ stdout: '{"tag_name":"v26.2.6"}', stderr: '' })      // github API
+        .mockResolvedValueOnce({ stderr: '' })                                         // download + extract + install
+        .mockResolvedValueOnce({ code: 0 })                                            // test -x xray
+        .mockResolvedValueOnce({ stderr: '' })                                         // daemon-reload
+        .mockResolvedValueOnce({ stderr: '' })                                         // enable+restart
+        .mockResolvedValueOnce({ stdout: '' })                                         // openFirewallPort (combined)
+        .mockResolvedValueOnce({ stdout: 'active' });                                  // is-active
 
       const promise = svc.deploy('node-1');
       jest.runAllTimersAsync();
@@ -385,9 +386,10 @@ describe('NodeDeployService', () => {
         .mockResolvedValueOnce(false); // re-verify after install: still missing
       mockExecCommand.mockReset();
       mockExecCommand
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // apt-get/yum install unzip
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // install script
-        .mockResolvedValueOnce({ code: 0 });               // test -x xray succeeds → installXray returns true
+        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })                 // uname -m
+        .mockResolvedValueOnce({ stdout: '{"tag_name":"v26.2.6"}', stderr: '' }) // github API
+        .mockResolvedValueOnce({ stderr: '' })                                    // download + extract + install
+        .mockResolvedValueOnce({ code: 0 });                                      // test -x xray succeeds → installXray returns true
 
       const promise = svc.deploy('node-1');
       jest.runAllTimersAsync();
