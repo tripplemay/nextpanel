@@ -39,10 +39,10 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           password: ${{ secrets.SSH_PASSWORD }}
           command_timeout: 30m
-          envs: CERTBOT_EMAIL
+          envs: CERTBOT_EMAIL,DOMAIN
           script: |
             set -e
-            DOMAIN="1.router.video"
+            DOMAIN="${DOMAIN}"
             APP_DIR="/opt/apps/nextpanel"
             SETUP_DONE="/opt/.nextpanel_setup_done"
             export DEBIAN_FRONTEND=noninteractive
@@ -86,7 +86,36 @@ jobs:
               mkdir -p $APP_DIR/apps/server
               printf 'DATABASE_URL=postgresql://nextpanel:%s@localhost:5432/nextpanel\nJWT_SECRET=%s\nJWT_EXPIRES_IN=7d\nENCRYPTION_KEY=%s\nPORT=3001\nALLOWED_ORIGIN=https://%s\n' "$DB_PASS" "$JWT_SECRET" "$ENC_KEY" "$DOMAIN" > $APP_DIR/apps/server/.env
 
-              echo 'c2VydmVyIHsKICBsaXN0ZW4gODA7CiAgc2VydmVyX25hbWUgMS5yb3V0ZXIudmlkZW87CgogIGxvY2F0aW9uIC9hcGkvIHsKICAgIHByb3h5X3Bhc3MgaHR0cDovLzEyNy4wLjAuMTozMDAxOwogICAgcHJveHlfaHR0cF92ZXJzaW9uIDEuMTsKICAgIHByb3h5X3NldF9oZWFkZXIgVXBncmFkZSAkaHR0cF91cGdyYWRlOwogICAgcHJveHlfc2V0X2hlYWRlciBDb25uZWN0aW9uIHVwZ3JhZGU7CiAgICBwcm94eV9zZXRfaGVhZGVyIEhvc3QgJGhvc3Q7CiAgICBwcm94eV9zZXRfaGVhZGVyIFgtUmVhbC1JUCAkcmVtb3RlX2FkZHI7CiAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLUZvciAkcHJveHlfYWRkX3hfZm9yd2FyZGVkX2ZvcjsKICAgIHByb3h5X3NldF9oZWFkZXIgWC1Gb3J3YXJkZWQtUHJvdG8gJHNjaGVtZTsKICAgIHByb3h5X2NhY2hlX2J5cGFzcyAkaHR0cF91cGdyYWRlOwogIH0KCiAgbG9jYXRpb24gLyB7CiAgICBwcm94eV9wYXNzIGh0dHA6Ly8xMjcuMC4wLjE6MzAwMDsKICAgIHByb3h5X2h0dHBfdmVyc2lvbiAxLjE7CiAgICBwcm94eV9zZXRfaGVhZGVyIFVwZ3JhZGUgJGh0dHBfdXBncmFkZTsKICAgIHByb3h5X3NldF9oZWFkZXIgQ29ubmVjdGlvbiB1cGdyYWRlOwogICAgcHJveHlfc2V0X2hlYWRlciBIb3N0ICRob3N0OwogICAgcHJveHlfc2V0X2hlYWRlciBYLVJlYWwtSVAgJHJlbW90ZV9hZGRyOwogICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Gb3IgJHByb3h5X2FkZF94X2ZvcndhcmRlZF9mb3I7CiAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLVByb3RvICRzY2hlbWU7CiAgICBwcm94eV9jYWNoZV9ieXBhc3MgJGh0dHBfdXBncmFkZTsKICB9Cn0K' | base64 -d > /etc/nginx/sites-available/nextpanel
+              cat > /etc/nginx/sites-available/nextpanel << NGINXEOF
+server {
+  listen 80;
+  server_name $DOMAIN;
+
+  location /api/ {
+    proxy_pass http://127.0.0.1:3001;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection upgrade;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_cache_bypass \$http_upgrade;
+  }
+
+  location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection upgrade;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_cache_bypass \$http_upgrade;
+  }
+}
+NGINXEOF
 
               rm -f /etc/nginx/sites-enabled/default
               ln -sf /etc/nginx/sites-available/nextpanel /etc/nginx/sites-enabled/
@@ -178,3 +207,4 @@ jobs:
             echo ">>> Deploy completed at $(date) — https://$DOMAIN"
         env:
           CERTBOT_EMAIL: ${{ secrets.CERTBOT_EMAIL }}
+          DOMAIN: ${{ vars.DOMAIN }}
