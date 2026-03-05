@@ -9,7 +9,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -29,8 +29,10 @@ jobs:
 
       - name: Check if release already exists
         id: tag_check
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
         run: |
-          if git ls-remote --tags origin "refs/tags/${{ steps.version.outputs.TAG }}" | grep -q .; then
+          if gh release view "${{ steps.version.outputs.TAG }}" --repo tripplemay/nextpanel-releases &>/dev/null; then
             echo "EXISTS=true" >> $GITHUB_OUTPUT
             echo "Tag ${{ steps.version.outputs.TAG }} already exists — skipping release"
           else
@@ -50,6 +52,8 @@ jobs:
         if: steps.tag_check.outputs.EXISTS == 'false'
         uses: softprops/action-gh-release@v2
         with:
+          repository: tripplemay/nextpanel-releases
+          token: ${{ secrets.RELEASES_PAT }}
           tag_name: ${{ steps.version.outputs.TAG }}
           files: |
             apps/agent/agent-linux-amd64

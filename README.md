@@ -108,7 +108,7 @@ pnpm exec prisma db seed
 
 ```bash
 # 替换为你的面板地址和 Agent Token（在面板「服务器」页面查看）
-curl -fsSL https://github.com/tripplemay/nextpanel/releases/latest/download/agent-linux-amd64 \
+curl -fsSL https://github.com/tripplemay/nextpanel-releases/releases/latest/download/agent-linux-amd64 \
   -o /usr/local/bin/nextpanel-agent && chmod +x /usr/local/bin/nextpanel-agent
 
 # 创建配置文件
@@ -280,7 +280,7 @@ Default credentials: `admin` / `admin123` — **change the password immediately 
 To monitor server metrics in real time, run this on each target server:
 
 ```bash
-curl -fsSL https://github.com/tripplemay/nextpanel/releases/latest/download/agent-linux-amd64 \
+curl -fsSL https://github.com/tripplemay/nextpanel-releases/releases/latest/download/agent-linux-amd64 \
   -o /usr/local/bin/nextpanel-agent && chmod +x /usr/local/bin/nextpanel-agent
 
 mkdir -p /etc/nextpanel
