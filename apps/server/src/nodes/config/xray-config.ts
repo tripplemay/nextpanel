@@ -4,19 +4,46 @@ import { REALITY_DEFAULT_SNI, REALITY_FLOW } from '../protocols/reality';
 // ─── Xray / V2Ray ────────────────────────────────────────────────────────────
 
 export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): string {
+  const proxyInbound = {
+    tag: `in-${node.id}`,
+    port: node.listenPort,
+    listen: '0.0.0.0',
+    protocol: xrayProtocol(node.protocol),
+    settings: xraySettings(node.protocol, creds, node.tls),
+    streamSettings: xrayStreamSettings(node.id, node.transport, node.tls, node.domain, creds),
+  };
+
+  if (node.statsPort) {
+    return JSON.stringify(
+      {
+        log: { loglevel: 'warning' },
+        stats: {},
+        api: { tag: 'api', services: ['StatsService'] },
+        policy: { system: { statsInboundUplink: true, statsInboundDownlink: true } },
+        inbounds: [
+          {
+            tag: 'api',
+            listen: '127.0.0.1',
+            port: node.statsPort,
+            protocol: 'dokodemo-door',
+            settings: { address: '127.0.0.1' },
+          },
+          proxyInbound,
+        ],
+        outbounds: [{ protocol: 'freedom', tag: 'direct' }],
+        routing: {
+          rules: [{ type: 'field', inboundTag: ['api'], outboundTag: 'direct' }],
+        },
+      },
+      null,
+      2,
+    );
+  }
+
   return JSON.stringify(
     {
       log: { loglevel: 'warning' },
-      inbounds: [
-        {
-          tag: `in-${node.id}`,
-          port: node.listenPort,
-          listen: '0.0.0.0',
-          protocol: xrayProtocol(node.protocol),
-          settings: xraySettings(node.protocol, creds, node.tls),
-          streamSettings: xrayStreamSettings(node.id, node.transport, node.tls, node.domain, creds),
-        },
-      ],
+      inbounds: [proxyInbound],
       outbounds: [{ protocol: 'freedom', tag: 'direct' }],
     },
     null,

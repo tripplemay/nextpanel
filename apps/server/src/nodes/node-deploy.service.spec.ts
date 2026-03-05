@@ -34,6 +34,7 @@ const mockPrisma = {
   node: {
     findUnique: jest.fn(),
     update: jest.fn(),
+    delete: jest.fn(),
   },
   configSnapshot: {
     findFirst: jest.fn(),
@@ -89,6 +90,8 @@ beforeEach(() => {
   mockBinaryExists.mockResolvedValue(true);
   mockWhichBinary.mockResolvedValue('/usr/bin/ss-server');
   mockDetectPackageManager.mockResolvedValue('apt');
+  (mockPrisma.node.delete as jest.Mock).mockResolvedValue({});
+  (mockOperationLog.createLog as jest.Mock).mockResolvedValue({});
   // Default exec: daemon-reload → enable+restart → openFirewallPort → is-active (active)
   mockExecCommand
     .mockResolvedValueOnce({ stderr: '' })
@@ -299,6 +302,166 @@ describe('NodeDeployService', () => {
         next: (event) => events.push(event),
         complete: () => {
           const lastEvent = events[events.length - 1] as { data: { success: boolean } };
+          expect(lastEvent.data.success).toBe(false);
+          done();
+        },
+      });
+    });
+  });
+
+  describe('toggleService', () => {
+    it('connects SSH and runs start command when enabling', async () => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      mockConnectSsh.mockResolvedValue(mockSsh);
+      mockExecCommand.mockReset();
+      mockExecCommand.mockResolvedValue({ stdout: '', stderr: '' });
+
+      await svc.toggleService('node-1', true);
+
+      expect(mockConnectSsh).toHaveBeenCalled();
+      expect(mockExecCommand).toHaveBeenCalledWith(expect.stringContaining('start'));
+      expect(mockDispose).toHaveBeenCalled();
+    });
+
+    it('connects SSH and runs stop command when disabling', async () => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      mockConnectSsh.mockResolvedValue(mockSsh);
+      mockExecCommand.mockReset();
+      mockExecCommand.mockResolvedValue({ stdout: '', stderr: '' });
+
+      await svc.toggleService('node-1', false);
+
+      expect(mockExecCommand).toHaveBeenCalledWith(expect.stringContaining('stop'));
+    });
+
+    it('throws NotFoundException when node is not found', async () => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(null);
+      await expect(svc.toggleService('bad', true)).rejects.toThrow(NotFoundException);
+    });
+
+    it('re-throws SSH errors', async () => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      mockConnectSsh.mockRejectedValue(new Error('SSH error'));
+      await expect(svc.toggleService('node-1', true)).rejects.toThrow('SSH error');
+    });
+  });
+
+  describe('deploy — TLS cert generation', () => {
+    it('runs openssl command for TLS nodes', async () => {
+      const tlsNode = { ...fakeNode, tls: 'TLS' };
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(tlsNode);
+      (mockPrisma.configSnapshot.findFirst as jest.Mock).mockResolvedValue({ version: 1 });
+      (mockPrisma.configSnapshot.create as jest.Mock).mockResolvedValue({});
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
+      mockConnectSsh.mockResolvedValue(mockSsh);
+      mockBinaryExists.mockResolvedValue(true);
+      mockExecCommand.mockReset();
+      mockExecCommand
+        .mockResolvedValueOnce({ stderr: '' })    // TLS cert (openssl)
+        .mockResolvedValueOnce({ stderr: '' })    // daemon-reload
+        .mockResolvedValueOnce({ stderr: '' })    // enable+restart
+        .mockResolvedValueOnce({ stdout: '' })    // openFirewallPort
+        .mockResolvedValueOnce({ stdout: 'active' }); // is-active
+
+      const promise = svc.deploy('node-1');
+      jest.runAllTimersAsync();
+      const result = await promise;
+
+      expect(result.success).toBe(true);
+      expect(mockExecCommand.mock.calls[0][0]).toContain('openssl');
+    });
+  });
+
+  describe('deploy — binary re-verify fails after install', () => {
+    it('returns success=false when binary still missing after auto-install', async () => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      (mockPrisma.configSnapshot.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.configSnapshot.create as jest.Mock).mockResolvedValue({});
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
+      mockConnectSsh.mockResolvedValue(mockSsh);
+      mockBinaryExists
+        .mockResolvedValueOnce(false)  // initial check: missing
+        .mockResolvedValueOnce(false); // re-verify after install: still missing
+      mockExecCommand.mockReset();
+      mockExecCommand
+        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // install script
+        .mockResolvedValueOnce({ code: 0 });               // test -x xray succeeds → installXray returns true
+
+      const promise = svc.deploy('node-1');
+      jest.runAllTimersAsync();
+      const result = await promise;
+
+      expect(result.success).toBe(false);
+      expect(result.log).toContain('still not found');
+    });
+  });
+
+  describe('deploy — SS_LIBEV resolves different binary path', () => {
+    it('overrides bin when autoInstall resolves to different path', async () => {
+      const ssNode = { ...fakeNode, implementation: 'SS_LIBEV' };
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(ssNode);
+      (mockPrisma.configSnapshot.findFirst as jest.Mock).mockResolvedValue({ version: 1 });
+      (mockPrisma.configSnapshot.create as jest.Mock).mockResolvedValue({});
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
+      mockConnectSsh.mockResolvedValue(mockSsh);
+      mockBinaryExists
+        .mockResolvedValueOnce(false)  // initial check: missing
+        .mockResolvedValueOnce(true);  // re-verify: found at resolved path
+      mockExecCommand.mockReset();
+      mockExecCommand
+        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // apt install ss-libev
+        .mockResolvedValueOnce({ stderr: '' })             // daemon-reload
+        .mockResolvedValueOnce({ stderr: '' })             // enable+restart
+        .mockResolvedValueOnce({ stdout: '' })             // openFirewallPort
+        .mockResolvedValueOnce({ stdout: 'active' });      // is-active
+
+      const logs: string[] = [];
+      const promise = svc.deploy('node-1', (l) => logs.push(l));
+      jest.runAllTimersAsync();
+      const result = await promise;
+
+      expect(result.success).toBe(true);
+      expect(logs.some((l) => l.includes('resolved binary path'))).toBe(true);
+    });
+  });
+
+  describe('undeployStream', () => {
+    it('emits done=true success=true on successful undeploy', (done) => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      mockConnectSsh.mockResolvedValue(mockSsh);
+      mockExecCommand.mockReset();
+      mockExecCommand
+        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // systemctl stop
+        .mockResolvedValueOnce({ stdout: '' })             // closeFirewallPort
+        .mockResolvedValueOnce({ stdout: '', stderr: '' }); // systemctl disable + rm + daemon-reload
+
+      const obs$ = svc.undeployStream('node-1');
+      const events: unknown[] = [];
+
+      obs$.subscribe({
+        next: (event) => events.push(event),
+        complete: () => {
+          const lastEvent = events[events.length - 1] as { data: { done: boolean; success: boolean } };
+          expect(lastEvent.data.done).toBe(true);
+          expect(lastEvent.data.success).toBe(true);
+          expect(mockPrisma.node.delete).toHaveBeenCalledWith({ where: { id: 'node-1' } });
+          done();
+        },
+      });
+    });
+
+    it('emits done=true success=false when SSH connect fails', (done) => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      mockConnectSsh.mockRejectedValue(new Error('SSH timeout'));
+
+      const obs$ = svc.undeployStream('node-1');
+      const events: unknown[] = [];
+
+      obs$.subscribe({
+        next: (event) => events.push(event),
+        complete: () => {
+          const lastEvent = events[events.length - 1] as { data: { done: boolean; success: boolean } };
+          expect(lastEvent.data.done).toBe(true);
           expect(lastEvent.data.success).toBe(false);
           done();
         },

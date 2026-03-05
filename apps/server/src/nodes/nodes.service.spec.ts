@@ -25,6 +25,7 @@ const mockCrypto = {
 const mockDeploy = {
   deploy: jest.fn().mockResolvedValue({ success: true, log: '' }),
   undeploy: jest.fn().mockResolvedValue(undefined),
+  toggleService: jest.fn().mockResolvedValue(undefined),
 } as unknown as NodeDeployService;
 
 const mockCfService = {
@@ -347,6 +348,120 @@ describe('NodesService', () => {
     it('throws NotFoundException when node is missing', async () => {
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(null);
       await expect(svc.getCredentials('bad')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('rename', () => {
+    it('updates the node name and returns updated node', async () => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({ ...fakeNode, name: 'New Name' });
+
+      const result = await svc.rename('node-1', 'New Name');
+
+      expect(mockPrisma.node.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'node-1' }, data: { name: 'New Name' } }),
+      );
+      expect(result).toMatchObject({ name: 'New Name' });
+    });
+
+    it('throws NotFoundException when node is missing', async () => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(null);
+      await expect(svc.rename('bad', 'X')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('toggle', () => {
+    it('disables an enabled node and sets status to STOPPED', async () => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ id: 'node-1', enabled: true });
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({ ...fakeNode, enabled: false, status: 'STOPPED' });
+
+      const result = await svc.toggle('node-1');
+
+      expect(mockDeploy.toggleService).toHaveBeenCalledWith('node-1', false);
+      expect(mockPrisma.node.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ enabled: false, status: 'STOPPED' }) }),
+      );
+      expect(result).toMatchObject({ enabled: false });
+    });
+
+    it('enables a disabled node and sets status to RUNNING', async () => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ id: 'node-1', enabled: false });
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({ ...fakeNode, enabled: true, status: 'RUNNING' });
+
+      await svc.toggle('node-1');
+
+      expect(mockDeploy.toggleService).toHaveBeenCalledWith('node-1', true);
+      expect(mockPrisma.node.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ enabled: true, status: 'RUNNING' }) }),
+      );
+    });
+
+    it('throws NotFoundException when node is missing', async () => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(null);
+      await expect(svc.toggle('bad')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('remove — with Cloudflare DNS cleanup', () => {
+    beforeEach(() => {
+      (mockDeploy.undeploy as jest.Mock).mockResolvedValue(undefined);
+    });
+
+    it('cleans up Cloudflare DNS record when cfDnsRecordId is set', async () => {
+      const nodeWithCf = { id: 'node-1', userId: 'user-1', cfDnsRecordId: 'rec-abc' };
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(nodeWithCf);
+      (mockPrisma.node.delete as jest.Mock).mockResolvedValue(nodeWithCf);
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'token', domain: 'example.com', zoneId: 'zone-1',
+      });
+
+      await svc.remove('node-1');
+
+      expect(mockCfService.deleteRecord).toHaveBeenCalledWith('token', 'zone-1', 'rec-abc');
+    });
+
+    it('skips Cloudflare cleanup when cfDnsRecordId is null', async () => {
+      const nodeNoCf = { id: 'node-1', userId: 'user-1', cfDnsRecordId: null };
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(nodeNoCf);
+      (mockPrisma.node.delete as jest.Mock).mockResolvedValue(nodeNoCf);
+
+      await svc.remove('node-1');
+
+      expect(mockCfService.deleteRecord).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getLatestSnapshot', () => {
+    it('returns the latest snapshot for a node', async () => {
+      const mockPrismaWithSnapshot = mockPrisma as any;
+      if (!mockPrismaWithSnapshot.configSnapshot) {
+        mockPrismaWithSnapshot.configSnapshot = { findFirst: jest.fn() };
+      }
+      const snapshot = { version: 3, deployLog: 'ok', createdAt: new Date() };
+      (mockPrismaWithSnapshot.configSnapshot.findFirst as jest.Mock).mockResolvedValue(snapshot);
+
+      const result = await svc.getLatestSnapshot('node-1');
+      expect(result).toBe(snapshot);
+    });
+  });
+
+  describe('createFromPreset — Cloudflare DNS provisioning', () => {
+    it('provisions Cloudflare DNS when preset is VLESS_WS_TLS and CF settings exist', async () => {
+      (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-ws' });
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-ws' });
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
+      });
+      const mockServer = { ip: '1.2.3.4' };
+      (mockPrisma as any).server = { findUnique: jest.fn().mockResolvedValue(mockServer) };
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
+
+      await svc.createFromPreset('user-1', { serverId: 'srv-1', name: 'WS Node', preset: 'VLESS_WS_TLS' });
+
+      expect(mockCfSettings.getDecryptedToken).toHaveBeenCalledWith('user-1');
+      expect(mockCfService.createARecord).toHaveBeenCalledWith(
+        'cf-token', 'zone-1', expect.stringContaining('example.com'), '1.2.3.4',
+      );
     });
   });
 });

@@ -69,6 +69,10 @@ export class NodeDeployService {
     ) as Record<string, string>;
 
     // ── 2. Generate config JSON ──────────────────────────────────────────────
+    const impl = (node.implementation ?? 'XRAY').toUpperCase();
+    const isXray = impl === 'XRAY' || impl === 'V2RAY';
+    const statsPort = isXray ? computeStatsPort(node.listenPort) : undefined;
+
     const nodeInfo: NodeInfo = {
       id: node.id,
       protocol: node.protocol,
@@ -77,6 +81,7 @@ export class NodeDeployService {
       tls: node.tls,
       listenPort: node.listenPort,
       domain: node.domain,
+      statsPort,
     };
     const configJson = generateConfig(nodeInfo, credentials);
     const configPath = `/etc/nextpanel/nodes/${node.id}.json`;
@@ -194,7 +199,7 @@ export class NodeDeployService {
       }
 
       ssh.dispose();
-      await this.finalize(nodeId, node.name, isActive, logs, configJson, actorId, startMs, correlationId);
+      await this.finalize(nodeId, node.name, isActive, logs, configJson, actorId, startMs, correlationId, statsPort);
 
       if (isActive) {
         log(`Deployment completed successfully!`);
@@ -207,7 +212,7 @@ export class NodeDeployService {
       ssh?.dispose();
       const msg = err instanceof Error ? err.message : String(err);
       log(`Deploy error: ${msg}`);
-      await this.finalize(nodeId, node.name, false, logs, configJson, actorId, startMs, correlationId);
+      await this.finalize(nodeId, node.name, false, logs, configJson, actorId, startMs, correlationId, statsPort);
       return { success: false, log: logs.join('\n') };
     }
   }
@@ -604,6 +609,7 @@ export class NodeDeployService {
     actorId: string | undefined,
     startMs: number,
     correlationId?: string,
+    statsPort?: number,
   ) {
     const last = await this.prisma.configSnapshot.findFirst({
       where: { nodeId },
@@ -622,7 +628,13 @@ export class NodeDeployService {
       }),
       this.prisma.node.update({
         where: { id: nodeId },
-        data: { status: success ? 'RUNNING' : 'ERROR' },
+        data: {
+          status: success ? 'RUNNING' : 'ERROR',
+          // Reset traffic counters and assign statsPort on each (re)deploy
+          statsPort: success ? (statsPort ?? null) : undefined,
+          trafficUpBytes: success ? 0 : undefined,
+          trafficDownBytes: success ? 0 : undefined,
+        },
       }),
       this.operationLog.createLog({
         resourceType: 'node',
@@ -637,6 +649,16 @@ export class NodeDeployService {
       }),
     ]);
   }
+}
+
+/**
+ * Derives a local stats API port from the node's main listen port.
+ * Uses a +20000 offset (capped to valid range) to avoid conflicts.
+ */
+function computeStatsPort(listenPort: number): number {
+  if (listenPort + 20000 <= 65535) return listenPort + 20000;
+  if (listenPort - 20000 >= 1) return listenPort - 20000;
+  return 40000 + (listenPort % 10000);
 }
 
 function buildSystemdUnit(name: string, bin: string, args: string): string {

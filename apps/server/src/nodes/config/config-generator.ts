@@ -14,6 +14,8 @@ export interface NodeInfo {
   tls: string;              // NONE | TLS | REALITY
   listenPort: number;
   domain: string | null;
+  /** xray stats API port — only passed for xray/v2ray nodes during deploy */
+  statsPort?: number;
 }
 
 export interface NodeCredentials {

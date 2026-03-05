@@ -95,6 +95,9 @@ export interface Node {
   lastReachable: boolean | null;
   lastLatency: number | null;
   lastTestedAt: string | null;
+  statsPort: number | null;
+  trafficUpBytes: number;
+  trafficDownBytes: number;
   createdAt: string;
   updatedAt: string;
 }

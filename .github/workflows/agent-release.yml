@@ -22,6 +22,7 @@ jobs:
       - name: Build binaries
         run: |
           cd apps/agent
+          go mod tidy
           GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o agent-linux-amd64 .
           GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o agent-linux-arm64 .
 

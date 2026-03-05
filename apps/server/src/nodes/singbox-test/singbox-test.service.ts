@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as net from 'net';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { execFile } from 'child_process';
+import { execFile, spawn, type ChildProcess } from 'child_process';
 import { Injectable, Logger } from '@nestjs/common';
 import { TestResult } from '../xray-test/xray-test.service';
 
@@ -82,13 +82,11 @@ export class SingboxTestService {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  private spawnSingbox(configPath: string): { proc: ReturnType<typeof require['child_process']['spawn']>; ready: Promise<void> } {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const child = require('child_process').spawn(
-      SINGBOX_BINARY,
-      ['run', '-c', configPath],
-      { stdio: 'ignore', detached: false },
-    ) as ReturnType<typeof require['child_process']['spawn']>;
+  private spawnSingbox(configPath: string): { proc: ChildProcess; ready: Promise<void> } {
+    const child = spawn(SINGBOX_BINARY, ['run', '-c', configPath], {
+      stdio: 'ignore',
+      detached: false,
+    });
 
     const ready = new Promise<void>((_, reject) => {
       child.on('error', (err: NodeJS.ErrnoException) => {

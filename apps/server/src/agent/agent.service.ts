@@ -11,6 +11,7 @@ export interface HeartbeatPayload {
   networkIn: number;
   networkOut: number;
   nodeStatuses?: { nodeId: string; status: 'RUNNING' | 'STOPPED' | 'ERROR' }[];
+  nodeTraffic?: { nodeId: string; upBytes: number; downBytes: number }[];
 }
 
 @Injectable()
@@ -71,6 +72,24 @@ export class AgentService {
       }
     }
 
-    return { ok: true };
+    if (payload.nodeTraffic) {
+      for (const { nodeId, upBytes, downBytes } of payload.nodeTraffic) {
+        await this.prisma.node.updateMany({
+          where: { id: nodeId, serverId: server.id },
+          data: { trafficUpBytes: upBytes, trafficDownBytes: downBytes },
+        });
+      }
+    }
+
+    // Return xray nodes with their stats ports so the agent can query traffic
+    const xrayNodes = await this.prisma.node.findMany({
+      where: { serverId: server.id, statsPort: { not: null }, status: 'RUNNING' },
+      select: { id: true, statsPort: true },
+    });
+
+    return {
+      ok: true,
+      xrayNodes: xrayNodes.map((n) => ({ nodeId: n.id, statsPort: n.statsPort })),
+    };
   }
 }

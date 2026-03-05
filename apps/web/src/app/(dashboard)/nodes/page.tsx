@@ -15,6 +15,14 @@ import { useDeployStream } from '@/hooks/useDeployStream';
 import type { Node, ConnectivityResult } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
+function formatBytes(bytes: number, hasStats: boolean): string {
+  if (!hasStats) return '-';
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)}GB`;
+}
+
 function formatTimeAgo(isoString: string | null): string {
   if (!isoString) return '';
   const diff = Date.now() - new Date(isoString).getTime();
@@ -251,6 +259,16 @@ export default function NodesPage() {
           onChange={() => toggleMutation.mutate(r.id)}
         />
       ),
+    },
+    {
+      title: '↑上传',
+      width: 90,
+      render: (_: unknown, r) => formatBytes(r.trafficUpBytes, r.statsPort !== null),
+    },
+    {
+      title: '↓下载',
+      width: 90,
+      render: (_: unknown, r) => formatBytes(r.trafficDownBytes, r.statsPort !== null),
     },
     {
       title: '连通性',

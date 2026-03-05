@@ -2,7 +2,11 @@ module github.com/nextpanel/agent
 
 go 1.22
 
-require github.com/shirou/gopsutil/v3 v3.24.5
+require (
+	github.com/shirou/gopsutil/v3 v3.24.5
+	google.golang.org/grpc v1.64.0
+	google.golang.org/protobuf v1.34.2
+)
 
 require (
 	github.com/go-ole/go-ole v1.2.6 // indirect

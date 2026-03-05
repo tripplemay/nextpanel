@@ -103,13 +103,19 @@ model Node {
   status         NodeStatus      @default(INACTIVE)
   enabled        Boolean         @default(true)
   /// Last connectivity test: true = reachable, false = unreachable, null = never tested
-  lastReachable  Boolean?
+  lastReachable    Boolean?
   /// Last measured latency in ms
-  lastLatency    Int?
+  lastLatency      Int?
   /// Timestamp of last connectivity test
-  lastTestedAt   DateTime?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  lastTestedAt     DateTime?
+  /// xray stats API port — set only for deployed xray/v2ray nodes; null for sing-box/ss-libev
+  statsPort        Int?
+  /// Cumulative upload bytes since last deploy (xray nodes only) — reset on redeploy
+  trafficUpBytes   Float           @default(0)
+  /// Cumulative download bytes since last deploy (xray nodes only) — reset on redeploy
+  trafficDownBytes Float           @default(0)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
   snapshots         ConfigSnapshot[]
   subscriptionNodes SubscriptionNode[]
