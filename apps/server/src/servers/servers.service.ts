@@ -214,24 +214,7 @@ export class ServersService {
         'systemctl is-active nextpanel-agent',
       );
       const alreadyInstalled = activeCode === 0;
-
-      if (alreadyInstalled) {
-        // 已安装：只更新配置文件（Token 可能已变），重启服务
-        onLog('Agent 已安装，更新配置文件...');
-        const configJson = JSON.stringify({
-          serverUrl: panelUrl,
-          agentToken: server.agentToken,
-        });
-        const b64Config = Buffer.from(configJson).toString('base64');
-        await ssh.execCommand('mkdir -p /etc/nextpanel');
-        await ssh.execCommand(
-          `echo '${b64Config}' | base64 -d > /etc/nextpanel/agent.json`,
-        );
-        onLog('配置已更新，重启 Agent...');
-        await ssh.execCommand('systemctl restart nextpanel-agent');
-        onLog('Agent 已重启，Token 已同步。');
-        return true;
-      }
+      if (alreadyInstalled) onLog('检测到已安装旧版 Agent，将升级到最新版本...');
 
       // 检测架构
       onLog('检测系统架构...');
@@ -257,7 +240,10 @@ export class ServersService {
       const tag = tagMatch[1];
       onLog(`最新版本: ${tag}`);
 
-      // 下载二进制
+      // 下载二进制（先停服务释放文件锁）
+      if (alreadyInstalled) {
+        await ssh.execCommand('systemctl stop nextpanel-agent');
+      }
       onLog('下载 Agent 二进制...');
       const downloadUrl = `https://github.com/${githubRepo}/releases/download/${tag}/${binary}`;
       const { code: dlCode, stderr: dlErr } = await ssh.execCommand(
@@ -279,30 +265,32 @@ export class ServersService {
       );
       onLog('配置文件写入完成。');
 
-      // 创建 systemd 服务
-      onLog('创建 systemd 服务...');
-      const serviceContent = [
-        '[Unit]',
-        'Description=NextPanel Agent',
-        'After=network.target',
-        '',
-        '[Service]',
-        'ExecStart=/usr/local/bin/nextpanel-agent',
-        'Restart=always',
-        'RestartSec=10',
-        '',
-        '[Install]',
-        'WantedBy=multi-user.target',
-      ].join('\n');
-      const b64Service = Buffer.from(serviceContent).toString('base64');
-      await ssh.execCommand(
-        `echo '${b64Service}' | base64 -d > /etc/systemd/system/nextpanel-agent.service`,
-      );
-      await ssh.execCommand('systemctl daemon-reload');
-      await ssh.execCommand('systemctl enable nextpanel-agent');
+      if (!alreadyInstalled) {
+        // 首次安装：创建 systemd 服务
+        onLog('创建 systemd 服务...');
+        const serviceContent = [
+          '[Unit]',
+          'Description=NextPanel Agent',
+          'After=network.target',
+          '',
+          '[Service]',
+          'ExecStart=/usr/local/bin/nextpanel-agent',
+          'Restart=always',
+          'RestartSec=10',
+          '',
+          '[Install]',
+          'WantedBy=multi-user.target',
+        ].join('\n');
+        const b64Service = Buffer.from(serviceContent).toString('base64');
+        await ssh.execCommand(
+          `echo '${b64Service}' | base64 -d > /etc/systemd/system/nextpanel-agent.service`,
+        );
+        await ssh.execCommand('systemctl daemon-reload');
+        await ssh.execCommand('systemctl enable nextpanel-agent');
+      }
 
       // 启动服务
-      onLog('启动 Agent 服务...');
+      onLog(alreadyInstalled ? '重启 Agent 服务...' : '启动 Agent 服务...');
       const { code: startCode, stderr: startErr } = await ssh.execCommand(
         'systemctl start nextpanel-agent',
       );
