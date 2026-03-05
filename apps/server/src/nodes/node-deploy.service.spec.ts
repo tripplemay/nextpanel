@@ -53,7 +53,16 @@ const mockOperationLog = {
   getLog: jest.fn().mockResolvedValue(null),
 } as unknown as import('../operation-log/operation-log.service').OperationLogService;
 
-const svc = new NodeDeployService(mockPrisma, mockCrypto, mockOperationLog);
+const mockCertService = {
+  ensureWildcardCert: jest.fn().mockResolvedValue({ certPath: '/tmp/cert.crt', keyPath: '/tmp/cert.key' }),
+  pushCertToNode: jest.fn().mockResolvedValue(undefined),
+} as unknown as import('../common/cert/cert.service').CertService;
+
+const mockCfSettings = {
+  getDecryptedToken: jest.fn().mockResolvedValue(null),
+} as unknown as import('../cloudflare/cloudflare-settings.service').CloudflareSettingsService;
+
+const svc = new NodeDeployService(mockPrisma, mockCrypto, mockOperationLog, mockCertService, mockCfSettings);
 
 const fakeServer = {
   id: 'srv-1', ip: '1.2.3.4', sshPort: 22,

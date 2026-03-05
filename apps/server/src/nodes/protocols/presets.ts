@@ -17,6 +17,7 @@ import * as crypto from 'crypto';
 export type SupportedProtocol =
   | 'VLESS_REALITY'
   | 'VLESS_WS_TLS'
+  | 'VLESS_TCP_TLS'
   | 'HYSTERIA2'
   | 'SHADOWSOCKS';
 
@@ -24,6 +25,7 @@ export type SupportedProtocol =
 export const SUPPORTED_PROTOCOLS: SupportedProtocol[] = [
   'VLESS_REALITY',
   'VLESS_WS_TLS',
+  'VLESS_TCP_TLS',
   'HYSTERIA2',
   'SHADOWSOCKS',
 ];
@@ -64,6 +66,15 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
     tls: 'TLS',
     fixedPort: 443,
   },
+  VLESS_TCP_TLS: {
+    label: 'VLESS + TCP + TLS',
+    description: '直连，真实 TLS 证书，兼容不支持 REALITY 的客户端（Quantumult X 等）',
+    protocol: 'VLESS',
+    implementation: 'XRAY',
+    transport: 'TCP',
+    tls: 'TLS',
+    fixedPort: 443,
+  },
   HYSTERIA2: {
     label: 'Hysteria2',
     description: '基于 QUIC/UDP，速度极快',
@@ -101,6 +112,9 @@ export const CREDENTIAL_GENERATORS: Record<
     };
   },
   VLESS_WS_TLS: () => ({
+    uuid: crypto.randomUUID(),
+  }),
+  VLESS_TCP_TLS: () => ({
     uuid: crypto.randomUUID(),
   }),
   HYSTERIA2: () => ({

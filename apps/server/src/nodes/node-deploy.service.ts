@@ -5,6 +5,8 @@ import { NodeSSH } from 'node-ssh';
 import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { OperationLogService } from '../operation-log/operation-log.service';
+import { CertService } from '../common/cert/cert.service';
+import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.service';
 import { generateConfig, getBinaryCommand, NodeInfo } from './config/config-generator';
 import { connectSsh, uploadText, binaryExists, whichBinary, detectPackageManager } from './ssh/ssh.util';
 
@@ -21,6 +23,8 @@ export class NodeDeployService {
     private prisma: PrismaService,
     private crypto: CryptoService,
     private operationLog: OperationLogService,
+    private certService: CertService,
+    private cfSettings: CloudflareSettingsService,
   ) {}
 
   /** Stream deploy logs as SSE events */
@@ -138,20 +142,26 @@ export class NodeDeployService {
         log(`Binary OK: ${bin}`);
       }
 
-      // ── 5. Generate self-signed TLS cert if node uses TLS mode ───────────
+      // ── 5. Provision TLS certificate ───────────────────────────────────────
       if (node.tls === 'TLS') {
-        const certDir = '/etc/nextpanel/certs';
-        const certFile = `${certDir}/${node.id}.crt`;
-        const keyFile  = `${certDir}/${node.id}.key`;
-        const cn = node.domain ?? node.server.ip;
-        log(`Ensuring TLS certificate at ${certFile}...`);
-        const { stderr: certErr } = await ssh.execCommand(
-          `mkdir -p ${certDir} && ` +
-          `[ -f ${certFile} ] || openssl req -x509 -newkey rsa:2048 ` +
-          `-keyout ${keyFile} -out ${certFile} -days 3650 -nodes -subj "/CN=${cn}" 2>&1`,
-        );
-        if (certErr) log(`TLS cert warning: ${certErr}`);
-        else log(`TLS certificate ready`);
+        const useLetsEncrypt =
+          node.transport === 'TCP' &&
+          node.source === 'AUTO' &&
+          node.domain !== null;
+
+        if (useLetsEncrypt) {
+          const cf = await this.cfSettings.getDecryptedToken(node.userId);
+          if (cf) {
+            const baseDomain = node.domain!.split('.').slice(1).join('.');
+            await this.certService.ensureWildcardCert(cf.apiToken, baseDomain, log);
+            await this.certService.pushCertToNode(ssh, node.id, baseDomain, log);
+          } else {
+            log(`No CF settings found for user, falling back to self-signed cert`);
+            await this.generateSelfSignedCert(ssh, node.id, node.domain ?? node.server.ip, log);
+          }
+        } else {
+          await this.generateSelfSignedCert(ssh, node.id, node.domain ?? node.server.ip, log);
+        }
       }
 
       // ── 6. Upload config file (base64 to avoid shell escaping issues) ──────
@@ -397,6 +407,66 @@ export class NodeDeployService {
       ssh?.dispose();
       throw err;
     }
+  }
+
+  // ── Cert refresh (called by CertRenewalScheduler) ─────────────────────────
+
+  /**
+   * Push a renewed LE cert to the node server and restart the service.
+   * Used by the daily cert renewal scheduler.
+   */
+  async refreshCert(nodeId: string): Promise<void> {
+    const node = await this.prisma.node.findUnique({
+      where: { id: nodeId },
+      include: { server: true },
+    });
+    if (!node) throw new NotFoundException(`Node ${nodeId} not found`);
+    if (!node.domain) return;
+
+    const sshAuth = this.crypto.decrypt(node.server.sshAuthEnc);
+    const serviceName = `nextpanel-${node.id}`;
+    const baseDomain = node.domain.split('.').slice(1).join('.');
+
+    let ssh: NodeSSH | null = null;
+    try {
+      ssh = await connectSsh({
+        host: node.server.ip,
+        port: node.server.sshPort,
+        username: node.server.sshUser,
+        authType: node.server.sshAuthType as 'KEY' | 'PASSWORD',
+        auth: sshAuth,
+        readyTimeout: 10000,
+      });
+      await this.certService.pushCertToNode(ssh, node.id, baseDomain, (msg) =>
+        this.logger.log(`[refreshCert ${nodeId}] ${msg}`),
+      );
+      await ssh.execCommand(`systemctl restart ${serviceName}`);
+      ssh.dispose();
+    } catch (err: unknown) {
+      ssh?.dispose();
+      throw err;
+    }
+  }
+
+  // ── Cert helpers ──────────────────────────────────────────────────────────
+
+  private async generateSelfSignedCert(
+    ssh: NodeSSH,
+    nodeId: string,
+    cn: string,
+    log: (msg: string) => void,
+  ): Promise<void> {
+    const certDir = '/etc/nextpanel/certs';
+    const certFile = `${certDir}/${nodeId}.crt`;
+    const keyFile = `${certDir}/${nodeId}.key`;
+    log(`Ensuring self-signed TLS certificate at ${certFile}...`);
+    const { stderr: certErr } = await ssh.execCommand(
+      `mkdir -p ${certDir} && ` +
+      `[ -f ${certFile} ] || openssl req -x509 -newkey rsa:2048 ` +
+      `-keyout ${keyFile} -out ${certFile} -days 3650 -nodes -subj "/CN=${cn}" 2>&1`,
+    );
+    if (certErr) log(`TLS cert warning: ${certErr}`);
+    else log(`TLS certificate ready`);
   }
 
   // ── Auto-install ─────────────────────────────────────────────────────────

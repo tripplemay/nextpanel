@@ -462,7 +462,7 @@ describe('NodesService', () => {
 
       expect(mockCfSettings.getDecryptedToken).toHaveBeenCalledWith('user-1');
       expect(mockCfService.createARecord).toHaveBeenCalledWith(
-        'cf-token', 'zone-1', expect.stringContaining('example.com'), '1.2.3.4',
+        'cf-token', 'zone-1', expect.stringContaining('example.com'), '1.2.3.4', true,
       );
     });
 

@@ -28,7 +28,8 @@ export class CloudflareService {
   private readonly logger = new Logger(CloudflareService.name);
 
   /**
-   * Create a proxied A record pointing subdomain → ip.
+   * Create a DNS A record pointing subdomain → ip.
+   * proxied=true (default) routes through CF CDN; proxied=false is DNS-only (direct IP).
    * Returns the newly created DNS record ID.
    */
   async createARecord(
@@ -36,14 +37,15 @@ export class CloudflareService {
     zoneId: string,
     subdomain: string,
     ip: string,
+    proxied = true,
   ): Promise<string> {
     const url = `${CF_API}/zones/${zoneId}/dns_records`;
     const body = JSON.stringify({
       type: 'A',
       name: subdomain,
       content: ip,
-      proxied: true,
-      ttl: 1, // auto when proxied
+      proxied,
+      ttl: proxied ? 1 : 60, // auto-ttl when proxied, 60s for DNS-only
     });
 
     const res = await fetch(url, {

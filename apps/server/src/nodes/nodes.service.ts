@@ -57,11 +57,11 @@ export class NodesService {
   }
 
   async createFromPreset(userId: string, dto: CreateNodeFromPresetDto) {
-    // VLESS+WS+TLS requires an active Cloudflare zone to provision the DNS record
-    if (dto.preset === 'VLESS_WS_TLS') {
+    // VLESS+WS+TLS and VLESS+TCP+TLS both require an active Cloudflare zone for DNS provisioning
+    if (dto.preset === 'VLESS_WS_TLS' || dto.preset === 'VLESS_TCP_TLS') {
       const cf = await this.cfSettings.verify(userId);
       if (!cf.valid) {
-        throw new BadRequestException(`无法创建 CDN 友好节点：${cf.message}`);
+        throw new BadRequestException(`无法创建该节点：${cf.message}`);
       }
       if (cf.zoneStatus !== 'active') {
         throw new BadRequestException(
@@ -92,9 +92,12 @@ export class NodesService {
       select: this.safeSelect(),
     });
 
-    // Auto-create Cloudflare DNS A record for VLESS+WS+TLS nodes
+    // Auto-create Cloudflare DNS A record for CDN/TLS nodes
     if (dto.preset === 'VLESS_WS_TLS') {
-      await this.provisionCloudflareDns(userId, node.id, dto.serverId);
+      await this.provisionCloudflareDns(userId, node.id, dto.serverId, true);
+    } else if (dto.preset === 'VLESS_TCP_TLS') {
+      // DNS-Only (proxied=false): direct connection, real IP exposed in DNS
+      await this.provisionCloudflareDns(userId, node.id, dto.serverId, false);
     }
 
     return this.findOne(node.id, userId);
@@ -280,7 +283,12 @@ export class NodesService {
     }
   }
 
-  private async provisionCloudflareDns(userId: string, nodeId: string, serverId: string): Promise<void> {
+  private async provisionCloudflareDns(
+    userId: string,
+    nodeId: string,
+    serverId: string,
+    proxied = true,
+  ): Promise<void> {
     const settings = await this.cfSettings.getDecryptedToken(userId);
     if (!settings) return; // No CF configured — skip silently
 
@@ -297,6 +305,7 @@ export class NodesService {
         settings.zoneId,
         subdomain,
         server.ip,
+        proxied,
       );
       await this.prisma.node.update({
         where: { id: nodeId },
