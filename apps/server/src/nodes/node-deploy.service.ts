@@ -420,6 +420,10 @@ export class NodeDeployService {
 
   private async installXray(ssh: NodeSSH, log: (msg: string) => void): Promise<boolean> {
     log(`Installing Xray via official script...`);
+    // Ensure unzip is available — required by the Xray install script
+    await ssh.execCommand(
+      `DEBIAN_FRONTEND=noninteractive apt-get install -y unzip 2>/dev/null || yum install -y unzip 2>/dev/null; true`,
+    );
     // Download to tmp file first to avoid process substitution (<()) which sh/dash don't support
     const { stdout, stderr } = await ssh.execCommand(
       `curl -sL https://github.com/XTLS/Xray-install/raw/main/install-release.sh -o /tmp/install-xray.sh && ` +
@@ -435,6 +439,10 @@ export class NodeDeployService {
 
   private async installV2Ray(ssh: NodeSSH, log: (msg: string) => void): Promise<boolean> {
     log(`Installing V2Ray via official script...`);
+    // Ensure unzip is available — required by the V2Ray install script
+    await ssh.execCommand(
+      `DEBIAN_FRONTEND=noninteractive apt-get install -y unzip 2>/dev/null || yum install -y unzip 2>/dev/null; true`,
+    );
     const { stdout, stderr } = await ssh.execCommand(
       `curl -sL https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh -o /tmp/install-v2ray.sh && ` +
       `bash /tmp/install-v2ray.sh 2>&1; rm -f /tmp/install-v2ray.sh`,

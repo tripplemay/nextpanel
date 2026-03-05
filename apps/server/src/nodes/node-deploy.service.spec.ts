@@ -183,6 +183,7 @@ describe('NodeDeployService', () => {
       // installXray SSH commands + daemon-reload + enable+restart + firewall (1 call) + is-active
       mockExecCommand.mockReset();
       mockExecCommand
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })   // apt-get/yum install unzip
         .mockResolvedValueOnce({ stdout: '', stderr: '' })   // install script
         .mockResolvedValueOnce({ code: 0 })                  // test -x xray
         .mockResolvedValueOnce({ stderr: '' })               // daemon-reload
@@ -384,6 +385,7 @@ describe('NodeDeployService', () => {
         .mockResolvedValueOnce(false); // re-verify after install: still missing
       mockExecCommand.mockReset();
       mockExecCommand
+        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // apt-get/yum install unzip
         .mockResolvedValueOnce({ stdout: '', stderr: '' }) // install script
         .mockResolvedValueOnce({ code: 0 });               // test -x xray succeeds → installXray returns true
 
