@@ -181,12 +181,11 @@ export class NodeDeployService {
       const { stderr: reloadErr } = await ssh.execCommand('systemctl daemon-reload');
       if (reloadErr) log(`daemon-reload warning: ${reloadErr}`);
 
-      // Kill any stale process occupying the stats port before starting the service.
-      // systemctl restart only stops the systemd-managed process; orphaned Xray
-      // processes from previous failed deployments can still hold the port.
-      if (statsPort) {
-        await ssh.execCommand(`fuser -k ${statsPort}/tcp 2>/dev/null || true`);
-      }
+      // Kill any orphaned process for THIS node before starting the service.
+      // systemctl restart only stops the systemd-managed process; stale Xray
+      // processes from previous failed deployments can still hold the statsPort.
+      // We target by config file path (not port) to avoid killing other nodes.
+      await ssh.execCommand(`pkill -f "${configPath}" 2>/dev/null || true`);
 
       log(`Starting service: ${serviceName}...`);
       const { stderr: startErr } = await ssh.execCommand(
