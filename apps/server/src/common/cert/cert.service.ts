@@ -125,9 +125,14 @@ export class CertService {
 
     log('acme.sh not found, installing...');
     await new Promise<void>((resolve, reject) => {
+      // Note: avoid passing --no-cron via `sh -s -- --no-cron` because the
+      // double `--` causes get.acme.sh to forward `----no-cron` (4 dashes)
+      // to the installer, which treats it as an unknown parameter and exits early.
+      // The acme.sh cron job it installs is harmless — our NestJS scheduler
+      // handles renewals independently.
       execFile(
         'sh',
-        ['-c', 'curl https://get.acme.sh | sh -s -- --no-cron'],
+        ['-c', 'curl https://get.acme.sh | sh'],
         (err, stdout, stderr) => {
           if (stdout) log(stdout.slice(-500));
           if (stderr) log(stderr.slice(-200));
@@ -135,8 +140,15 @@ export class CertService {
             reject(new Error(`acme.sh install failed: ${err.message}`));
             return;
           }
-          log('acme.sh installed');
-          resolve();
+          // Verify binary actually exists — install can exit 0 with warnings
+          execFile('test', ['-x', ACME_BIN], (testErr) => {
+            if (testErr) {
+              reject(new Error(`acme.sh install appeared to succeed but binary not found at ${ACME_BIN}`));
+              return;
+            }
+            log('acme.sh installed');
+            resolve();
+          });
         },
       );
     });
