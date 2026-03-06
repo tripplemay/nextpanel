@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Layout, Menu, Typography, Avatar, Dropdown, Space } from 'antd';
 import {
@@ -12,13 +12,16 @@ import {
   LogoutOutlined,
   UserOutlined,
   SettingOutlined,
+  TeamOutlined,
+  KeyOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/auth';
+import type { ItemType } from 'antd/es/menu/interface';
 
 const { Sider, Header, Content } = Layout;
 const { Text } = Typography;
 
-const menuItems = [
+const baseMenuItems: ItemType[] = [
   { key: '/servers', icon: <CloudServerOutlined />, label: '服务器' },
   { key: '/nodes', icon: <NodeIndexOutlined />, label: '节点' },
   { key: '/subscriptions', icon: <LinkOutlined />, label: '订阅管理' },
@@ -26,16 +29,33 @@ const menuItems = [
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
 ];
 
+const adminMenuItems: ItemType[] = [
+  { type: 'divider' },
+  {
+    type: 'group',
+    label: '管理员',
+    children: [
+      { key: '/users', icon: <TeamOutlined />, label: '用户管理' },
+      { key: '/invite-codes', icon: <KeyOutlined />, label: '邀请码' },
+    ],
+  },
+];
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { user, token, logout } = useAuthStore();
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    if (!token) router.replace('/login');
-  }, [token, router]);
+    setHydrated(true);
+  }, []);
 
-  if (!token) return null;
+  useEffect(() => {
+    if (hydrated && !token) router.replace('/login');
+  }, [hydrated, token, router]);
+
+  if (!hydrated || !token) return null;
 
   const userMenu = [
     {
@@ -71,7 +91,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           mode="inline"
           selectedKeys={[pathname]}
           onClick={({ key }) => router.push(key)}
-          items={menuItems}
+          items={user?.role === 'ADMIN' ? [...baseMenuItems, ...adminMenuItems] : baseMenuItems}
           style={{ marginTop: 8 }}
         />
       </Sider>

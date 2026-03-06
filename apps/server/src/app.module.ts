@@ -13,6 +13,8 @@ import { AgentModule } from './agent/agent.module';
 import { OperationLogModule } from './operation-log/operation-log.module';
 import { CloudflareModule } from './cloudflare/cloudflare.module';
 import { RulesModule } from './rules/rules.module';
+import { InviteCodesModule } from './invite-codes/invite-codes.module';
+import { UsersModule } from './users/users.module';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 
 @Module({
@@ -30,6 +32,8 @@ import { AuditInterceptor } from './common/interceptors/audit.interceptor';
     OperationLogModule,
     CloudflareModule,
     RulesModule,
+    InviteCodesModule,
+    UsersModule,
   ],
   providers: [
     {

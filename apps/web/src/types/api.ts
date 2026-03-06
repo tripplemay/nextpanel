@@ -56,6 +56,33 @@ export interface UpdateSubscriptionDto {
   nodeIds?: string[];
 }
 
+export interface RegisterDto {
+  username: string;
+  password: string;
+  inviteCode: string;
+}
+
+// ── Users ─────────────────────────────────────────────────────────────────────
+
+export interface UserRecord {
+  id: string;
+  username: string;
+  role: 'ADMIN' | 'OPERATOR' | 'VIEWER';
+  createdAt: string;
+}
+
+// ── InviteCodes ───────────────────────────────────────────────────────────────
+
+export interface InviteCode {
+  id: string;
+  code: string;
+  maxUses: number;
+  usedCount: number;
+  createdBy: string;
+  creator: { username: string };
+  createdAt: string;
+}
+
 // ── Response types ────────────────────────────────────────────────────────────
 
 export interface Server {

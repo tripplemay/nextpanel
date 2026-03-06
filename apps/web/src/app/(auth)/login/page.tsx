@@ -4,10 +4,11 @@ import { useState } from 'react';
 import { App, Form, Input, Button, Card, Typography } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
 export default function LoginPage() {
   const { message } = App.useApp();
@@ -53,6 +54,10 @@ export default function LoginPage() {
             登录
           </Button>
         </Form>
+        <div style={{ textAlign: 'center', marginTop: 16 }}>
+          <Text type="secondary">没有账号？</Text>{' '}
+          <Link href="/register">注册账号</Link>
+        </div>
       </Card>
     </div>
   );

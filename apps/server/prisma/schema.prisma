@@ -22,6 +22,19 @@ model User {
   servers           Server[]
   nodes             Node[]
   cloudflareSetting CloudflareSetting?
+  inviteCodes       InviteCode[]
+}
+
+// ──────────────────────────── InviteCode ────────────────────────────
+
+model InviteCode {
+  id        String   @id @default(cuid())
+  code      String   @unique @default(cuid())
+  maxUses   Int      @default(1)
+  usedCount Int      @default(0)
+  creator   User     @relation(fields: [createdBy], references: [id])
+  createdBy String
+  createdAt DateTime @default(now())
 }
 
 enum UserRole {

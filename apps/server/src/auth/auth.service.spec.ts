@@ -1,7 +1,7 @@
 import { AuthService } from './auth.service';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma.service';
-import { UnauthorizedException, ConflictException } from '@nestjs/common';
+import { UnauthorizedException, ConflictException, BadRequestException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 
 jest.mock('bcrypt');
@@ -13,6 +13,11 @@ const mockPrisma = {
     findUnique: jest.fn(),
     create: jest.fn(),
   },
+  inviteCode: {
+    findUnique: jest.fn(),
+    update: jest.fn(),
+  },
+  $transaction: jest.fn(),
 } as unknown as PrismaService;
 
 const mockJwt = {
@@ -24,6 +29,8 @@ const svc = new AuthService(mockPrisma, mockJwt);
 const fakeUser = {
   id: 'u1', username: 'admin', passwordHash: 'hashed', role: 'ADMIN',
 };
+
+const fakeInvite = { id: 'inv1', code: 'valid-code', maxUses: 5, usedCount: 2 };
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -68,42 +75,49 @@ describe('AuthService', () => {
   });
 
   describe('register', () => {
-    it('creates a new user and returns safe user info', async () => {
+    it('creates a new user with OPERATOR role and returns safe user info', async () => {
+      (mockPrisma.inviteCode.findUnique as jest.Mock).mockResolvedValue(fakeInvite);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
       bcryptHash.mockResolvedValue('hashed-pw');
-      (mockPrisma.user.create as jest.Mock).mockResolvedValue(fakeUser);
+      const newUser = { ...fakeUser, role: 'OPERATOR' };
+      (mockPrisma.$transaction as jest.Mock).mockResolvedValue([newUser, {}]);
 
-      const result = await svc.register({ username: 'admin', password: 'pw' });
+      const result = await svc.register({ username: 'newuser', password: 'mypassword', inviteCode: 'valid-code' });
 
       expect(result.id).toBe('u1');
-      expect(result.username).toBe('admin');
+      expect(result.role).toBe('OPERATOR');
       expect(result).not.toHaveProperty('passwordHash');
     });
 
+    it('throws BadRequestException when invite code is invalid', async () => {
+      (mockPrisma.inviteCode.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(svc.register({ username: 'x', password: 'mypassword', inviteCode: 'bad-code' }))
+        .rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when invite code is exhausted', async () => {
+      (mockPrisma.inviteCode.findUnique as jest.Mock).mockResolvedValue({ ...fakeInvite, maxUses: 1, usedCount: 1 });
+
+      await expect(svc.register({ username: 'x', password: 'mypassword', inviteCode: 'used-code' }))
+        .rejects.toThrow(BadRequestException);
+    });
+
     it('throws ConflictException when username is taken', async () => {
+      (mockPrisma.inviteCode.findUnique as jest.Mock).mockResolvedValue(fakeInvite);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(fakeUser);
 
-      await expect(svc.register({ username: 'admin', password: 'pw' }))
+      await expect(svc.register({ username: 'admin', password: 'mypassword', inviteCode: 'valid-code' }))
         .rejects.toThrow(ConflictException);
     });
 
-    it('defaults role to VIEWER when not provided', async () => {
-      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
-      bcryptHash.mockResolvedValue('h');
-      (mockPrisma.user.create as jest.Mock).mockResolvedValue({ ...fakeUser, role: 'VIEWER' });
-
-      await svc.register({ username: 'new', password: 'pw' });
-
-      const createArg = (mockPrisma.user.create as jest.Mock).mock.calls[0][0];
-      expect(createArg.data.role).toBe('VIEWER');
-    });
-
     it('hashes password with bcrypt (salt=12)', async () => {
+      (mockPrisma.inviteCode.findUnique as jest.Mock).mockResolvedValue(fakeInvite);
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
       bcryptHash.mockResolvedValue('hashed');
-      (mockPrisma.user.create as jest.Mock).mockResolvedValue(fakeUser);
+      (mockPrisma.$transaction as jest.Mock).mockResolvedValue([fakeUser, {}]);
 
-      await svc.register({ username: 'x', password: 'mypassword' });
+      await svc.register({ username: 'x', password: 'mypassword', inviteCode: 'valid-code' });
 
       expect(bcryptHash).toHaveBeenCalledWith('mypassword', 12);
     });

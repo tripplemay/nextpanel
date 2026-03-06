@@ -18,6 +18,9 @@ import type {
   CreateSubscriptionDto,
   UpdateSubscriptionDto,
   UpsertCloudflareSettingDto,
+  RegisterDto,
+  UserRecord,
+  InviteCode,
 } from '@/types/api';
 
 export const api = axios.create({
@@ -57,6 +60,8 @@ export const authApi = {
       '/auth/login',
       { username, password },
     ),
+  register: (data: RegisterDto) =>
+    api.post<{ id: string; username: string; role: string }>('/auth/register', data),
 };
 
 // ── Servers ──────────────────────────────────────────
@@ -118,6 +123,21 @@ export const operationLogsApi = {
   getByCorrelationId: (correlationId: string) =>
     api.get<OperationLogDetail | null>(`/operation-logs/by-correlation/${correlationId}`),
   getLog: (logId: string) => api.get<OperationLogDetail>(`/operation-logs/${logId}`),
+};
+
+// ── Users ─────────────────────────────────────────────
+export const usersApi = {
+  list: () => api.get<UserRecord[]>('/users'),
+  updateRole: (id: string, role: string) => api.patch<UserRecord>(`/users/${id}/role`, { role }),
+  remove: (id: string) => api.delete<void>(`/users/${id}`),
+};
+
+// ── InviteCodes ───────────────────────────────────────
+export const inviteCodesApi = {
+  list: () => api.get<InviteCode[]>('/invite-codes'),
+  create: (quantity: number, maxUses: number) =>
+    api.post<InviteCode[]>('/invite-codes', { quantity, maxUses }),
+  remove: (id: string) => api.delete<void>(`/invite-codes/${id}`),
 };
 
 // ── Cloudflare ────────────────────────────────────────
