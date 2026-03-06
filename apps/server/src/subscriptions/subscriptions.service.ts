@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { NodesService } from '../nodes/nodes.service';
 import { buildShareUri, buildClashProxy, buildSingboxOutbound } from './uri-builder';
@@ -43,8 +43,45 @@ export class SubscriptionsService {
   findAll(ownerId: string) {
     return this.prisma.subscription.findMany({
       where: { ownerId },
-      include: { nodes: { include: { node: { select: { id: true, name: true, protocol: true } } } } },
+      include: {
+        nodes: {
+          include: {
+            node: { select: { id: true, name: true, protocol: true, status: true, enabled: true, listenPort: true } },
+          },
+        },
+      },
       orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async update(id: string, name: string | undefined, nodeIds: string[] | undefined, ownerId: string) {
+    const sub = await this.prisma.subscription.findFirst({ where: { id, ownerId } });
+    if (!sub) throw new NotFoundException(`Subscription ${id} not found`);
+
+    return this.prisma.subscription.update({
+      where: { id },
+      data: {
+        ...(name !== undefined && { name }),
+        ...(nodeIds !== undefined && {
+          nodes: {
+            deleteMany: {},
+            create: nodeIds.map((nodeId) => ({ nodeId })),
+          },
+        }),
+      },
+      include: { nodes: { include: { node: { select: { id: true, name: true, protocol: true } } } } },
+    });
+  }
+
+  async refreshToken(id: string, ownerId: string) {
+    const sub = await this.prisma.subscription.findFirst({ where: { id, ownerId } });
+    if (!sub) throw new NotFoundException(`Subscription ${id} not found`);
+    if (sub.ownerId !== ownerId) throw new ForbiddenException();
+
+    return this.prisma.subscription.update({
+      where: { id },
+      data: { token: require('crypto').randomUUID() },
+      select: { id: true, token: true },
     });
   }
 

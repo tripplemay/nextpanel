@@ -1,12 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { App, Button, Table, Space, Card, Popconfirm, Modal, QRCode, Tabs, Input } from 'antd';
-import { QrcodeOutlined, CopyOutlined } from '@ant-design/icons';
+import { App, Button, Table, Space, Card, Popconfirm, Modal, QRCode, Tabs, Input, Tag, Typography } from 'antd';
+import { QrcodeOutlined, CopyOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { subscriptionsApi } from '@/lib/api';
 import SubscriptionFormModal from '@/components/subscriptions/SubscriptionFormModal';
 import PageHeader from '@/components/common/PageHeader';
+import StatusTag from '@/components/common/StatusTag';
 import type { Subscription } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
@@ -16,16 +17,28 @@ interface SubFormat {
   url: string;
 }
 
+function getFormats(token: string): SubFormat[] {
+  const base = `${window.location.origin}/api/subscriptions/link/${token}`;
+  return [
+    { key: 'v2ray', label: 'V2Ray / Xray Base64', url: base },
+    { key: 'clash', label: 'Clash / Mihomo YAML', url: `${base}/clash` },
+    { key: 'singbox', label: 'Sing-box JSON', url: `${base}/singbox` },
+  ];
+}
+
 export default function SubscriptionsPage() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const qc = useQueryClient();
+
   const [createOpen, setCreateOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<Subscription | null>(null);
   const [linkTarget, setLinkTarget] = useState<SubFormat[] | null>(null);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['subscriptions'],
     queryFn: () => subscriptionsApi.list().then((r) => r.data),
+    refetchInterval: 10_000,
   });
 
   const deleteMutation = useMutation({
@@ -37,20 +50,57 @@ export default function SubscriptionsPage() {
     onError: () => message.error('删除失败'),
   });
 
-  function getFormats(token: string): SubFormat[] {
-    const base = `${window.location.origin}/api/subscriptions/link/${token}`;
-    return [
-      { key: 'v2ray', label: 'V2Ray / Xray Base64', url: base },
-      { key: 'clash', label: 'Clash / Mihomo YAML', url: `${base}/clash` },
-      { key: 'singbox', label: 'Sing-box JSON', url: `${base}/singbox` },
-    ];
+  const refreshTokenMutation = useMutation({
+    mutationFn: (id: string) => subscriptionsApi.refreshToken(id),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['subscriptions'] });
+      // Auto-open export modal with the new token
+      setLinkTarget(getFormats(res.data.token));
+      message.success('订阅链接已刷新，请重新导入');
+    },
+    onError: () => message.error('刷新失败'),
+  });
+
+  function confirmRefreshToken(record: Subscription) {
+    modal.confirm({
+      title: '确认刷新订阅链接？',
+      content: '旧链接将立即失效，所有使用旧链接的客户端需重新导入新链接才能正常使用。',
+      okText: '确认刷新',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: () => refreshTokenMutation.mutate(record.id),
+    });
   }
+
+  const expandedRowRender = (record: Subscription) => (
+    <Table
+      rowKey={(sn) => sn.node.id}
+      size="small"
+      dataSource={record.nodes}
+      pagination={false}
+      columns={[
+        { title: '节点名称', render: (_: unknown, sn) => sn.node.name },
+        {
+          title: '协议',
+          render: (_: unknown, sn) => <Tag color="blue">{sn.node.protocol}</Tag>,
+        },
+        { title: '端口', render: (_: unknown, sn) => sn.node.listenPort },
+        {
+          title: '状态',
+          render: (_: unknown, sn) => <StatusTag status={sn.node.status} enabled={sn.node.enabled} />,
+        },
+      ]}
+      style={{ marginBlock: 0 }}
+    />
+  );
 
   const columns: ColumnType<Subscription>[] = [
     { title: '名称', dataIndex: 'name' },
     {
       title: '节点数',
-      render: (_: unknown, r) => r.nodes.length,
+      render: (_: unknown, r) => (
+        <Typography.Text type="secondary">{r.nodes.length} 个节点</Typography.Text>
+      ),
     },
     {
       title: '创建时间',
@@ -60,7 +110,7 @@ export default function SubscriptionsPage() {
     {
       title: '操作',
       render: (_: unknown, record) => (
-        <Space>
+        <Space size={4}>
           <Button
             size="small"
             type="primary"
@@ -77,6 +127,21 @@ export default function SubscriptionsPage() {
             }}
           >
             二维码
+          </Button>
+          <Button
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => setEditTarget(record)}
+          >
+            编辑
+          </Button>
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
+            loading={refreshTokenMutation.isPending}
+            onClick={() => confirmRefreshToken(record)}
+          >
+            刷新链接
           </Button>
           <Popconfirm
             title="确认删除该订阅？"
@@ -98,13 +163,33 @@ export default function SubscriptionsPage() {
         addLabel="新增订阅"
         onAdd={() => setCreateOpen(true)}
       />
-      <Table rowKey="id" size="middle" loading={isLoading} dataSource={data} columns={columns} pagination={{ showTotal: (total) => `共 ${total} 条` }} />
+      <Table
+        rowKey="id"
+        size="middle"
+        loading={isLoading}
+        dataSource={data}
+        columns={columns}
+        pagination={{ showTotal: (total) => `共 ${total} 条` }}
+        expandable={{ expandedRowRender }}
+      />
 
+      {/* Create modal */}
       <SubscriptionFormModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onSuccess={() => {
           setCreateOpen(false);
+          qc.invalidateQueries({ queryKey: ['subscriptions'] });
+        }}
+      />
+
+      {/* Edit modal */}
+      <SubscriptionFormModal
+        open={!!editTarget}
+        subscription={editTarget}
+        onClose={() => setEditTarget(null)}
+        onSuccess={() => {
+          setEditTarget(null);
           qc.invalidateQueries({ queryKey: ['subscriptions'] });
         }}
       />
@@ -141,7 +226,7 @@ export default function SubscriptionsPage() {
         )}
       </Modal>
 
-      {/* QR code modal (Base64 universal) */}
+      {/* QR code modal */}
       <Modal
         open={!!qrUrl}
         footer={null}

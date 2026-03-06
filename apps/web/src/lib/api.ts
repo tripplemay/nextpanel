@@ -16,6 +16,7 @@ import type {
   UpdateNodeDto,
   CreateNodeFromPresetDto,
   CreateSubscriptionDto,
+  UpdateSubscriptionDto,
   UpsertCloudflareSettingDto,
 } from '@/types/api';
 
@@ -92,6 +93,8 @@ export const nodesApi = {
 export const subscriptionsApi = {
   list: () => api.get<Subscription[]>('/subscriptions'),
   create: (data: CreateSubscriptionDto) => api.post<Subscription>('/subscriptions', data),
+  update: (id: string, data: UpdateSubscriptionDto) => api.patch<Subscription>(`/subscriptions/${id}`, data),
+  refreshToken: (id: string) => api.post<{ id: string; token: string }>(`/subscriptions/${id}/refresh-token`),
   delete: (id: string) => api.delete<void>(`/subscriptions/${id}`),
 };
 

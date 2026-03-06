@@ -51,6 +51,11 @@ export interface CreateSubscriptionDto {
   nodeIds: string[];
 }
 
+export interface UpdateSubscriptionDto {
+  name?: string;
+  nodeIds?: string[];
+}
+
 // ── Response types ────────────────────────────────────────────────────────────
 
 export interface Server {
@@ -107,7 +112,7 @@ export interface Subscription {
   id: string;
   name: string;
   token: string;
-  nodes: Array<{ node: Pick<Node, 'id' | 'name' | 'protocol'> }>;
+  nodes: Array<{ node: Pick<Node, 'id' | 'name' | 'protocol' | 'status' | 'enabled' | 'listenPort'> }>;
   createdAt: string;
 }
 

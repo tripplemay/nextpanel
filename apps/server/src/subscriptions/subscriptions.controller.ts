@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Param,
@@ -14,6 +15,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { SubscriptionsService } from './subscriptions.service';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
+import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 
 @ApiTags('subscriptions')
 @Controller('subscriptions')
@@ -37,6 +39,29 @@ export class SubscriptionsController {
   @ApiOperation({ summary: 'List subscriptions for current user' })
   findAll(@CurrentUser() user: { id: string }) {
     return this.subscriptionsService.findAll(user.id);
+  }
+
+  @Patch(':id')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Update a subscription' })
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateSubscriptionDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.subscriptionsService.update(id, dto.name, dto.nodeIds, user.id);
+  }
+
+  @Post(':id/refresh-token')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Regenerate subscription token' })
+  refreshToken(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.subscriptionsService.refreshToken(id, user.id);
   }
 
   @Delete(':id')
