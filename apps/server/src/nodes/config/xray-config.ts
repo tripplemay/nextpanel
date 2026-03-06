@@ -32,7 +32,7 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
         ],
         outbounds: [{ protocol: 'freedom', tag: 'direct' }],
         routing: {
-          rules: [{ type: 'field', inboundTag: ['api'], outboundTag: 'direct' }],
+          rules: [{ type: 'field', inboundTag: ['api'], outboundTag: 'api' }],
         },
       },
       null,
