@@ -220,25 +220,44 @@ export class ServersService {
 
       // BBR 网络优化（best-effort，失败不中断安装）
       onLog('检测 BBR 支持...');
-      const { code: bbrCheckCode } = await ssh.execCommand(
-        'grep -q bbr /proc/sys/net/ipv4/tcp_available_congestion_control',
+
+      // Step 1: 已经在用 BBR 则直接跳过
+      const { stdout: currentAlgo } = await ssh.execCommand(
+        'sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null',
       );
-      if (bbrCheckCode === 0) {
-        const { code: bbrApplyCode } = await ssh.execCommand(
-          'grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf' +
-          ' || (printf "net.core.default_qdisc=fq\\nnet.ipv4.tcp_congestion_control=bbr\\n" >> /etc/sysctl.conf)' +
-          ' && sysctl -p >/dev/null 2>&1',
-        );
-        if (bbrApplyCode === 0) {
-          const { stdout: activeAlgo } = await ssh.execCommand(
-            'sysctl -n net.ipv4.tcp_congestion_control',
-          );
-          onLog(`BBR 已启用（当前拥塞控制算法: ${activeAlgo.trim()}）`);
-        } else {
-          onLog('⚠ BBR 配置失败（可能为容器环境限制），已跳过');
-        }
+      if (currentAlgo.trim() === 'bbr') {
+        onLog('BBR 已启用（无需重复配置）');
       } else {
-        onLog('⚠ 当前系统不支持 BBR（内核版本 < 4.9 或容器环境限制），已跳过');
+        // Step 2: 尝试加载 BBR 内核模块（模块存在但未加载时 grep 会误报不支持）
+        await ssh.execCommand('modprobe tcp_bbr 2>/dev/null || true');
+
+        // Step 3: 确认 BBR 现在是否可用
+        const { code: bbrAvailable } = await ssh.execCommand(
+          'grep -q bbr /proc/sys/net/ipv4/tcp_available_congestion_control',
+        );
+        if (bbrAvailable === 0) {
+          // Step 4: 立即生效
+          const { code: applyCode } = await ssh.execCommand(
+            'sysctl -w net.core.default_qdisc=fq >/dev/null 2>&1' +
+            ' && sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1',
+          );
+          if (applyCode === 0) {
+            // Step 5: 持久化（避免重复写入）
+            await ssh.execCommand(
+              'grep -q "tcp_congestion_control=bbr" /etc/sysctl.conf' +
+              ' || printf "net.core.default_qdisc=fq\\nnet.ipv4.tcp_congestion_control=bbr\\n" >> /etc/sysctl.conf',
+            );
+            // Step 6: 验证
+            const { stdout: verified } = await ssh.execCommand(
+              'sysctl -n net.ipv4.tcp_congestion_control',
+            );
+            onLog(`BBR 已启用（当前拥塞控制算法: ${verified.trim()}）`);
+          } else {
+            onLog('⚠ BBR 配置失败（可能为容器环境限制），已跳过');
+          }
+        } else {
+          onLog('⚠ 当前系统不支持 BBR（内核版本 < 4.9 或容器环境限制），已跳过');
+        }
       }
 
       // 检测架构
