@@ -19,7 +19,7 @@ export type SupportedProtocol =
   | 'VLESS_WS_TLS'
   | 'VLESS_TCP_TLS'
   | 'HYSTERIA2'
-  | 'SHADOWSOCKS';
+  | 'VMESS_TCP';
 
 /** Array form for use in IsIn() validators */
 export const SUPPORTED_PROTOCOLS: SupportedProtocol[] = [
@@ -27,14 +27,21 @@ export const SUPPORTED_PROTOCOLS: SupportedProtocol[] = [
   'VLESS_WS_TLS',
   'VLESS_TCP_TLS',
   'HYSTERIA2',
-  'SHADOWSOCKS',
+  'VMESS_TCP',
 ];
+
+export interface PresetTag {
+  text: string;
+  color: string;
+}
 
 export interface ProtocolPreset {
   /** Display name shown in UI */
   label: string;
   /** Brief description shown in UI */
   description: string;
+  /** Colored tags for speed / security / config cost */
+  tags: PresetTag[];
   /** Prisma Protocol enum value */
   protocol: string;
   /** Prisma Implementation enum value */
@@ -51,6 +58,11 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
   VLESS_REALITY: {
     label: 'VLESS + REALITY',
     description: '裸 IP 直连，抗识别能力最强，首选方案',
+    tags: [
+      { text: '极速', color: 'green' },
+      { text: '抗识别最强', color: 'red' },
+      { text: '无需域名', color: 'blue' },
+    ],
     protocol: 'VLESS',
     implementation: 'XRAY',
     transport: 'TCP',
@@ -60,6 +72,11 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
   VLESS_WS_TLS: {
     label: 'VLESS + WS + TLS',
     description: '经 Cloudflare CDN 中转，IP 被封时的保底方案',
+    tags: [
+      { text: '中速', color: 'orange' },
+      { text: '高安全', color: 'volcano' },
+      { text: '需要 CF + 域名', color: 'gold' },
+    ],
     protocol: 'VLESS',
     implementation: 'XRAY',
     transport: 'WS',
@@ -69,25 +86,40 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
   VLESS_TCP_TLS: {
     label: 'VLESS + TCP + TLS',
     description: '直连，真实 TLS 证书，兼容不支持 REALITY 的客户端（Quantumult X 等）',
+    tags: [
+      { text: '快', color: 'green' },
+      { text: '高安全', color: 'volcano' },
+      { text: '需要域名', color: 'gold' },
+    ],
     protocol: 'VLESS',
     implementation: 'XRAY',
     transport: 'TCP',
     tls: 'TLS',
-    fixedPort: 443,
+    fixedPort: null,
   },
   HYSTERIA2: {
     label: 'Hysteria2',
     description: '基于 QUIC/UDP，速度极快',
+    tags: [
+      { text: '极速', color: 'green' },
+      { text: '高安全', color: 'volcano' },
+      { text: '无需域名', color: 'blue' },
+    ],
     protocol: 'HYSTERIA2',
     implementation: 'SING_BOX',
     transport: null,
     tls: 'TLS',
     fixedPort: null,
   },
-  SHADOWSOCKS: {
-    label: 'Shadowsocks 2022',
-    description: '轻量备用，配置简单',
-    protocol: 'SHADOWSOCKS',
+  VMESS_TCP: {
+    label: 'VMess + TCP',
+    description: '兼容性最广的兜底方案，无需域名或证书，适合老旧客户端',
+    tags: [
+      { text: '快', color: 'green' },
+      { text: '基础加密', color: 'default' },
+      { text: '无需域名/证书', color: 'blue' },
+    ],
+    protocol: 'VMESS',
     implementation: 'XRAY',
     transport: 'TCP',
     tls: 'NONE',
@@ -120,9 +152,8 @@ export const CREDENTIAL_GENERATORS: Record<
   HYSTERIA2: () => ({
     password: randomPassword(32),
   }),
-  SHADOWSOCKS: () => ({
-    password: randomPassword(32),
-    method: 'aes-256-gcm',
+  VMESS_TCP: () => ({
+    uuid: crypto.randomUUID(),
   }),
 };
 

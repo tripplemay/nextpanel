@@ -160,9 +160,9 @@ describe('generateSingBoxConfig – TLS', () => {
     expect(cfg.inbounds[0].tls.reality.handshake.server).toBe('reality.example.com');
   });
 
-  it('REALITY mode falls back to www.google.com when domain is null', () => {
+  it('REALITY mode falls back to REALITY_DEFAULT_SNI when domain is null', () => {
     const cfg = parseSingBox({ ...baseNode, tls: 'REALITY', domain: null });
-    expect(cfg.inbounds[0].tls.reality.handshake.server).toBe('www.google.com');
+    expect(cfg.inbounds[0].tls.reality.handshake.server).toBe('addons.mozilla.org');
   });
 
   it('REALITY mode uses realityPrivateKey from credentials', () => {

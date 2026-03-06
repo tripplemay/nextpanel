@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { App, Modal, Form, Input, Select } from 'antd';
+import { App, Modal, Form, Input, Select, Tag, Space } from 'antd';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { nodesApi, serversApi } from '@/lib/api';
 import type { Node } from '@/types/api';
@@ -101,9 +101,22 @@ export default function NodePresetModal({ open, onClose, onSuccess }: Props) {
         </Form.Item>
 
         <Form.Item name="preset" label="协议预设" rules={[{ required: true, message: '请选择协议预设' }]}>
-          <Select placeholder="选择协议预设">
-            {presets?.map((p) => <Option key={p.value} value={p.value}>{p.label}</Option>)}
-          </Select>
+          <Select
+            placeholder="选择协议预设"
+            options={presets?.map((p) => ({ value: p.value, label: p.label, tags: p.tags }))}
+            optionRender={(option) => (
+              <div style={{ padding: '4px 0' }}>
+                <div>{option.data.label}</div>
+                <Space size={4} style={{ marginTop: 4 }} wrap>
+                  {option.data.tags?.map((tag: { text: string; color: string }) => (
+                    <Tag key={tag.text} color={tag.color} style={{ fontSize: 11, margin: 0 }}>
+                      {tag.text}
+                    </Tag>
+                  ))}
+                </Space>
+              </div>
+            )}
+          />
         </Form.Item>
 
         <Form.Item

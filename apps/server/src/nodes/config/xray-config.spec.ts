@@ -235,9 +235,9 @@ describe('generateXrayConfig – TLS', () => {
     expect(ss.realitySettings.dest).toBe('cdn.example.com:443');
   });
 
-  it('REALITY mode falls back to www.google.com when domain is null', () => {
+  it('REALITY mode falls back to REALITY_DEFAULT_SNI when domain is null', () => {
     const cfg = parse({ ...baseNode, tls: 'REALITY', domain: null });
-    expect(cfg.inbounds[0].streamSettings.realitySettings.dest).toBe('www.google.com:443');
+    expect(cfg.inbounds[0].streamSettings.realitySettings.dest).toBe('addons.mozilla.org:443');
   });
 
   it('REALITY uses empty string for realityPrivateKey when not provided', () => {

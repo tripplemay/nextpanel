@@ -1,4 +1,5 @@
 import type { NodeInfo, NodeCredentials } from './config-generator';
+import { REALITY_DEFAULT_SNI } from '../protocols/reality';
 
 // ─── sing-box ────────────────────────────────────────────────────────────────
 
@@ -70,7 +71,7 @@ function singBoxInbound(node: NodeInfo, creds: NodeCredentials): unknown {
       enabled: true,
       reality: {
         enabled: true,
-        handshake: { server: node.domain ?? 'www.google.com', server_port: 443 },
+        handshake: { server: node.domain ?? REALITY_DEFAULT_SNI, server_port: 443 },
         private_key: creds.realityPrivateKey ?? '',
         short_id: [''],
       },

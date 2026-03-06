@@ -71,7 +71,7 @@ export const serversApi = {
 
 // ── Nodes ─────────────────────────────────────────────
 export const nodesApi = {
-  listPresets: () => api.get<{ value: string; label: string; description: string }[]>('/nodes/presets'),
+  listPresets: () => api.get<{ value: string; label: string; description: string; tags: { text: string; color: string }[] }[]>('/nodes/presets'),
   list: (serverId?: string) =>
     api.get<Node[]>('/nodes', { params: serverId ? { serverId } : {} }),
   get: (id: string) => api.get<Node>(`/nodes/${id}`),
