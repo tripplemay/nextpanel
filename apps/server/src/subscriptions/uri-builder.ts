@@ -390,3 +390,134 @@ function yamlScalar(v: string | number | boolean): string {
   }
   return v;
 }
+
+// ─── Full Clash / Mihomo subscription YAML ───────────────────────────────────
+
+const RULE_NAMES = ['reject', 'proxy', 'direct', 'cncidr', 'telegramcidr', 'netflix', 'youtube', 'apple', 'microsoft', 'openai'] as const;
+
+const RULE_BEHAVIOR: Record<typeof RULE_NAMES[number], string> = {
+  reject: 'domain',
+  proxy: 'domain',
+  direct: 'domain',
+  cncidr: 'ipcidr',
+  telegramcidr: 'ipcidr',
+  netflix: 'classical',
+  youtube: 'classical',
+  apple: 'classical',
+  microsoft: 'classical',
+  openai: 'classical',
+};
+
+export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string): string {
+  // Build proxy entries; keep only successful ones
+  const proxyEntries: { name: string; yaml: string }[] = [];
+  for (const node of nodes) {
+    const yaml = buildClashProxy(node);
+    if (yaml !== null) proxyEntries.push({ name: node.name, yaml });
+  }
+
+  const nodeNames = proxyEntries.map((e) => e.name);
+
+  // ── rule-providers ────────────────────────────────────────────────────────
+  const base = panelUrl.replace(/\/$/, '');
+  const ruleProviderLines: string[] = ['rule-providers:'];
+  for (const name of RULE_NAMES) {
+    ruleProviderLines.push(
+      `  ${name}:`,
+      `    type: http`,
+      `    behavior: ${RULE_BEHAVIOR[name]}`,
+      `    url: "${base}/api/rules/${name}"`,
+      `    path: ./rules/${name}.yaml`,
+      `    interval: 86400`,
+    );
+  }
+
+  // ── proxies ───────────────────────────────────────────────────────────────
+  const proxiesSection =
+    proxyEntries.length === 0
+      ? 'proxies: []'
+      : ['proxies:', ...proxyEntries.map((e) => e.yaml)].join('\n');
+
+  // ── proxy-groups ──────────────────────────────────────────────────────────
+  function nodeList(prefix: string[] = []): string {
+    return [...prefix, ...nodeNames].map((n) => `      - ${yamlScalar(n)}`).join('\n');
+  }
+
+  const groups: string[] = [
+    [
+      '  - name: 🚀 节点选择',
+      '    type: select',
+      '    proxies:',
+      nodeList(['⚡ 自动选择']),
+    ].join('\n'),
+    [
+      '  - name: ⚡ 自动选择',
+      '    type: url-test',
+      '    url: http://www.gstatic.com/generate_204',
+      '    interval: 300',
+      '    proxies:',
+      nodeList(),
+    ].join('\n'),
+    ...([
+      ['🎬 Netflix', '🚀 节点选择'],
+      ['📺 YouTube', '🚀 节点选择'],
+      ['📱 Telegram', '🚀 节点选择'],
+      ['🤖 AI 服务', '🚀 节点选择'],
+    ] as [string, string][]).map(([groupName, def]) =>
+      [
+        `  - name: ${groupName}`,
+        '    type: select',
+        '    proxies:',
+        nodeList([def]),
+      ].join('\n'),
+    ),
+    ...([
+      ['🍎 Apple', 'DIRECT'],
+      ['🪟 Microsoft', 'DIRECT'],
+    ] as [string, string][]).map(([groupName, def]) =>
+      [
+        `  - name: ${groupName}`,
+        '    type: select',
+        '    proxies:',
+        nodeList([def, '🚀 节点选择']),
+      ].join('\n'),
+    ),
+    [
+      '  - name: 🐟 漏网之鱼',
+      '    type: select',
+      '    proxies:',
+      nodeList(['🚀 节点选择', 'DIRECT']),
+    ].join('\n'),
+  ];
+
+  const proxyGroupsSection = ['proxy-groups:', ...groups].join('\n');
+
+  // ── rules ─────────────────────────────────────────────────────────────────
+  const rulesSection = [
+    'rules:',
+    '  - RULE-SET,reject,REJECT',
+    '  - RULE-SET,netflix,🎬 Netflix',
+    '  - RULE-SET,youtube,📺 YouTube',
+    '  - RULE-SET,apple,🍎 Apple',
+    '  - RULE-SET,microsoft,🪟 Microsoft',
+    '  - RULE-SET,telegramcidr,📱 Telegram',
+    '  - RULE-SET,openai,🤖 AI 服务',
+    '  - RULE-SET,proxy,🚀 节点选择',
+    '  - RULE-SET,direct,DIRECT',
+    '  - RULE-SET,cncidr,DIRECT',
+    '  - GEOIP,LAN,DIRECT',
+    '  - GEOIP,CN,DIRECT',
+    '  - MATCH,🐟 漏网之鱼',
+  ].join('\n');
+
+  return [
+    ruleProviderLines.join('\n'),
+    '',
+    proxiesSection,
+    '',
+    proxyGroupsSection,
+    '',
+    rulesSection,
+    '',
+  ].join('\n');
+}

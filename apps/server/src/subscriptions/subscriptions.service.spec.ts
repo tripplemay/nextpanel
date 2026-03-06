@@ -17,7 +17,8 @@ const mockNodes = {
   getCredentials: jest.fn(),
 } as unknown as NodesService;
 
-const svc = new SubscriptionsService(mockPrisma, mockNodes);
+const mockConfig = { get: jest.fn((key: string) => key === 'PANEL_URL' ? 'http://localhost:3001' : undefined) } as unknown as import('@nestjs/config').ConfigService;
+const svc = new SubscriptionsService(mockPrisma, mockNodes, mockConfig);
 
 beforeEach(() => jest.clearAllMocks());
 

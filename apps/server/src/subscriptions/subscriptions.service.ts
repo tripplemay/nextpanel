@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service';
 import { NodesService } from '../nodes/nodes.service';
-import { buildShareUri, buildClashProxy, buildSingboxOutbound } from './uri-builder';
+import { buildShareUri, buildClashSubscription, buildSingboxOutbound } from './uri-builder';
 import type { NodeExportInfo } from './uri-builder';
 
 type SubscriptionNode = {
@@ -25,6 +26,7 @@ export class SubscriptionsService {
   constructor(
     private prisma: PrismaService,
     private nodesService: NodesService,
+    private config: ConfigService,
   ) {}
 
   async create(name: string, nodeIds: string[], ownerId: string) {
@@ -101,31 +103,8 @@ export class SubscriptionsService {
   /** Clash / Mihomo YAML subscription */
   async generateClashContent(token: string): Promise<string> {
     const nodes = await this.fetchActiveNodes(token);
-
-    const proxyBlocks = nodes
-      .map((n) => buildClashProxy(n))
-      .filter((b): b is string => b !== null);
-
-    if (proxyBlocks.length === 0) {
-      return 'proxies: []\nproxy-groups: []\nrules:\n  - MATCH,DIRECT\n';
-    }
-
-    const names = nodes.map((n) => `      - ${n.name}`).join('\n');
-
-    return [
-      'proxies:',
-      proxyBlocks.join('\n'),
-      '',
-      'proxy-groups:',
-      '  - name: 🚀 节点选择',
-      '    type: select',
-      '    proxies:',
-      names,
-      '',
-      'rules:',
-      '  - MATCH,🚀 节点选择',
-      '',
-    ].join('\n');
+    const panelUrl = this.config.get<string>('PANEL_URL') ?? 'http://localhost:3001';
+    return buildClashSubscription(nodes, panelUrl);
   }
 
   /** Sing-box JSON subscription */

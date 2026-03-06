@@ -12,6 +12,7 @@ import { MetricsModule } from './metrics/metrics.module';
 import { AgentModule } from './agent/agent.module';
 import { OperationLogModule } from './operation-log/operation-log.module';
 import { CloudflareModule } from './cloudflare/cloudflare.module';
+import { RulesModule } from './rules/rules.module';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 
 @Module({
@@ -28,6 +29,7 @@ import { AuditInterceptor } from './common/interceptors/audit.interceptor';
     AgentModule,
     OperationLogModule,
     CloudflareModule,
+    RulesModule,
   ],
   providers: [
     {

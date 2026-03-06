@@ -280,6 +280,16 @@ model OperationLog {
   @@index([createdAt])
 }
 
+// ──────────────────────────── RuleCache ────────────────────────────
+
+model RuleCache {
+  /// Rule name, e.g. "reject", "netflix"
+  name      String   @id
+  /// Raw text content fetched from upstream source
+  content   String
+  updatedAt DateTime @updatedAt
+}
+
 // ──────────────────────────── CloudflareSetting ────────────────────────────
 
 model CloudflareSetting {
