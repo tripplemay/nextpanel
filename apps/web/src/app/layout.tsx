@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { AntdRegistry } from '@ant-design/nextjs-registry';
 import Providers from './providers';
 import './globals.css';
+import 'flag-icons/css/flag-icons.min.css';
 
 export const metadata: Metadata = {
   title: 'NextPanel',

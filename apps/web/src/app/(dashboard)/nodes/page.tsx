@@ -16,11 +16,6 @@ import { useDeployStream } from '@/hooks/useDeployStream';
 import type { Node, Server, ConnectivityResult } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
-function toFlagEmoji(code: string): string {
-  return [...code.toUpperCase()]
-    .map((c) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65))
-    .join('');
-}
 
 function formatBytes(bytes: number, hasStats: boolean): string {
   if (!hasStats) return '-';
@@ -442,9 +437,10 @@ export default function NodesPage() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
         <span style={{ fontWeight: 500 }}>{server.name}</span>
         {server.countryCode && (
-          <span style={{ fontSize: 20, lineHeight: 1 }}>
-            {toFlagEmoji(server.countryCode)}
-          </span>
+          <span
+            className={`fi fi-${server.countryCode.toLowerCase()} fis`}
+            style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0 }}
+          />
         )}
         {server.region && <Tag style={{ margin: 0 }}>{server.region}</Tag>}
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>{server.ip}</Typography.Text>
