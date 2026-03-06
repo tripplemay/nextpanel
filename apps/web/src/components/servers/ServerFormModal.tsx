@@ -159,7 +159,7 @@ export default function ServerFormModal({
           form={form}
           layout="vertical"
           onFinish={(v) => mutation.mutate(v as Record<string, unknown>)}
-          initialValues={{ sshPort: 22, sshUser: 'root', sshAuthType: 'KEY' }}
+          initialValues={{ sshPort: 22, sshUser: 'root', sshAuthType: 'PASSWORD' }}
         >
           <Form.Item
             name="ip"
@@ -187,8 +187,8 @@ export default function ServerFormModal({
           </Form.Item>
           <Form.Item name="sshAuthType" label="认证方式">
             <Select>
-              <Option value="KEY">私钥</Option>
               <Option value="PASSWORD">密码</Option>
+              <Option value="KEY">私钥</Option>
             </Select>
           </Form.Item>
           <Form.Item
