@@ -57,6 +57,7 @@ model Server {
   lastSeenAt   DateTime?
   agentVersion String?
   agentToken   String       @unique @default(cuid())
+  deleteError  String?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
@@ -75,6 +76,7 @@ enum ServerStatus {
   UNKNOWN
   ONLINE
   OFFLINE
+  DELETING
   ERROR
 }
 

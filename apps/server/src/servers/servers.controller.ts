@@ -83,11 +83,15 @@ export class ServersController {
   @Delete(':id')
   @Roles('ADMIN')
   @Audit('DELETE', 'server')
-  @ApiOperation({ summary: 'Delete a server' })
+  @ApiOperation({ summary: 'Delete a server. Adds ?force=true to skip SSH cleanup.' })
   remove(
     @Param('id') id: string,
+    @Query('force') force: string,
     @CurrentUser() user: { id: string },
   ) {
+    if (force === 'true') {
+      return this.serversService.forceRemove(id, user.id);
+    }
     return this.serversService.remove(id, user.id);
   }
 

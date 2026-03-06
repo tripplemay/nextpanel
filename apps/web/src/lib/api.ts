@@ -64,7 +64,7 @@ export const serversApi = {
   get: (id: string) => api.get<Server>(`/servers/${id}`),
   create: (data: CreateServerDto) => api.post<Server>('/servers', data),
   update: (id: string, data: UpdateServerDto) => api.patch<Server>(`/servers/${id}`, data),
-  delete: (id: string) => api.delete<void>(`/servers/${id}`),
+  delete: (id: string, force?: boolean) => api.delete<void>(`/servers/${id}`, { params: force ? { force: 'true' } : {} }),
   testSsh: (id: string) => api.post<{ success: boolean; message: string }>(`/servers/${id}/test-ssh`),
   checkIp: (ip: string) => api.get<{ exists: boolean }>('/servers/check-ip', { params: { ip } }),
 };

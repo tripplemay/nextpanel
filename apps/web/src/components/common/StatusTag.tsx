@@ -1,6 +1,7 @@
 'use client';
 
 import { Tag } from 'antd';
+import { LoadingOutlined } from '@ant-design/icons';
 
 const STATUS_COLOR: Record<string, string> = {
   RUNNING: 'green',
@@ -9,7 +10,12 @@ const STATUS_COLOR: Record<string, string> = {
   INACTIVE: 'default',
   ONLINE: 'green',
   OFFLINE: 'red',
+  DELETING: 'processing',
   UNKNOWN: 'default',
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  DELETING: '删除中',
 };
 
 interface StatusTagProps {
@@ -25,9 +31,10 @@ export default function StatusTag({
   disabledLabel = '已禁用',
 }: StatusTagProps) {
   const color = STATUS_COLOR[status] ?? 'default';
+  const label = enabled ? (STATUS_LABEL[status] ?? status) : disabledLabel;
   return (
-    <Tag color={color}>
-      {enabled ? status : disabledLabel}
+    <Tag color={color} icon={status === 'DELETING' ? <LoadingOutlined /> : undefined}>
+      {label}
     </Tag>
   );
 }

@@ -106,9 +106,18 @@ export default function ServersPage() {
     mutationFn: (id: string) => serversApi.delete(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['servers'] });
-      message.success('服务器已删除');
+      message.info('正在清理服务器，请稍候...');
     },
     onError: () => message.error('删除失败'),
+  });
+
+  const forceDeleteMutation = useMutation({
+    mutationFn: (id: string) => serversApi.delete(id, true),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['servers'] });
+      message.success('服务器已强制删除');
+    },
+    onError: () => message.error('强制删除失败'),
   });
 
   const [testingSshId, setTestingSshId] = useState<string | null>(null);
@@ -127,11 +136,36 @@ export default function ServersPage() {
   const handleDelete = (record: Server) =>
     modal.confirm({
       title: '确认删除该服务器？',
-      content: `将删除「${record.name}」，此操作不可撤销。`,
+      content: `将删除「${record.name}」及其所有节点，此操作不可撤销。`,
       okText: '删除',
       okType: 'danger',
       onOk: () => deleteMutation.mutate(record.id),
     });
+
+  const handleForceDelete = (record: Server) => {
+    const failures: { nodeName: string; error: string }[] = record.deleteError
+      ? JSON.parse(record.deleteError) as { nodeName: string; error: string }[]
+      : [];
+    modal.confirm({
+      title: '强制删除服务器？',
+      content: (
+        <div>
+          <p>以下节点的服务未能从服务器上清理，仍可能在后台运行：</p>
+          <ul style={{ paddingLeft: 16, margin: '8px 0' }}>
+            {failures.map((f) => (
+              <li key={f.nodeName} style={{ fontSize: 12, color: '#ff4d4f' }}>
+                <strong>{f.nodeName}</strong>：{f.error}
+              </li>
+            ))}
+          </ul>
+          <p>强制删除将仅删除面板记录，不会清理服务器上的残留服务。</p>
+        </div>
+      ),
+      okText: '确认强制删除',
+      okType: 'danger',
+      onOk: () => forceDeleteMutation.mutate(record.id),
+    });
+  };
 
   const handleEdit = (record: Server) => {
     setEditTarget(record);
@@ -142,14 +176,14 @@ export default function ServersPage() {
   const handleBulkDelete = () => {
     modal.confirm({
       title: `确认删除 ${selectedRowKeys.length} 台服务器？`,
-      content: '此操作不可撤销，已部署的 Agent 不会自动卸载。',
+      content: '将异步清理节点并删除记录，此操作不可撤销。',
       okText: '删除',
       okType: 'danger',
       onOk: async () => {
         await Promise.allSettled(selectedRowKeys.map((id) => serversApi.delete(id)));
         qc.invalidateQueries({ queryKey: ['servers'] });
         setSelectedRowKeys([]);
-        message.success('批量删除完成');
+        message.info('正在清理服务器，请稍候...');
       },
     });
   };
@@ -269,43 +303,56 @@ export default function ServersPage() {
     },
     {
       title: '操作',
-      render: (_: unknown, record) => (
-        <Space>
-          <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
-            编辑
-          </Button>
-          <Dropdown
-            trigger={['click']}
-            menu={{
-              items: [
-                {
-                  key: 'ssh',
-                  icon: <CheckCircleOutlined />,
-                  label: testingSshId === record.id ? '测试中...' : '测试 SSH',
-                  disabled: testingSshId === record.id,
-                  onClick: () => testSshMutation.mutate(record.id),
-                },
-                {
-                  key: 'install',
-                  icon: <CloudDownloadOutlined />,
-                  label: '安装 / 更新 Agent',
-                  onClick: () => setInstallTarget(record),
-                },
-                { type: 'divider' },
-                {
-                  key: 'delete',
-                  icon: <DeleteOutlined />,
-                  label: '删除',
-                  danger: true,
-                  onClick: () => handleDelete(record),
-                },
-              ],
-            }}
-          >
-            <Button size="small" icon={<MoreOutlined />} />
-          </Dropdown>
-        </Space>
-      ),
+      render: (_: unknown, record) => {
+        if (record.status === 'DELETING') {
+          return <Text type="secondary" style={{ fontSize: 12 }}>删除中，请稍候...</Text>;
+        }
+        if (record.status === 'ERROR' && record.deleteError) {
+          return (
+            <Space>
+              <Button size="small" danger onClick={() => handleDelete(record)}>重试删除</Button>
+              <Button size="small" onClick={() => handleForceDelete(record)}>强制删除</Button>
+            </Space>
+          );
+        }
+        return (
+          <Space>
+            <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
+              编辑
+            </Button>
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  {
+                    key: 'ssh',
+                    icon: <CheckCircleOutlined />,
+                    label: testingSshId === record.id ? '测试中...' : '测试 SSH',
+                    disabled: testingSshId === record.id,
+                    onClick: () => testSshMutation.mutate(record.id),
+                  },
+                  {
+                    key: 'install',
+                    icon: <CloudDownloadOutlined />,
+                    label: '安装 / 更新 Agent',
+                    onClick: () => setInstallTarget(record),
+                  },
+                  { type: 'divider' },
+                  {
+                    key: 'delete',
+                    icon: <DeleteOutlined />,
+                    label: '删除',
+                    danger: true,
+                    onClick: () => handleDelete(record),
+                  },
+                ],
+              }}
+            >
+              <Button size="small" icon={<MoreOutlined />} />
+            </Dropdown>
+          </Space>
+        );
+      },
     },
   ];
 
@@ -430,6 +477,7 @@ export default function ServersPage() {
                 onEdit={handleEdit}
                 onInstall={setInstallTarget}
                 onDelete={handleDelete}
+                onForceDelete={handleForceDelete}
                 onTestSsh={(s) => testSshMutation.mutate(s.id)}
               />
             </Col>

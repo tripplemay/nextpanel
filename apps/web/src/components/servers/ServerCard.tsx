@@ -48,6 +48,7 @@ interface Props {
   onEdit: (server: Server) => void;
   onInstall: (server: Server) => void;
   onDelete: (server: Server) => void;
+  onForceDelete: (server: Server) => void;
   onTestSsh: (server: Server) => void;
 }
 
@@ -57,12 +58,16 @@ export default function ServerCard({
   onEdit,
   onInstall,
   onDelete,
+  onForceDelete,
   onTestSsh,
 }: Props) {
+  const isDeleting = server.status === 'DELETING';
+  const hasDeleteError = server.status === 'ERROR' && !!server.deleteError;
+
   return (
     <Card
       size="small"
-      style={{ borderRadius: 8 }}
+      style={{ borderRadius: 8, opacity: isDeleting ? 0.6 : 1 }}
       styles={{ body: { padding: 16 } }}
     >
       {/* 标题行 */}
@@ -80,42 +85,44 @@ export default function ServerCard({
             <Text type="secondary" style={{ fontSize: 12 }}>{server.ip}</Text>
           </div>
         </div>
-        <Dropdown
-          trigger={['click']}
-          menu={{
-            items: [
-              {
-                key: 'edit',
-                icon: <EditOutlined />,
-                label: '编辑',
-                onClick: () => onEdit(server),
-              },
-              {
-                key: 'ssh',
-                icon: <CheckCircleOutlined />,
-                label: testingSsh ? '测试中...' : '测试 SSH',
-                disabled: testingSsh,
-                onClick: () => onTestSsh(server),
-              },
-              {
-                key: 'install',
-                icon: <CloudDownloadOutlined />,
-                label: '安装 / 更新 Agent',
-                onClick: () => onInstall(server),
-              },
-              { type: 'divider' },
-              {
-                key: 'delete',
-                icon: <DeleteOutlined />,
-                label: '删除',
-                danger: true,
-                onClick: () => onDelete(server),
-              },
-            ],
-          }}
-        >
-          <Button size="small" type="text" icon={<MoreOutlined />} />
-        </Dropdown>
+        {!isDeleting && !hasDeleteError && (
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: [
+                {
+                  key: 'edit',
+                  icon: <EditOutlined />,
+                  label: '编辑',
+                  onClick: () => onEdit(server),
+                },
+                {
+                  key: 'ssh',
+                  icon: <CheckCircleOutlined />,
+                  label: testingSsh ? '测试中...' : '测试 SSH',
+                  disabled: testingSsh,
+                  onClick: () => onTestSsh(server),
+                },
+                {
+                  key: 'install',
+                  icon: <CloudDownloadOutlined />,
+                  label: '安装 / 更新 Agent',
+                  onClick: () => onInstall(server),
+                },
+                { type: 'divider' },
+                {
+                  key: 'delete',
+                  icon: <DeleteOutlined />,
+                  label: '删除',
+                  danger: true,
+                  onClick: () => onDelete(server),
+                },
+              ],
+            }}
+          >
+            <Button size="small" type="text" icon={<MoreOutlined />} />
+          </Dropdown>
+        )}
       </div>
 
       {/* 状态 + 延迟 */}
@@ -157,6 +164,19 @@ export default function ServerCard({
       {server.tags.length > 0 && (
         <div style={{ marginTop: 10 }}>
           {server.tags.map((t) => <Tag key={t} style={{ fontSize: 11 }}>{t}</Tag>)}
+        </div>
+      )}
+
+      {/* 删除失败操作区 */}
+      {hasDeleteError && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #f0f0f0' }}>
+          <Text type="danger" style={{ fontSize: 11, display: 'block', marginBottom: 6 }}>
+            节点清理失败，请重试或强制删除
+          </Text>
+          <Space size={6}>
+            <Button size="small" danger onClick={() => onDelete(server)}>重试删除</Button>
+            <Button size="small" onClick={() => onForceDelete(server)}>强制删除</Button>
+          </Space>
         </div>
       )}
     </Card>

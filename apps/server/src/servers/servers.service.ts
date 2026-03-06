@@ -73,28 +73,69 @@ export class ServersService {
     });
   }
 
+  /**
+   * Initiates server deletion asynchronously.
+   * Sets status to DELETING immediately and returns — SSH cleanup + DB deletion
+   * run in the background so the browser can safely close without affecting the outcome.
+   */
   async remove(id: string, userId: string) {
     await this.findOne(id, userId);
 
-    // Fetch all nodes on this server (need userId + cfDnsRecordId for cleanup)
-    const nodes = await this.prisma.node.findMany({
-      where: { serverId: id },
-      select: { id: true, userId: true, cfDnsRecordId: true },
+    // Mark as DELETING immediately and clear any previous error
+    await this.prisma.server.update({
+      where: { id },
+      data: { status: 'DELETING', deleteError: null },
     });
 
-    // Undeploy all nodes via SSH (best-effort — log errors but continue)
+    // Fire-and-forget: SSH cleanup then DB delete
+    void this.runDelete(id, userId);
+
+    return { status: 'DELETING' };
+  }
+
+  /**
+   * Force-delete: skip SSH cleanup, delete DB records directly.
+   * Use when the server is permanently unreachable and cleanup is impossible.
+   */
+  async forceRemove(id: string, userId: string) {
+    await this.findOne(id, userId);
+    return this.prisma.server.delete({ where: { id } });
+  }
+
+  private async runDelete(id: string, userId: string): Promise<void> {
+    const nodes = await this.prisma.node.findMany({
+      where: { serverId: id },
+      select: { id: true, name: true, userId: true, cfDnsRecordId: true },
+    });
+
+    // SSH cleanup per node — collect failures
+    const failures: { nodeName: string; error: string }[] = [];
+
     await Promise.allSettled(
       nodes.map(async (node) => {
         try {
           await this.nodeDeploy.undeploy(node.id);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          this.logger.warn(`Server ${id}: undeploy of node ${node.id} failed during cascade: ${msg}`);
+          this.logger.warn(`Server ${id}: undeploy of node ${node.id} failed: ${msg}`);
+          failures.push({ nodeName: node.name, error: msg });
         }
       }),
     );
 
-    // Clean up Cloudflare DNS records (best-effort)
+    if (failures.length > 0) {
+      await this.prisma.server.update({
+        where: { id },
+        data: {
+          status: 'ERROR',
+          deleteError: JSON.stringify(failures),
+        },
+      });
+      this.logger.warn(`Server ${id}: deletion failed for ${failures.length} node(s)`);
+      return;
+    }
+
+    // All SSH cleanups succeeded — clean up Cloudflare DNS (best-effort)
     await Promise.allSettled(
       nodes
         .filter((n) => n.cfDnsRecordId && n.userId)
@@ -110,8 +151,10 @@ export class ServersService {
         }),
     );
 
-    // DB cascade: Node has onDelete:Cascade on Server, so all nodes are deleted automatically
-    return this.prisma.server.delete({ where: { id } });
+    // DB cascade delete
+    await this.prisma.server.delete({ where: { id } }).catch((err) => {
+      this.logger.error(`Server ${id}: DB delete failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
   }
 
   async checkIp(ip: string, userId: string): Promise<{ exists: boolean }> {
@@ -413,6 +456,7 @@ export class ServersService {
       lastSeenAt: true,
       agentVersion: true,
       agentToken: true,
+      deleteError: true,
       createdAt: true,
       updatedAt: true,
     } as const;

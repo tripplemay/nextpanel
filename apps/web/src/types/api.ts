@@ -74,6 +74,7 @@ export interface Server {
   lastSeenAt: string | null;
   agentVersion: string | null;
   agentToken: string;
+  deleteError: string | null;
   createdAt: string;
   updatedAt: string;
 }
