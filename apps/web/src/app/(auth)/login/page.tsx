@@ -37,9 +37,10 @@ export default function LoginPage() {
         alignItems: 'center',
         justifyContent: 'center',
         background: '#f0f2f5',
+        padding: 16,
       }}
     >
-      <Card style={{ width: 380, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }}>
+      <Card style={{ width: '100%', maxWidth: 380, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }}>
         <Title level={3} style={{ textAlign: 'center', marginBottom: 32 }}>
           NextPanel
         </Title>

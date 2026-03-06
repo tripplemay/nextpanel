@@ -1,6 +1,7 @@
 'use client';
 
 import { use, useState, useEffect } from 'react';
+import { Grid } from 'antd';
 import { useRouter } from 'next/navigation';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -71,6 +72,8 @@ export default function ServerDetailPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md;
 
   const { data: server, isLoading: serverLoading } = useQuery({
     queryKey: ['server', id],
@@ -200,11 +203,14 @@ export default function ServerDetailPage({
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       {/* 页头 */}
       <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => router.push('/servers')}>
-            返回
-          </Button>
-          <Title level={4} style={{ margin: 0 }}>{server.name}</Title>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Button icon={<ArrowLeftOutlined />} onClick={() => router.push('/servers')}>
+              {!isMobile && '返回'}
+            </Button>
+            <Title level={4} style={{ margin: 0 }}>{server.name}</Title>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingLeft: isMobile ? 0 : 4 }}>
           <StatusTag status={server.status} />
           {server.pingMs != null && (
             <Text style={{ color: server.pingMs <= 50 ? '#52c41a' : server.pingMs <= 150 ? '#faad14' : '#ff4d4f' }}>
@@ -219,6 +225,7 @@ export default function ServerDetailPage({
               最后心跳 {dayjs(server.lastSeenAt).fromNow()}
             </Text>
           )}
+          </div>
         </div>
       </Card>
 
@@ -346,6 +353,7 @@ export default function ServerDetailPage({
           size="middle"
           dataSource={nodes}
           columns={nodeColumns}
+          scroll={{ x: 'max-content' }}
           pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条` }}
         />
       </Card>
@@ -357,6 +365,7 @@ export default function ServerDetailPage({
           size="middle"
           dataSource={logs}
           columns={logColumns}
+          scroll={{ x: 'max-content' }}
           pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条` }}
         />
       </Card>

@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useAuthStore } from '@/store/auth';
-import { App, Button, Table, Tag, Space, Card, Spin, Modal, Input, Switch, Dropdown, Typography, Collapse, Empty, Tooltip } from 'antd';
+import { App, Button, Table, Tag, Space, Card, Spin, Modal, Input, Switch, Dropdown, Typography, Collapse, Empty, Tooltip, Grid } from 'antd';
 import { ApiOutlined, ShareAltOutlined, FileTextOutlined, EditOutlined, CloudUploadOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { nodesApi, serversApi } from '@/lib/api';
@@ -68,6 +68,9 @@ export default function NodesPage() {
 
   // Collapse state: track collapsed server IDs
   const [collapsedIds, setCollapsedIds] = useState<string[]>([]);
+
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md;
 
   const { logLines, deployStatus, startStream, abort, reset } = useDeployStream();
   const {
@@ -434,25 +437,29 @@ export default function NodesPage() {
   const collapseItems = groups.map(({ server, nodes: serverNodes }) => ({
     key: server.id,
     label: (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
-        <span style={{ fontWeight: 500 }}>{server.name}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+        <span style={{ fontWeight: 500, flexShrink: 0 }}>{server.name}</span>
         {server.countryCode && (
           <span
             className={`fi fi-${server.countryCode.toLowerCase()} fis`}
             style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0 }}
           />
         )}
-        {server.region && <Tag style={{ margin: 0 }}>{server.region}</Tag>}
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{server.ip}</Typography.Text>
         <StatusTag status={server.status} />
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{serverNodes.length} 个节点</Typography.Text>
+        {!isMobile && server.region && <Tag style={{ margin: 0 }}>{server.region}</Tag>}
+        {!isMobile && (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{server.ip}</Typography.Text>
+        )}
+        {!isMobile && (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{serverNodes.length} 个节点</Typography.Text>
+        )}
         <div style={{ marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
           <Button
             size="small"
             icon={<PlusOutlined />}
             onClick={() => openPresetForServer(server.id)}
           >
-            新增节点
+            {!isMobile && '新增节点'}
           </Button>
         </div>
       </div>
@@ -521,6 +528,7 @@ export default function NodesPage() {
       <Modal
         open={!!renameNode}
         destroyOnClose
+        style={{ maxWidth: '95vw' }}
         title="重命名节点"
         onCancel={() => setRenameNode(null)}
         onOk={() => {
