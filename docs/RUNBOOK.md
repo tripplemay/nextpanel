@@ -1,6 +1,6 @@
 # NextPanel Runbook
 
-Last Updated: 2026-02-28
+Last Updated: 2026-03-06
 
 Quick reference guide for running, deploying, and troubleshooting NextPanel.
 
@@ -15,28 +15,26 @@ Quick reference guide for running, deploying, and troubleshooting NextPanel.
 ### 30-Second Setup
 
 ```bash
-cd /Users/zhouyixing/project/nextpannel
+cd /path/to/nextpanel
 
 # Install dependencies
 pnpm install
 
-# Start PostgreSQL (if using Docker)
-docker-compose up -d
-
-# Setup backend environment
+# Setup backend environment (copy and fill in values)
 cp apps/server/.env.example apps/server/.env
 
-# Initialize database
+# Initialize database (requires SSH tunnel — see Database section)
 cd apps/server
 pnpm exec prisma migrate dev --name init
+pnpm exec prisma db seed
 
-# Start everything
+# Start everything (auto-opens SSH tunnel to DB if needed)
 cd ../..
 pnpm dev
 ```
 
 Then open:
-- Frontend: http://localhost:3000
+- Frontend: http://localhost:3400
 - Backend API: http://localhost:3001/api
 - API Docs: http://localhost:3001/api/docs
 
@@ -50,8 +48,10 @@ pnpm dev
 ```
 
 This runs all services in parallel:
-- `apps/web` — Next.js on port 3000
+- `apps/web` — Next.js on port 3400
 - `apps/server` — NestJS on port 3001
+
+> The root `pnpm dev` script also checks for an SSH tunnel to the DB (port 5433) and opens it if needed.
 
 ### Start Individual Services
 
@@ -136,18 +136,20 @@ pnpm exec prisma db seed
 
 ## Environment Variables
 
-<!-- AUTO-GENERATED: From apps/server/.env.example -->
+<!-- AUTO-GENERATED: From apps/server/.env -->
 
 ### Backend (.env file location: `apps/server/.env`)
 
-| Variable | Type | Default | Description | Example |
-|----------|------|---------|-------------|---------|
-| `DATABASE_URL` | string | — | PostgreSQL connection string | `postgresql://user:pass@localhost:5432/nextpannel` |
-| `JWT_SECRET` | string | — | Secret key for signing JWTs (64 hex chars) | `410e9aa17d5da421837d934a829c75eb055187e4b367af6f49339e14a9d987e2` |
-| `JWT_EXPIRES_IN` | string | `7d` | JWT token expiration duration | `7d`, `24h`, `30d` |
-| `ENCRYPTION_KEY` | string | — | AES-256 encryption key (64 hex chars) | `f0737ba4e20d8b84eab76358bfde3a2160f61d005d1d7eac1a49abacda8f6d7b` |
-| `PORT` | number | `3001` | API server port | `3001` |
-| `ALLOWED_ORIGIN` | string | — | CORS origin for frontend | `http://localhost:3000` |
+| Variable | Required | Default | Description | Example |
+|----------|----------|---------|-------------|---------|
+| `DATABASE_URL` | Yes | — | PostgreSQL connection string | `postgresql://user:pass@localhost:5433/nextpanel_dev` |
+| `JWT_SECRET` | Yes | — | Secret key for signing JWTs (64 hex chars) | `openssl rand -hex 32` |
+| `JWT_EXPIRES_IN` | No | `7d` | JWT token expiration duration | `7d`, `24h`, `30d` |
+| `ENCRYPTION_KEY` | Yes | — | AES-256-GCM encryption key (64 hex chars) | `openssl rand -hex 32` |
+| `PORT` | No | `3001` | API server port | `3001` |
+| `ALLOWED_ORIGIN` | Yes | — | CORS origin for frontend | `http://localhost:3400` |
+| `PANEL_URL` | Yes | — | Public URL of the panel (used by Agent install script) | `https://panel.example.com` |
+| `GITHUB_REPO` | Yes | — | GitHub repo for Agent binary releases | `your-username/nextpanel-releases` |
 
 ### Generate Secure Keys
 
@@ -248,11 +250,11 @@ pnpm exec prisma migrate status
 
 ## Common Problems & Solutions
 
-### Port 3000 or 3001 Already in Use
+### Port 3400 or 3001 Already in Use
 
 ```bash
 # Find process using port
-lsof -i :3000
+lsof -i :3400
 lsof -i :3001
 
 # Kill process
@@ -383,34 +385,30 @@ Key indexes are already configured in `schema.prisma`:
 
 ## Deployment
 
-### Docker Deployment
+### Production Deployment (GitHub Actions)
 
-Build images:
+Deployment is fully automated via `.github/workflows/deploy.yml`:
+
+1. Push to `main` → GitHub Actions triggers
+2. Files are copied to VPS via sshpass + tar
+3. `pnpm install && pnpm build` runs on VPS (sequential, 512 MB heap cap to avoid OOM)
+4. `prisma migrate deploy` applies any new migrations
+5. pm2 restarts `nextpanel-server` and `nextpanel-web`
+
+**Required GitHub Secrets**: `SSH_HOST`, `SSH_USER`, `SSH_PORT`, `SSH_PASSWORD`, `CERTBOT_EMAIL`
+**Required GitHub Variable**: `DOMAIN`
+
+### Manual Deploy (Emergency)
 
 ```bash
-# Backend
-docker build -f apps/server/Dockerfile -t nextpannel:server .
-
-# Frontend
-docker build -f apps/web/Dockerfile -t nextpannel:web .
-```
-
-Run with docker-compose:
-
-```bash
-docker-compose -f docker-compose.prod.yml up
-```
-
-### Environment for Production
-
-Update `apps/server/.env` for production:
-
-```env
-DATABASE_URL="postgresql://prod-user:prod-pass@prod-db.example.com:5432/nextpannel"
-JWT_SECRET="<very-long-random-string>"
-ENCRYPTION_KEY="<very-long-random-string>"
-PORT=3001
-ALLOWED_ORIGIN="https://panel.example.com"
+ssh root@<VPS_IP>
+cd /opt/apps/nextpanel
+git pull
+pnpm install
+find . -name "*.tsbuildinfo" -delete
+NODE_OPTIONS="--max-old-space-size=512" pnpm -r --workspace-concurrency=1 build
+cd apps/server && pnpm exec prisma migrate deploy && cd ../..
+pm2 restart all
 ```
 
 ## Architecture Overview
@@ -449,35 +447,33 @@ Updates Server.cpuUsage, memUsage, diskUsage, lastSeenAt
 Creates ServerMetric record for history
 ```
 
-### Release/Deployment Flow
+### Node Deployment Flow
 
 ```
-User creates Release from Template
+User clicks Deploy (or opens deploy-stream drawer)
         ↓
-Specifies target servers and variable values
+POST /api/nodes/:id/deploy  OR  SSE /api/nodes/:id/deploy-stream
         ↓
-System renders template config with variables
+NodeDeployService connects to node server via SSH
         ↓
-Creates ReleaseStep for each target server
+Generates Xray/sing-box config from node settings + decrypted credentials
         ↓
-Steps initially PENDING
+For TLS nodes: issues/pushes Let's Encrypt wildcard cert via acme.sh
         ↓
-Agent on server polls /api/releases/pending
+Uploads config, sets up systemd service, opens firewall port
         ↓
-Agent downloads config and deploys
+Restarts service, runs end-to-end connectivity test
         ↓
-Agent reports back success/failure
+Saves ConfigSnapshot + OperationLog (SSH terminal output)
         ↓
-ReleaseStep status updates
-        ↓
-AuditLog records deployment action
+AuditLog records deployment action with correlationId
 ```
 
 ## Useful Links
 
 - **Swagger API Docs**: http://localhost:3001/api/docs
 - **Prisma Studio**: http://localhost:5555
-- **Frontend**: http://localhost:3000
+- **Frontend**: http://localhost:3400
 - **Backend API**: http://localhost:3001/api
 - **Contributing Guide**: [CONTRIBUTING.md](./CONTRIBUTING.md)
 
