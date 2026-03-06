@@ -126,6 +126,7 @@ export default function UsersPage() {
           loading={isLoading}
           dataSource={users}
           columns={columns}
+          scroll={{ x: 'max-content' }}
           pagination={{ showTotal: (total) => `共 ${total} 条` }}
         />
       </Card>

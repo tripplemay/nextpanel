@@ -221,6 +221,7 @@ export default function AuditLogsPage() {
         loading={isLoading}
         dataSource={data?.data}
         columns={columns}
+        scroll={{ x: 'max-content' }}
         expandable={{
           expandedRowRender: (record) => <ExpandedRowContent record={record} />,
           rowExpandable,

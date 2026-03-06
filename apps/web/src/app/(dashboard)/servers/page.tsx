@@ -463,6 +463,7 @@ export default function ServersPage() {
           loading={isLoading}
           dataSource={filteredData}
           columns={columns}
+          scroll={{ x: 'max-content' }}
           rowSelection={{
             selectedRowKeys,
             onChange: (keys) => setSelectedRowKeys(keys as string[]),

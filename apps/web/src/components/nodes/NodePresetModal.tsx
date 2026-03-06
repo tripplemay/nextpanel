@@ -91,6 +91,7 @@ export default function NodePresetModal({ open, onClose, onSuccess, defaultServe
       onOk={() => form.submit()}
       confirmLoading={mutation.isPending}
       width={480}
+      style={{ maxWidth: '95vw' }}
     >
       <Form
         form={form}

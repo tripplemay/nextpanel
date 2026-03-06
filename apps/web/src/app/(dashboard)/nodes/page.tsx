@@ -463,6 +463,7 @@ export default function NodesPage() {
         size="middle"
         dataSource={serverNodes}
         columns={columns}
+        scroll={{ x: 'max-content' }}
         pagination={serverNodes.length > 10 ? { showTotal: (total) => `共 ${total} 条` } : false}
       />
     ) : (

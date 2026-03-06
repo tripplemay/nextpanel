@@ -122,6 +122,7 @@ export default function InviteCodesPage() {
           loading={isLoading}
           dataSource={codes}
           columns={columns}
+          scroll={{ x: 'max-content' }}
           pagination={{ showTotal: (total) => `共 ${total} 条` }}
         />
       </Card>

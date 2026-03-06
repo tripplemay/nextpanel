@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Layout, Menu, Typography, Avatar, Dropdown, Space } from 'antd';
+import { Layout, Menu, Typography, Avatar, Dropdown, Space, Drawer, Button, Grid } from 'antd';
 import type { ItemType } from 'antd/es/menu/interface';
 import {
   CloudServerOutlined,
@@ -17,8 +17,11 @@ import {
   KeyOutlined,
   CloudOutlined,
   LockOutlined,
+  MenuOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/auth';
+
+const { useBreakpoint } = Grid;
 
 const { Sider, Header, Content } = Layout;
 const { Text } = Typography;
@@ -57,6 +60,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { user, token, logout } = useAuthStore();
   const [hydrated, setHydrated] = useState(false);
   const [openKeys, setOpenKeys] = useState<string[]>([]);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const screens = useBreakpoint();
+  const isMobile = !screens.md;
 
   useEffect(() => {
     setHydrated(true);
@@ -86,55 +92,91 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     },
   ];
 
+  const menuItems = user?.role === 'ADMIN' ? [...baseMenuItems, ...adminMenuItems] : baseMenuItems;
+
+  const sidebarContent = (
+    <>
+      <div
+        style={{
+          height: 64,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderBottom: '1px solid rgba(255,255,255,0.1)',
+          flexShrink: 0,
+        }}
+      >
+        <DashboardOutlined style={{ color: '#1677ff', fontSize: 20, marginRight: 8 }} />
+        <Text strong style={{ color: '#fff', fontSize: 16 }}>
+          NextPanel
+        </Text>
+      </div>
+      <Menu
+        theme="dark"
+        mode="inline"
+        selectedKeys={[pathname]}
+        openKeys={openKeys}
+        onOpenChange={setOpenKeys}
+        onClick={({ key }) => {
+          if (!key.startsWith('settings')) {
+            router.push(key);
+            setDrawerOpen(false);
+          }
+        }}
+        items={menuItems}
+        style={{ marginTop: 8 }}
+      />
+    </>
+  );
+
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider width={220} theme="dark">
-        <div
-          style={{
-            height: 64,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderBottom: '1px solid rgba(255,255,255,0.1)',
-          }}
-        >
-          <DashboardOutlined style={{ color: '#1677ff', fontSize: 20, marginRight: 8 }} />
-          <Text strong style={{ color: '#fff', fontSize: 16 }}>
-            NextPanel
-          </Text>
-        </div>
-        <Menu
-          theme="dark"
-          mode="inline"
-          selectedKeys={[pathname]}
-          openKeys={openKeys}
-          onOpenChange={setOpenKeys}
-          onClick={({ key }) => { if (!key.startsWith('settings')) router.push(key); }}
-          items={user?.role === 'ADMIN' ? [...baseMenuItems, ...adminMenuItems] : baseMenuItems}
-          style={{ marginTop: 8 }}
-        />
-      </Sider>
+      {!isMobile && (
+        <Sider width={220} theme="dark">
+          {sidebarContent}
+        </Sider>
+      )}
+
+      <Drawer
+        open={isMobile && drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        placement="left"
+        width={220}
+        styles={{ body: { padding: 0, background: '#001529' }, header: { display: 'none' } }}
+      >
+        {sidebarContent}
+      </Drawer>
 
       <Layout>
         <Header
           style={{
             background: '#fff',
-            padding: '0 24px',
+            padding: '0 16px',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'flex-end',
+            justifyContent: 'space-between',
             borderBottom: '1px solid #f0f0f0',
           }}
         >
+          {isMobile ? (
+            <Button
+              type="text"
+              icon={<MenuOutlined />}
+              onClick={() => setDrawerOpen(true)}
+              style={{ fontSize: 18 }}
+            />
+          ) : (
+            <div />
+          )}
           <Dropdown menu={{ items: userMenu }} placement="bottomRight">
             <Space style={{ cursor: 'pointer' }}>
               <Avatar icon={<UserOutlined />} size="small" />
-              <Text>{user?.username}</Text>
+              {!isMobile && <Text>{user?.username}</Text>}
             </Space>
           </Dropdown>
         </Header>
 
-        <Content style={{ margin: 24, background: '#f5f7fa' }}>
+        <Content style={{ margin: isMobile ? 12 : 24, background: '#f5f7fa' }}>
           {children}
         </Content>
       </Layout>

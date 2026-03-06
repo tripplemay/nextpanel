@@ -169,6 +169,7 @@ export default function SubscriptionsPage() {
         loading={isLoading}
         dataSource={data}
         columns={columns}
+        scroll={{ x: 'max-content' }}
         pagination={{ showTotal: (total) => `共 ${total} 条` }}
         expandable={{ expandedRowRender }}
       />

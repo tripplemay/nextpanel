@@ -169,6 +169,7 @@ export default function ServerFormModal({
       onOk={handleOk}
       confirmLoading={mutation.isPending}
       width={560}
+      style={{ maxWidth: '95vw' }}
     >
       <Spin spinning={geoLoading} tip="正在查询 IP 归属地...">
         <Form
