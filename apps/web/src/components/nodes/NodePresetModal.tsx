@@ -13,9 +13,10 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onSuccess: (node: Node) => void;
+  defaultServerId?: string;
 }
 
-export default function NodePresetModal({ open, onClose, onSuccess }: Props) {
+export default function NodePresetModal({ open, onClose, onSuccess, defaultServerId }: Props) {
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const [serverId, setServerId] = useState<string | undefined>(undefined);
@@ -59,9 +60,14 @@ export default function NodePresetModal({ open, onClose, onSuccess }: Props) {
   useEffect(() => {
     if (open) {
       form.resetFields();
-      setServerId(undefined);
+      if (defaultServerId) {
+        form.setFieldValue('serverId', defaultServerId);
+        setServerId(defaultServerId);
+      } else {
+        setServerId(undefined);
+      }
     }
-  }, [open, form]);
+  }, [open, form, defaultServerId]);
 
   const mutation = useMutation({
     mutationFn: (values: { serverId: string; preset: string; name: string }) =>

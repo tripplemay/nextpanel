@@ -1,10 +1,10 @@
 'use client';
 
-import { useRef, useState } from 'react';
-import { App, Button, Table, Tag, Space, Card, Spin, Modal, Input, Switch, Dropdown, Typography } from 'antd';
-import { ApiOutlined, ShareAltOutlined, FileTextOutlined, EditOutlined, CloudUploadOutlined, EllipsisOutlined, DeleteOutlined } from '@ant-design/icons';
+import { useMemo, useRef, useState } from 'react';
+import { App, Button, Table, Tag, Space, Card, Spin, Modal, Input, Switch, Dropdown, Typography, Collapse, Empty } from 'antd';
+import { ApiOutlined, ShareAltOutlined, FileTextOutlined, EditOutlined, CloudUploadOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { nodesApi } from '@/lib/api';
+import { nodesApi, serversApi } from '@/lib/api';
 import NodePresetModal from '@/components/nodes/NodePresetModal';
 import DeployDrawer from '@/components/nodes/DeployDrawer';
 import NodeShareModal from '@/components/nodes/NodeShareModal';
@@ -12,7 +12,7 @@ import DeployLogModal from '@/components/nodes/DeployLogModal';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
 import { useDeployStream } from '@/hooks/useDeployStream';
-import type { Node, ConnectivityResult } from '@/types/api';
+import type { Node, Server, ConnectivityResult } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
 function formatBytes(bytes: number, hasStats: boolean): string {
@@ -40,6 +40,7 @@ export default function NodesPage() {
 
   // Modals
   const [presetModalOpen, setPresetModalOpen] = useState(false);
+  const [presetServerId, setPresetServerId] = useState<string | undefined>(undefined);
 
   // Rename modal
   const [renameNode, setRenameNode] = useState<Node | null>(null);
@@ -63,6 +64,9 @@ export default function NodesPage() {
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
   const abortBatchRef = useRef<AbortController | null>(null);
 
+  // Collapse state: track collapsed server IDs
+  const [collapsedIds, setCollapsedIds] = useState<string[]>([]);
+
   const { logLines, deployStatus, startStream, abort, reset } = useDeployStream();
   const {
     logLines: deleteLogLines,
@@ -77,7 +81,33 @@ export default function NodesPage() {
     queryFn: () => nodesApi.list().then((r) => r.data),
   });
 
+  const { data: servers, isLoading: serversLoading } = useQuery({
+    queryKey: ['servers'],
+    queryFn: () => serversApi.list().then((r) => r.data),
+  });
+
   if (isError) message.error('加载节点失败');
+
+  // Group nodes by server
+  const groups = useMemo(() => {
+    if (!servers) return [];
+    const nodesByServer = new Map<string, Node[]>();
+    for (const node of (data ?? [])) {
+      const arr = nodesByServer.get(node.serverId) ?? [];
+      arr.push(node);
+      nodesByServer.set(node.serverId, arr);
+    }
+    return servers.map((server) => ({
+      server,
+      nodes: nodesByServer.get(server.id) ?? [],
+    }));
+  }, [servers, data]);
+
+  // All servers expanded by default; track collapsed ones
+  const activeKeys = useMemo(
+    () => groups.map((g) => g.server.id).filter((id) => !collapsedIds.includes(id)),
+    [groups, collapsedIds],
+  );
 
   const testMutation = useMutation({
     mutationFn: (id: string) => {
@@ -226,6 +256,11 @@ export default function NodesPage() {
     setRenameValue(node.name);
   }
 
+  function openPresetForServer(serverId: string) {
+    setPresetServerId(serverId);
+    setPresetModalOpen(true);
+  }
+
   const columns: ColumnType<Node>[] = [
     {
       title: '名称',
@@ -236,7 +271,6 @@ export default function NodesPage() {
       render: (_: unknown, r) => (
         <Space size={4}>
           <Tag color="blue">{r.protocol}</Tag>
-          {r.implementation && <Tag>{r.implementation}</Tag>}
           {r.transport && <Tag>{r.transport}</Tag>}
           {r.tls !== 'NONE' && <Tag color="green">{r.tls}</Tag>}
         </Space>
@@ -274,7 +308,6 @@ export default function NodesPage() {
       title: '连通性',
       width: 130,
       render: (_: unknown, r) => {
-        // In-session test result takes priority over persisted data
         const sessionResult = testResults[r.id];
         const isTestingThis = testingId === r.id || (batchTesting && !sessionResult);
 
@@ -292,7 +325,6 @@ export default function NodesPage() {
           return <Tag color="red">失败</Tag>;
         }
 
-        // Fall back to persisted data
         if (r.lastTestedAt) {
           if (r.lastReachable) {
             return (
@@ -394,24 +426,84 @@ export default function NodesPage() {
     </Button>
   );
 
+  const collapseItems = groups.map(({ server, nodes: serverNodes }) => ({
+    key: server.id,
+    label: (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+        <span style={{ fontWeight: 500 }}>{server.name}</span>
+        {server.region && <Tag style={{ margin: 0 }}>{server.region}</Tag>}
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{server.ip}</Typography.Text>
+        <StatusTag status={server.status} />
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{serverNodes.length} 个节点</Typography.Text>
+        <div style={{ marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
+          <Button
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={() => openPresetForServer(server.id)}
+          >
+            新增节点
+          </Button>
+        </div>
+      </div>
+    ),
+    children: serverNodes.length > 0 ? (
+      <Table
+        rowKey="id"
+        size="middle"
+        dataSource={serverNodes}
+        columns={columns}
+        pagination={{ showTotal: (total) => `共 ${total} 条` }}
+      />
+    ) : (
+      <Empty
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        description={
+          <span>
+            暂无节点，
+            <a onClick={() => openPresetForServer(server.id)}>点击新增</a>
+          </span>
+        }
+        style={{ padding: '16px 0' }}
+      />
+    ),
+  }));
+
   return (
     <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
       <PageHeader
         title="节点管理"
         addLabel="新增节点"
-        onAdd={() => setPresetModalOpen(true)}
+        onAdd={() => {
+          setPresetServerId(undefined);
+          setPresetModalOpen(true);
+        }}
         extra={batchTestButton}
       />
-      <Table rowKey="id" size="middle" loading={isLoading} dataSource={data} columns={columns} pagination={{ showTotal: (total) => `共 ${total} 条` }} />
+      <Spin spinning={isLoading || serversLoading}>
+        <Collapse
+          activeKey={activeKeys}
+          onChange={(keys) => {
+            const activeSet = new Set(Array.isArray(keys) ? keys : [keys]);
+            setCollapsedIds(groups.map((g) => g.server.id).filter((id) => !activeSet.has(id)));
+          }}
+          items={collapseItems}
+          style={{ background: 'transparent' }}
+        />
+      </Spin>
 
       <NodePresetModal
         open={presetModalOpen}
-        onClose={() => setPresetModalOpen(false)}
+        onClose={() => {
+          setPresetModalOpen(false);
+          setPresetServerId(undefined);
+        }}
         onSuccess={(node) => {
           setPresetModalOpen(false);
+          setPresetServerId(undefined);
           qc.invalidateQueries({ queryKey: ['nodes'] });
           openDeploy(node);
         }}
+        defaultServerId={presetServerId}
       />
 
       <Modal
