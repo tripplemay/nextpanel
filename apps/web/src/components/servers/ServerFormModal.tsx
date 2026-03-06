@@ -85,8 +85,21 @@ export default function ServerFormModal({
     }
     setIpError(undefined);
 
-    // 仅新增时自动填充名称、区域和提供商
-    if (isEdit) return;
+    // 编辑时：仅在 countryCode 缺失时补查并回填
+    if (isEdit) {
+      const existing = form.getFieldValue('countryCode') as string | undefined;
+      if (!existing) {
+        setGeoLoading(true);
+        const geo = await fetchGeoIp(ip);
+        setGeoLoading(false);
+        if (geo?.country_code) {
+          setTimeout(() => form.setFieldsValue({ countryCode: geo.country_code!.toUpperCase() }), 0);
+        }
+      }
+      return;
+    }
+
+    // 新增时：自动填充名称、区域和提供商
     const region = form.getFieldValue('region') as string;
     const provider = form.getFieldValue('provider') as string;
     if (region && provider) return; // 已有值，不覆盖
