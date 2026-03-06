@@ -88,9 +88,10 @@ export class SubscriptionsController {
   @Get('link/:token/clash')
   @ApiOperation({ summary: 'Clash / Mihomo YAML subscription content' })
   async getClashContent(@Param('token') token: string, @Res() res: Response) {
-    const content = await this.subscriptionsService.generateClashContent(token);
+    const { content, name } = await this.subscriptionsService.generateClashContent(token);
+    const filename = encodeURIComponent(name) + '.yaml';
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Content-Disposition', 'inline; filename="clash.yaml"');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
     res.send(content);
   }
 

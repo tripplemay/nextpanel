@@ -101,10 +101,11 @@ export class SubscriptionsService {
   }
 
   /** Clash / Mihomo YAML subscription */
-  async generateClashContent(token: string): Promise<string> {
+  async generateClashContent(token: string): Promise<{ content: string; name: string }> {
+    const sub = await this.prisma.subscription.findUnique({ where: { token }, select: { name: true } });
     const nodes = await this.fetchActiveNodes(token);
     const panelUrl = this.config.get<string>('PANEL_URL') ?? 'http://localhost:3001';
-    return buildClashSubscription(nodes, panelUrl);
+    return { content: buildClashSubscription(nodes, panelUrl), name: sub?.name ?? 'clash' };
   }
 
   /** Sing-box JSON subscription */
