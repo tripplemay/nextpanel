@@ -416,18 +416,26 @@ export class ServersService {
 
       // 启动服务
       onLog(alreadyInstalled ? '重启 Agent 服务...' : '启动 Agent 服务...');
-      const { code: startCode, stderr: startErr } = await ssh.execCommand(
-        'systemctl start nextpanel-agent',
-      );
-      if (startCode !== 0) throw new Error(`启动失败: ${startErr}`);
+      await ssh.execCommand('systemctl start nextpanel-agent');
 
-      // 验证
-      const { stdout: statusOut } = await ssh.execCommand(
-        'systemctl status nextpanel-agent --no-pager',
+      // systemctl start 对 Restart=always 的服务总是返回 0（systemd 接受启动请求，
+      // 即使进程立即崩溃）。等待 3s 后用 is-active 检查实际运行状态。
+      await new Promise((r) => setTimeout(r, 3000));
+      const { stdout: activeOut } = await ssh.execCommand(
+        'systemctl is-active nextpanel-agent',
       );
-      onLog(statusOut);
-      onLog('Agent 安装并启动成功！');
-      return true;
+      const isActive = activeOut.trim() === 'active';
+
+      if (isActive) {
+        onLog('Agent 安装并启动成功！');
+        return true;
+      } else {
+        const { stdout: journalOut } = await ssh.execCommand(
+          'journalctl -u nextpanel-agent -n 30 --no-pager 2>&1 || true',
+        );
+        if (journalOut?.trim()) onLog(`Agent 日志:\n${journalOut.trim()}`);
+        throw new Error(`Agent 启动失败（状态: ${activeOut.trim()}），请检查以上日志`);
+      }
     } finally {
       ssh.dispose();
     }
