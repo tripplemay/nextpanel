@@ -99,7 +99,7 @@ export default function ServersPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['servers'],
     queryFn: () => serversApi.list().then((r) => r.data as Server[]),
-    staleTime: 2 * 60 * 1000,
+    refetchInterval: 30_000,
   });
   if (isError) message.error('加载服务器失败');
 

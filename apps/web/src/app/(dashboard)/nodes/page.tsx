@@ -92,7 +92,7 @@ export default function NodesPage() {
   const { data: servers, isLoading: serversLoading } = useQuery({
     queryKey: ['servers'],
     queryFn: () => serversApi.list().then((r) => r.data),
-    staleTime: 2 * 60 * 1000,
+    refetchInterval: 30_000,
   });
 
   if (isError) message.error('加载节点失败');

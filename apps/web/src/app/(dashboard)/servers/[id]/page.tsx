@@ -75,20 +75,20 @@ export default function ServerDetailPage({
   const { data: server, isLoading: serverLoading } = useQuery({
     queryKey: ['server', id],
     queryFn: () => serversApi.get(id).then((r) => r.data),
-    refetchInterval: 10_000,
+    refetchInterval: 30_000,
   });
 
   const { data: latestMetrics = [] } = useQuery({
     queryKey: ['metrics', id],
     queryFn: () => metricsApi.server(id, 60).then((r) => r.data as Metric[]),
-    refetchInterval: 10_000,
+    refetchInterval: 30_000,
     enabled: !!id,
   });
 
   const { data: nodes = [] } = useQuery({
     queryKey: ['nodes', id],
     queryFn: () => nodesApi.list(id).then((r) => r.data as Node[]),
-    refetchInterval: 10_000,
+    refetchInterval: 30_000,
     enabled: !!id,
   });
 
