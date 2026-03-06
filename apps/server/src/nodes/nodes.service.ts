@@ -259,14 +259,25 @@ export class NodesService {
 
   private async pickPort(serverId: string, fixedPort: number | null): Promise<number> {
     if (fixedPort !== null) return fixedPort;
-    const usedPorts = new Set(
-      (await this.prisma.node.findMany({ where: { serverId }, select: { listenPort: true } })).map(
-        (n) => n.listenPort,
-      ),
-    );
+    const existingNodes = await this.prisma.node.findMany({
+      where: { serverId },
+      select: { listenPort: true, statsPort: true },
+    });
+
+    // Reserve both listenPort and statsPort of every existing node.
+    // xray stats API binds 127.0.0.1:<statsPort>; if a new node's listenPort
+    // matches that, its 0.0.0.0:<port> bind will fail with "address already in use".
+    const usedPorts = new Set<number>();
+    for (const n of existingNodes) {
+      usedPorts.add(n.listenPort);
+      if (n.statsPort) usedPorts.add(n.statsPort);
+    }
+
     for (let i = 0; i < 100; i++) {
       const port = Math.floor(Math.random() * 40001) + 10000;
-      if (!usedPorts.has(port)) return port;
+      // Also ensure the derived statsPort (port + 20000) doesn't collide.
+      const derivedStats = port + 20000 <= 65535 ? port + 20000 : port - 20000;
+      if (!usedPorts.has(port) && !usedPorts.has(derivedStats)) return port;
     }
     throw new BadRequestException('No available port found on this server');
   }
