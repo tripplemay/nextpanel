@@ -192,6 +192,12 @@ export class NodeDeployService {
       // avoid killing other nodes running on the same server.
       await ssh.execCommand(`pkill -f "${configPath}" 2>/dev/null || true`);
 
+      // Kill any orphaned proxy process occupying our ports (e.g. a deleted node
+      // whose xray was not fully cleaned up). This handles cases where the DB no
+      // longer has the record but the process is still holding the port.
+      if (statsPort) await this.freePortIfOrphaned(ssh, statsPort, 'stats', log);
+      await this.freePortIfOrphaned(ssh, node.listenPort, 'listen', log);
+
       log(`Starting service: ${serviceName}...`);
       // Use `enable` + `start` (not `enable --now` + `restart`) — the service is
       // already stopped above, so a single start is sufficient and avoids the
@@ -706,6 +712,38 @@ export class NodeDeployService {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
+
+  /**
+   * If `port` is already in use by an orphaned proxy binary (xray, sing-box, etc.),
+   * kill it so the new deployment can bind the port cleanly.
+   * Only proxy binaries are killed — arbitrary system processes are left alone.
+   */
+  private async freePortIfOrphaned(
+    ssh: NodeSSH,
+    port: number,
+    label: string,
+    log: (msg: string) => void,
+  ): Promise<void> {
+    const { stdout: pidRaw } = await ssh.execCommand(
+      `fuser ${port}/tcp 2>/dev/null || true`,
+    );
+    const pid = pidRaw?.trim();
+    if (!pid) return; // port is free
+
+    const { stdout: commRaw } = await ssh.execCommand(
+      `cat /proc/${pid}/comm 2>/dev/null || true`,
+    );
+    const comm = commRaw?.trim();
+    const PROXY_BINS = new Set(['xray', 'sing-box', 'hysteria', 'hysteria2', 'v2ray']);
+    if (PROXY_BINS.has(comm ?? '')) {
+      log(`${label} port ${port} occupied by orphaned ${comm} (PID ${pid}), killing...`);
+      await ssh.execCommand(`kill -9 ${pid} 2>/dev/null || true`);
+      await new Promise((r) => setTimeout(r, 300));
+      log(`Orphaned process killed, ${label} port ${port} freed`);
+    } else if (comm) {
+      log(`WARNING: ${label} port ${port} in use by "${comm}" (PID ${pid}) — not a proxy binary, skipping`);
+    }
+  }
 
   private async finalize(
     nodeId: string,
