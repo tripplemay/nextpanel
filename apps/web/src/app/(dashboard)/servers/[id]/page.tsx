@@ -1,6 +1,6 @@
 'use client';
 
-import { use } from 'react';
+import { use, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -18,8 +18,9 @@ import {
   Spin,
   Empty,
   Badge,
+  Statistic,
 } from 'antd';
-import { ArrowLeftOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import {
   LineChart,
@@ -41,10 +42,26 @@ dayjs.locale('zh-cn');
 
 const { Title, Text } = Typography;
 
+const CHART_WINDOW = 60;
+
 function formatRate(bytes: number): string {
   if (bytes < 1024) return `${bytes} B/s`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB/s`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB/s`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '—';
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function usageColor(pct: number | null | undefined): string {
+  if (pct == null) return '#1677ff';
+  if (pct < 70) return '#52c41a';
+  if (pct < 90) return '#faad14';
+  return '#ff4d4f';
 }
 
 export default function ServerDetailPage({
@@ -58,19 +75,20 @@ export default function ServerDetailPage({
   const { data: server, isLoading: serverLoading } = useQuery({
     queryKey: ['server', id],
     queryFn: () => serversApi.get(id).then((r) => r.data),
-    refetchInterval: 15_000,
+    refetchInterval: 10_000,
   });
 
-  const { data: metrics = [] } = useQuery({
+  const { data: latestMetrics = [] } = useQuery({
     queryKey: ['metrics', id],
     queryFn: () => metricsApi.server(id, 60).then((r) => r.data as Metric[]),
-    refetchInterval: 15_000,
+    refetchInterval: 10_000,
     enabled: !!id,
   });
 
   const { data: nodes = [] } = useQuery({
     queryKey: ['nodes', id],
     queryFn: () => nodesApi.list(id).then((r) => r.data as Node[]),
+    refetchInterval: 10_000,
     enabled: !!id,
   });
 
@@ -80,8 +98,24 @@ export default function ServerDetailPage({
     enabled: !!id,
   });
 
-  // 指标图数据（正序排列）
-  const chartData = [...metrics].reverse().map((m) => ({
+  // 滑窗：追加新数据点，保留最近 CHART_WINDOW 条，按时间升序
+  const [accMetrics, setAccMetrics] = useState<Metric[]>([]);
+  useEffect(() => {
+    if (latestMetrics.length === 0) return;
+    setAccMetrics((prev) => {
+      const existingIds = new Set(prev.map((m) => m.id));
+      const newPoints = latestMetrics.filter((m) => !existingIds.has(m.id));
+      if (newPoints.length === 0) return prev;
+      const combined = [...prev, ...newPoints];
+      combined.sort(
+        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+      );
+      return combined.slice(-CHART_WINDOW);
+    });
+  }, [latestMetrics]);
+
+  // 图表数据（已是升序）
+  const chartData = accMetrics.map((m) => ({
     time: dayjs(m.timestamp).format('HH:mm'),
     CPU: parseFloat(m.cpu.toFixed(1)),
     内存: parseFloat(m.mem.toFixed(1)),
@@ -89,6 +123,11 @@ export default function ServerDetailPage({
     上传: parseFloat((m.networkOut / 1024).toFixed(1)),
     下载: parseFloat((m.networkIn / 1024).toFixed(1)),
   }));
+
+  const timeRange =
+    chartData.length >= 2
+      ? `${chartData[0].time} – ${chartData[chartData.length - 1].time}`
+      : null;
 
   const nodeColumns: ColumnType<Node>[] = [
     { title: '名称', dataIndex: 'name' },
@@ -106,6 +145,16 @@ export default function ServerDetailPage({
       title: '状态',
       dataIndex: 'status',
       render: (v: string) => <StatusTag status={v} />,
+    },
+    {
+      title: '上传',
+      dataIndex: 'trafficUpBytes',
+      render: (v: number) => formatBytes(v),
+    },
+    {
+      title: '下载',
+      dataIndex: 'trafficDownBytes',
+      render: (v: number) => formatBytes(v),
     },
     {
       title: '创建时间',
@@ -208,8 +257,49 @@ export default function ServerDetailPage({
         </Col>
       </Row>
 
+      {/* 当前资源数值 */}
+      <Row gutter={16}>
+        {(
+          [
+            { label: 'CPU', value: server.cpuUsage },
+            { label: '内存', value: server.memUsage },
+            { label: '磁盘', value: server.diskUsage },
+          ] as { label: string; value: number | null }[]
+        ).map(({ label, value }) => (
+          <Col xs={12} sm={6} key={label}>
+            <Card size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+              <Statistic
+                title={label}
+                value={value != null ? Math.round(value) : '—'}
+                suffix={value != null ? '%' : undefined}
+                valueStyle={{ color: usageColor(value), fontSize: 24 }}
+              />
+            </Card>
+          </Col>
+        ))}
+        <Col xs={12} sm={6}>
+          <Card size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>网速</div>
+            <div style={{ lineHeight: 2 }}>
+              <div style={{ fontSize: 13 }}>
+                <ArrowUpOutlined style={{ color: '#52c41a', marginRight: 4 }} />
+                {server.networkOut != null ? formatRate(server.networkOut) : '—'}
+              </div>
+              <div style={{ fontSize: 13 }}>
+                <ArrowDownOutlined style={{ color: '#1677ff', marginRight: 4 }} />
+                {server.networkIn != null ? formatRate(server.networkIn) : '—'}
+              </div>
+            </div>
+          </Card>
+        </Col>
+      </Row>
+
       {/* 资源趋势图 */}
-      <Card title="资源使用趋势（最近 60 条）" size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+      <Card
+        title={`资源使用趋势${timeRange ? `（${timeRange}）` : ''}`}
+        size="small"
+        style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+      >
         {chartData.length === 0 ? (
           <Empty description="暂无监控数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         ) : (
@@ -230,7 +320,9 @@ export default function ServerDetailPage({
               </ResponsiveContainer>
             </Col>
             <Col xs={24} xl={12}>
-              <Text type="secondary" style={{ fontSize: 12 }}>网络流量 (KB/s)</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                网络流量 (KB/s){timeRange ? `　${timeRange}` : ''}
+              </Text>
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
