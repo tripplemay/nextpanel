@@ -105,6 +105,7 @@ export default function DeployLogModal({ node, onClose }: Props) {
   return (
     <Modal
       open={!!node}
+      destroyOnClose
       title={`操作日志 — ${node?.name ?? ''}`}
       onCancel={onClose}
       footer={<Button onClick={onClose}>关闭</Button>}

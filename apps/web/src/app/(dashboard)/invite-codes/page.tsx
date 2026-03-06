@@ -24,6 +24,7 @@ export default function InviteCodesPage() {
   const { data: codes = [], isLoading } = useQuery({
     queryKey: ['invite-codes'],
     queryFn: () => inviteCodesApi.list().then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
   });
 
   const createMutation = useMutation({

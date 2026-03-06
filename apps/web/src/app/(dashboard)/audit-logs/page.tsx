@@ -6,8 +6,9 @@ import { useQuery } from '@tanstack/react-query';
 import { auditApi, operationLogsApi } from '@/lib/api';
 import type { AuditLog, OperationLogDetail } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
+import PageHeader from '@/components/common/PageHeader';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 // Actions that may have associated SSH terminal logs
 const SSH_LOG_ACTIONS = new Set(['CREATE', 'UPDATE', 'DELETE', 'DEPLOY']);
@@ -82,27 +83,32 @@ function SshLogPane({ correlationId }: { correlationId: string }) {
   );
 }
 
-// ── Expanded row content ──────────────────────────────────────────────────────
+// ── Shared helpers ────────────────────────────────────────────────────────────
 
-function ExpandedRowContent({ record }: { record: AuditLog }) {
-  const hasDiff =
+function hasDiff(record: AuditLog): boolean {
+  return (
     record.diff !== null &&
     record.diff !== undefined &&
     typeof record.diff === 'object' &&
-    Object.keys(record.diff as object).length > 0;
+    Object.keys(record.diff as object).length > 0
+  );
+}
 
-  const hasSshLog =
-    record.resource === 'node' &&
-    SSH_LOG_ACTIONS.has(record.action) &&
-    !!record.correlationId;
+function hasSshLog(record: AuditLog): boolean {
+  return record.resource === 'node' && SSH_LOG_ACTIONS.has(record.action) && !!record.correlationId;
+}
 
-  if (!hasDiff && !hasSshLog) {
+// ── Expanded row content ──────────────────────────────────────────────────────
+
+function ExpandedRowContent({ record }: { record: AuditLog }) {
+
+  if (!hasDiff(record) && !hasSshLog(record)) {
     return <Empty description="暂无详情" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '8px 0' }} />;
   }
 
   return (
     <Space direction="vertical" style={{ width: '100%' }} size={12}>
-      {hasDiff && (
+      {hasDiff(record) && (
         <div>
           <Text strong style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 6 }}>
             变更详情
@@ -123,7 +129,7 @@ function ExpandedRowContent({ record }: { record: AuditLog }) {
           </pre>
         </div>
       )}
-      {hasSshLog && (
+      {hasSshLog(record) && (
         <div>
           <Text strong style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 6 }}>
             SSH 执行日志
@@ -149,6 +155,7 @@ export default function AuditLogsPage() {
       auditApi
         .list(page, pageSize, actionFilter || undefined)
         .then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
   });
 
   if (isError) message.error('加载审计日志失败');
@@ -190,35 +197,25 @@ export default function AuditLogsPage() {
     },
   ];
 
-  // Only rows with diff or SSH log should be expandable
-  const rowExpandable = (record: AuditLog) => {
-    const hasDiff =
-      record.diff !== null &&
-      record.diff !== undefined &&
-      typeof record.diff === 'object' &&
-      Object.keys(record.diff as object).length > 0;
-    const hasSshLog =
-      record.resource === 'node' &&
-      SSH_LOG_ACTIONS.has(record.action) &&
-      !!record.correlationId;
-    return hasDiff || hasSshLog;
-  };
+  const rowExpandable = (record: AuditLog) => hasDiff(record) || hasSshLog(record);
 
   return (
     <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
-      <Space style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-        <Title level={4} style={{ margin: 0 }}>审计日志</Title>
-        <Select
-          style={{ width: 160 }}
-          placeholder="筛选动作类型"
-          value={actionFilter}
-          onChange={(v) => {
-            setActionFilter(v);
-            setPage(1);
-          }}
-          options={ACTION_OPTIONS}
-        />
-      </Space>
+      <PageHeader
+        title="审计日志"
+        extra={
+          <Select
+            style={{ width: 160 }}
+            placeholder="筛选动作类型"
+            value={actionFilter}
+            onChange={(v) => {
+              setActionFilter(v);
+              setPage(1);
+            }}
+            options={ACTION_OPTIONS}
+          />
+        }
+      />
       <Table<AuditLog>
         rowKey="id"
         loading={isLoading}

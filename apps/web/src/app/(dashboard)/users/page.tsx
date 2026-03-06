@@ -28,6 +28,7 @@ export default function UsersPage() {
   const { data: users = [], isLoading } = useQuery({
     queryKey: ['users'],
     queryFn: () => usersApi.list().then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
   });
 
   const updateRoleMutation = useMutation({

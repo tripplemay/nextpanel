@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
@@ -91,6 +91,7 @@ export default function ServersPage() {
 
   // 筛选状态
   const [searchText, setSearchText] = useState('');
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const [tagsFilter, setTagsFilter] = useState<string[]>([]);
   const [regionFilter, setRegionFilter] = useState<string | undefined>(undefined);
@@ -98,7 +99,7 @@ export default function ServersPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['servers'],
     queryFn: () => serversApi.list().then((r) => r.data as Server[]),
-    refetchInterval: 10_000,
+    staleTime: 2 * 60 * 1000,
   });
   if (isError) message.error('加载服务器失败');
 
@@ -388,7 +389,11 @@ export default function ServersPage() {
           placeholder="搜索名称或 IP"
           allowClear
           style={{ width: 200 }}
-          onChange={(e) => setSearchText(e.target.value)}
+          onChange={(e) => {
+            const value = e.target.value;
+            if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+            searchTimerRef.current = setTimeout(() => setSearchText(value), 300);
+          }}
         />
         <Select
           placeholder="状态"

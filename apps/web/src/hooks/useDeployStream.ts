@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState, useCallback } from 'react';
+import { useAuthStore } from '@/store/auth';
 
 export type DeployStatus = 'idle' | 'running' | 'success' | 'failed';
 
@@ -33,7 +34,7 @@ export function useDeployStream(): UseDeployStreamResult {
     setLogLines([]);
     setDeployStatus('running');
 
-    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : '';
+    const token = useAuthStore.getState().token ?? '';
 
     try {
       const res = await fetch(url, {

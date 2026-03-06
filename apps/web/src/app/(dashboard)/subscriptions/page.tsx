@@ -38,7 +38,7 @@ export default function SubscriptionsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['subscriptions'],
     queryFn: () => subscriptionsApi.list().then((r) => r.data),
-    refetchInterval: 10_000,
+    staleTime: 5 * 60 * 1000,
   });
 
   const deleteMutation = useMutation({

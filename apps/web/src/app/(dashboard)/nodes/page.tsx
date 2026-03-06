@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { useAuthStore } from '@/store/auth';
 import { App, Button, Table, Tag, Space, Card, Spin, Modal, Input, Switch, Dropdown, Typography, Collapse, Empty, Tooltip } from 'antd';
 import { ApiOutlined, ShareAltOutlined, FileTextOutlined, EditOutlined, CloudUploadOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -85,13 +86,13 @@ export default function NodesPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['nodes'],
     queryFn: () => nodesApi.list().then((r) => r.data),
-    refetchInterval: 10_000,
+    staleTime: 2 * 60 * 1000,
   });
 
   const { data: servers, isLoading: serversLoading } = useQuery({
     queryKey: ['servers'],
     queryFn: () => serversApi.list().then((r) => r.data),
-    refetchInterval: 10_000,
+    staleTime: 2 * 60 * 1000,
   });
 
   if (isError) message.error('加载节点失败');
@@ -170,7 +171,7 @@ export default function NodesPage() {
     setTestResults({});
     abortBatchRef.current = new AbortController();
 
-    const token = typeof window !== 'undefined' ? (localStorage.getItem('access_token') ?? '') : '';
+    const token = useAuthStore.getState().token ?? '';
 
     try {
       const res = await fetch('/api/nodes/test-all', {
@@ -231,45 +232,45 @@ export default function NodesPage() {
     }
   }
 
-  function openDeploy(node: Node) {
+  const openDeploy = useCallback((node: Node) => {
     reset();
     setDeployingNode(node);
     setDrawerOpen(true);
     void startStream(`/api/nodes/${node.id}/deploy-stream`, (success) => {
       if (success) qc.invalidateQueries({ queryKey: ['nodes'] });
     });
-  }
+  }, [reset, startStream, qc]);
 
   function closeDrawer() {
     abort();
     setDrawerOpen(false);
   }
 
-  function openDelete(node: Node) {
+  const openDelete = useCallback((node: Node) => {
     resetDelete();
     setDeletingNode(node);
     setDeleteDrawerOpen(true);
     void startDeleteStream(`/api/nodes/${node.id}/delete-stream`, (success) => {
       if (success) qc.invalidateQueries({ queryKey: ['nodes'] });
     });
-  }
+  }, [resetDelete, startDeleteStream, qc]);
 
   function closeDeleteDrawer() {
     abortDelete();
     setDeleteDrawerOpen(false);
   }
 
-  function openRename(node: Node) {
+  const openRename = useCallback((node: Node) => {
     setRenameNode(node);
     setRenameValue(node.name);
-  }
+  }, []);
 
   function openPresetForServer(serverId: string) {
     setPresetServerId(serverId);
     setPresetModalOpen(true);
   }
 
-  const columns: ColumnType<Node>[] = [
+  const columns: ColumnType<Node>[] = useMemo(() => [
     {
       title: '名称',
       dataIndex: 'name',
@@ -420,7 +421,8 @@ export default function NodesPage() {
         </Space>
       ),
     },
-  ];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [testResults, testingId, batchTesting, togglingId, toggleMutation, testMutation, modal, openDeploy, openDelete, openRename]);
 
   const batchTestButton = (
     <Button
@@ -521,6 +523,7 @@ export default function NodesPage() {
 
       <Modal
         open={!!renameNode}
+        destroyOnClose
         title="重命名节点"
         onCancel={() => setRenameNode(null)}
         onOk={() => {
