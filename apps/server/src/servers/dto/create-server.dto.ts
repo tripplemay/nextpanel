@@ -20,6 +20,11 @@ export class CreateServerDto {
   @IsString()
   region: string;
 
+  @ApiPropertyOptional({ description: 'ISO 3166-1 alpha-2 country code, e.g. SG, JP, US' })
+  @IsString()
+  @IsOptional()
+  countryCode?: string;
+
   @ApiProperty()
   @IsString()
   provider: string;

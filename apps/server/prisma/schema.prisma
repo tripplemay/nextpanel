@@ -51,6 +51,7 @@ model Server {
   userId       String
   name         String
   region       String
+  countryCode  String?
   provider     String
   ip           String
   sshPort      Int          @default(22)

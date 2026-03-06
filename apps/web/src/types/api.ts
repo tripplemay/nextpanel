@@ -95,6 +95,7 @@ export interface Server {
   tags: string[];
   status: string;
   region: string;
+  countryCode: string | null;
   provider: string;
   cpuUsage: number | null;
   memUsage: number | null;

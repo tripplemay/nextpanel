@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { OperationLogService } from '../operation-log/operation-log.service';
 import { CertService } from '../common/cert/cert.service';
+import { CloudflareService } from '../cloudflare/cloudflare.service';
 import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.service';
 import { generateConfig, getBinaryCommand, NodeInfo } from './config/config-generator';
 import { connectSsh, uploadText, binaryExists, whichBinary, detectPackageManager } from './ssh/ssh.util';
@@ -25,6 +26,7 @@ export class NodeDeployService {
     private operationLog: OperationLogService,
     private certService: CertService,
     private cfSettings: CloudflareSettingsService,
+    private cfService: CloudflareService,
   ) {}
 
   /** Stream deploy logs as SSE events */
@@ -342,7 +344,23 @@ export class NodeDeployService {
     }
     ssh.dispose();
 
-    // ── Step 2: DB deletion — only after SSH cleanup confirmed ────────────────
+    // ── Step 2: Cloudflare DNS cleanup (non-fatal) ────────────────────────────
+    if (node.cfDnsRecordId && node.userId) {
+      trackLog('正在清理 Cloudflare DNS 记录...');
+      const cfSetting = await this.cfSettings.getDecryptedToken(node.userId);
+      if (cfSetting) {
+        try {
+          await this.cfService.deleteRecord(cfSetting.apiToken, cfSetting.zoneId, node.cfDnsRecordId);
+          trackLog('Cloudflare DNS 记录已清理');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          trackLog(`Cloudflare DNS 清理失败（已忽略）: ${msg}`);
+          this.logger.error(`Cloudflare DNS cleanup failed for record ${node.cfDnsRecordId}: ${msg}`);
+        }
+      }
+    }
+
+    // ── Step 3: DB deletion — only after SSH cleanup confirmed ────────────────
     trackLog('服务器清理已确认，正在从数据库删除节点记录...');
     // Save operation log BEFORE deleting the node (while nodeId is still valid)
     await this.operationLog.createLog({

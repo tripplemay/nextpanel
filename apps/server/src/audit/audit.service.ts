@@ -30,8 +30,11 @@ export class AuditService {
     });
   }
 
-  async findAll(page = 1, pageSize = 20, action?: AuditAction) {
-    const where: Prisma.AuditLogWhereInput = action ? { action } : {};
+  async findAll(page = 1, pageSize = 20, action?: AuditAction, actorId?: string) {
+    const where: Prisma.AuditLogWhereInput = {
+      ...(action ? { action } : {}),
+      ...(actorId ? { actorId } : {}),
+    };
     const [data, total] = await Promise.all([
       this.prisma.auditLog.findMany({
         where,

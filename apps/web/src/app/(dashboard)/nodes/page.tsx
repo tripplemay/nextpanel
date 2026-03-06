@@ -15,6 +15,12 @@ import { useDeployStream } from '@/hooks/useDeployStream';
 import type { Node, Server, ConnectivityResult } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
+function toFlagEmoji(code: string): string {
+  return [...code.toUpperCase()]
+    .map((c) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65))
+    .join('');
+}
+
 function formatBytes(bytes: number, hasStats: boolean): string {
   if (!hasStats) return '-';
   if (bytes < 1024) return `${bytes}B`;
@@ -433,6 +439,11 @@ export default function NodesPage() {
     label: (
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
         <span style={{ fontWeight: 500 }}>{server.name}</span>
+        {server.countryCode && (
+          <span style={{ fontSize: 20, lineHeight: 1 }}>
+            {toFlagEmoji(server.countryCode)}
+          </span>
+        )}
         {server.region && <Tag style={{ margin: 0 }}>{server.region}</Tag>}
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>{server.ip}</Typography.Text>
         <StatusTag status={server.status} />
@@ -454,7 +465,7 @@ export default function NodesPage() {
         size="middle"
         dataSource={serverNodes}
         columns={columns}
-        pagination={{ showTotal: (total) => `共 ${total} 条` }}
+        pagination={serverNodes.length > 10 ? { showTotal: (total) => `共 ${total} 条` } : false}
       />
     ) : (
       <Empty

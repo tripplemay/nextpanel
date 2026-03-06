@@ -100,6 +100,9 @@ export default function ServerFormModal({
     if (!region && geo.country_code) {
       updates.region = geo.country_code.toUpperCase();
     }
+    if (geo.country_code) {
+      updates.countryCode = geo.country_code.toUpperCase();
+    }
     if (!provider && geo.org) {
       updates.provider = geo.org.replace(/^AS\d+\s+/, '');
     }
@@ -175,6 +178,9 @@ export default function ServerFormModal({
           </Form.Item>
           <Form.Item name="region" label="区域" rules={[{ required: true }]}>
             <Input placeholder="填写 IP 后自动识别，可手动修改" />
+          </Form.Item>
+          <Form.Item name="countryCode" hidden>
+            <Input />
           </Form.Item>
           <Form.Item name="provider" label="提供商" rules={[{ required: true }]}>
             <Input placeholder="填写 IP 后自动识别，可手动修改" />
