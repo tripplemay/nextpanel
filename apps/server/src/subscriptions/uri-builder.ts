@@ -121,6 +121,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
         lines.push(`      grpc-service-name: grpc`);
       }
       if (tls === 'REALITY') {
+        lines.push(`    client-fingerprint: chrome`);
         lines.push(`    reality-opts:`);
         lines.push(`      public-key: ${creds.realityPublicKey ?? ''}`);
         lines.push(`      short-id: ""`);
@@ -145,6 +146,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
         lines.push(`      grpc-service-name: grpc`);
       }
       if (tls === 'REALITY') {
+        lines.push(`    client-fingerprint: chrome`);
         lines.push(`    reality-opts:`);
         lines.push(`      public-key: ${creds.realityPublicKey ?? ''}`);
         lines.push(`      short-id: ""`);
