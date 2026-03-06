@@ -21,16 +21,18 @@
 
 | 功能 | 说明 |
 |------|------|
-| **多协议节点管理** | 支持 VLESS、VMess、Trojan、Shadowsocks、Hysteria2、SOCKS5、HTTP |
+| **多协议节点管理** | 支持 VLESS（REALITY / WS+TLS / TCP+TLS）、VMess、Hysteria2 |
+| **协议预设** | 内置主流协议配置模板，一键创建节点，自动分配端口 |
 | **一键部署** | 通过 SSH 自动部署节点服务，实时查看终端日志 |
-| **服务器监控** | CPU、内存、磁盘、网络实时监控，历史图表 |
+| **服务器监控** | CPU、内存、磁盘、网速实时显示，历史趋势图，在线延迟检测 |
 | **流量统计** | 统计每个节点自上次部署以来的累计上传/下载流量 |
-| **订阅导出** | 一键生成 V2Ray / Clash / Sing-Box 格式订阅链接 |
+| **订阅导出** | 生成 V2Ray / Clash（含规则集和策略组）/ Sing-Box 订阅链接 |
 | **Cloudflare 集成** | 自动创建 DNS 记录，支持 VLESS+WS+TLS 节点 |
 | **连通性测试** | 端到端测试节点可达性与延迟，支持批量测试 |
-| **轻量 Agent** | 安装到服务器后自动上报状态，无需手动维护 |
+| **轻量 Agent** | 面板内一键安装到服务器，自动上报心跳与流量数据 |
+| **操作日志** | 记录每次部署/删除的完整终端输出，可随时回溯 |
 | **审计日志** | 所有操作均记录，可追溯部署历史 |
-| **多用户权限** | Admin / Operator / Viewer 三级权限控制 |
+| **多用户权限** | Admin / Operator / Viewer 三级权限，邀请码注册机制 |
 | **账户安全** | 支持在面板内修改密码，无需命令行操作 |
 
 ### 界面预览
@@ -195,16 +197,18 @@ EOF
 
 | Feature | Description |
 |---------|-------------|
-| **Multi-protocol Nodes** | VLESS, VMess, Trojan, Shadowsocks, Hysteria2, SOCKS5, HTTP |
+| **Multi-protocol Nodes** | VLESS (REALITY / WS+TLS / TCP+TLS), VMess, Hysteria2 |
+| **Protocol Presets** | Built-in protocol templates — create nodes in one click with auto port allocation |
 | **One-click Deploy** | SSH-based auto-deployment with real-time terminal logs |
-| **Server Monitoring** | Real-time CPU, memory, disk, network metrics with history charts |
+| **Server Monitoring** | Real-time CPU, memory, disk, network speed, history charts, and ping latency |
 | **Traffic Statistics** | Cumulative upload/download per node since last deploy |
-| **Subscription Export** | Generate V2Ray / Clash / Sing-Box subscription links instantly |
+| **Subscription Export** | Generate V2Ray / Clash (with rule-providers and policy groups) / Sing-Box links |
 | **Cloudflare Integration** | Auto DNS record creation for VLESS+WS+TLS nodes |
 | **Connectivity Test** | End-to-end latency testing with batch support |
-| **Lightweight Agent** | Install once, auto-reports server status continuously |
+| **Lightweight Agent** | One-click install from panel, auto-reports heartbeat and traffic data |
+| **Operation Logs** | Full terminal output for every deploy/delete, always accessible |
 | **Audit Logs** | Full operation history with deployment traceability |
-| **Role-based Access** | Admin / Operator / Viewer permission levels |
+| **Role-based Access** | Admin / Operator / Viewer permissions with invite-code registration |
 | **Account Security** | Change password directly in the panel without command-line access |
 
 ### Screenshots
