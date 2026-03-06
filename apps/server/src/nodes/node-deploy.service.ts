@@ -181,15 +181,23 @@ export class NodeDeployService {
       const { stderr: reloadErr } = await ssh.execCommand('systemctl daemon-reload');
       if (reloadErr) log(`daemon-reload warning: ${reloadErr}`);
 
-      // Kill any orphaned process for THIS node before starting the service.
-      // systemctl restart only stops the systemd-managed process; stale Xray
-      // processes from previous failed deployments can still hold the statsPort.
-      // We target by config file path (not port) to avoid killing other nodes.
+      // Stop the service first to release the port cleanly before re-deploying.
+      // Without this, the enable --now + restart sequence creates a race: systemd
+      // starts xray (binds the port), then restart immediately stops it, then the
+      // new xray finds the port still held by the brief first instance.
+      await ssh.execCommand(`systemctl stop ${serviceName} 2>/dev/null || true`);
+
+      // Kill any orphaned process for THIS node (e.g. stale from a failed previous
+      // deploy that bypassed systemd). Target by config file path, not port, to
+      // avoid killing other nodes running on the same server.
       await ssh.execCommand(`pkill -f "${configPath}" 2>/dev/null || true`);
 
       log(`Starting service: ${serviceName}...`);
+      // Use `enable` + `start` (not `enable --now` + `restart`) — the service is
+      // already stopped above, so a single start is sufficient and avoids the
+      // double-start race that caused "address already in use".
       const { stderr: startErr } = await ssh.execCommand(
-        `systemctl enable --now ${serviceName} && systemctl restart ${serviceName}`,
+        `systemctl enable ${serviceName} && systemctl start ${serviceName}`,
       );
       if (startErr) log(`Start warning: ${startErr}`);
 
