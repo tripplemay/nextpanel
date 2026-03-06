@@ -28,6 +28,32 @@ export class PingScheduler {
     this.logger.debug(`Pinged ${servers.length} servers`);
   }
 
+  @Interval(30_000)
+  async markStaleServersOffline() {
+    const threshold = new Date(Date.now() - 60_000);
+    const result = await this.prisma.server.updateMany({
+      where: {
+        status: 'ONLINE',
+        OR: [
+          { lastSeenAt: null },
+          { lastSeenAt: { lt: threshold } },
+        ],
+      },
+      data: {
+        status: 'OFFLINE',
+        cpuUsage: null,
+        memUsage: null,
+        diskUsage: null,
+        networkIn: null,
+        networkOut: null,
+      },
+    });
+
+    if (result.count > 0) {
+      this.logger.log(`Marked ${result.count} stale server(s) as OFFLINE`);
+    }
+  }
+
   private tcpPing(host: string, port: number, timeoutMs = 5000): Promise<number | null> {
     return new Promise((resolve) => {
       const start = Date.now();
