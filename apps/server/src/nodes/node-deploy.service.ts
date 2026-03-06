@@ -817,7 +817,7 @@ function buildSystemdUnit(name: string, bin: string, args: string): string {
     `ExecStart=${bin} ${args}`,
     'Restart=always',
     'RestartSec=3',
-    'LimitNOFILE=65536',
+    'LimitNOFILE=1048576',
     '',
     '[Install]',
     'WantedBy=multi-user.target',

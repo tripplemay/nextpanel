@@ -260,6 +260,43 @@ export class ServersService {
         }
       }
 
+      // TCP 缓冲区 & 连接队列优化（best-effort，失败不中断安装）
+      onLog('配置 TCP 缓冲区与连接队列...');
+      const sysctlConf = [
+        '# NextPanel network tuning',
+        'net.core.rmem_max = 134217728',
+        'net.core.wmem_max = 134217728',
+        'net.ipv4.tcp_rmem = 4096 87380 134217728',
+        'net.ipv4.tcp_wmem = 4096 65536 134217728',
+        'net.core.netdev_max_backlog = 65536',
+        'net.ipv4.tcp_max_syn_backlog = 8192',
+        'net.core.somaxconn = 8192',
+      ].join('\n');
+      const b64Sysctl = Buffer.from(sysctlConf).toString('base64');
+      const { code: sysctlCode } = await ssh.execCommand(
+        `echo '${b64Sysctl}' | base64 -d > /etc/sysctl.d/99-nextpanel.conf` +
+        ' && sysctl -p /etc/sysctl.d/99-nextpanel.conf >/dev/null 2>&1',
+      );
+      if (sysctlCode === 0) {
+        onLog('TCP 缓冲区与连接队列优化已应用');
+      } else {
+        onLog('⚠ TCP 调优失败（可能为容器环境限制），已跳过');
+      }
+
+      // 文件描述符限制（best-effort）
+      onLog('配置文件描述符限制...');
+      const limitsLines = '* soft nofile 1048576\n* hard nofile 1048576\n';
+      const b64Limits = Buffer.from(limitsLines).toString('base64');
+      const { code: limitsCode } = await ssh.execCommand(
+        `grep -q "nofile 1048576" /etc/security/limits.conf` +
+        ` || echo '${b64Limits}' | base64 -d >> /etc/security/limits.conf`,
+      );
+      if (limitsCode === 0) {
+        onLog('文件描述符限制已配置（nofile = 1048576）');
+      } else {
+        onLog('⚠ 文件描述符配置失败，已跳过');
+      }
+
       // 检测架构
       onLog('检测系统架构...');
       const { stdout: arch } = await ssh.execCommand('uname -m');
@@ -321,6 +358,7 @@ export class ServersService {
           'ExecStart=/usr/local/bin/nextpanel-agent',
           'Restart=always',
           'RestartSec=10',
+          'LimitNOFILE=1048576',
           '',
           '[Install]',
           'WantedBy=multi-user.target',
