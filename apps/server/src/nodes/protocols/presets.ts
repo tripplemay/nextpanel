@@ -50,8 +50,24 @@ export interface ProtocolPreset {
   transport: string | null;
   /** Prisma TlsMode enum value */
   tls: string;
-  /** Fixed listen port — null means random */
+  /**
+   * Fixed listen port (e.g. 443 for VLESS+WS+TLS).
+   * When set, portBase is ignored and this exact port is always used.
+   */
   fixedPort: number | null;
+  /**
+   * Start of the deterministic 1000-port allocation range [portBase, portBase+999].
+   * Used when fixedPort is null. Each preset gets its own non-overlapping range so
+   * listenPort and statsPort (listenPort+20000) ranges never collide across presets.
+   *
+   * Port map:
+   *   VLESS_REALITY  listen 10000–10999  stats 30000–30999
+   *   VLESS_WS_TLS   listen 443 (fixed)  stats 20443 (fixed)
+   *   VLESS_TCP_TLS  listen 12000–12999  stats 32000–32999
+   *   HYSTERIA2      listen 13000–13999  (no stats — sing-box)
+   *   VMESS_TCP      listen 14000–14999  stats 34000–34999
+   */
+  portBase: number | null;
 }
 
 export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
@@ -68,6 +84,7 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
     transport: 'TCP',
     tls: 'REALITY',
     fixedPort: null,
+    portBase: 10000,
   },
   VLESS_WS_TLS: {
     label: 'VLESS + WS + TLS',
@@ -82,6 +99,7 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
     transport: 'WS',
     tls: 'TLS',
     fixedPort: 443,
+    portBase: null,
   },
   VLESS_TCP_TLS: {
     label: 'VLESS + TCP + TLS',
@@ -96,6 +114,7 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
     transport: 'TCP',
     tls: 'TLS',
     fixedPort: null,
+    portBase: 12000,
   },
   HYSTERIA2: {
     label: 'Hysteria2',
@@ -110,6 +129,7 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
     transport: null,
     tls: 'TLS',
     fixedPort: null,
+    portBase: 13000,
   },
   VMESS_TCP: {
     label: 'VMess + TCP',
@@ -124,6 +144,7 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
     transport: 'TCP',
     tls: 'NONE',
     fixedPort: null,
+    portBase: 14000,
   },
 };
 

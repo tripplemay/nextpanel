@@ -72,7 +72,7 @@ export class NodesService {
 
     const preset = PROTOCOL_PRESETS[dto.preset as SupportedProtocol];
     const credentials = CREDENTIAL_GENERATORS[dto.preset as SupportedProtocol]();
-    const listenPort = await this.pickPort(dto.serverId, preset.fixedPort);
+    const listenPort = await this.pickPort(dto.serverId, preset.fixedPort, preset.portBase);
     const credentialsEnc = this.crypto.encrypt(JSON.stringify(credentials));
 
     const node = await this.prisma.node.create({
@@ -257,29 +257,38 @@ export class NodesService {
     return JSON.parse(this.crypto.decrypt(node.credentialsEnc)) as Record<string, string>;
   }
 
-  private async pickPort(serverId: string, fixedPort: number | null): Promise<number> {
+  private async pickPort(
+    serverId: string,
+    fixedPort: number | null,
+    portBase: number | null,
+  ): Promise<number> {
     if (fixedPort !== null) return fixedPort;
+    if (portBase === null) throw new BadRequestException('Preset misconfiguration: no fixedPort or portBase');
+
     const existingNodes = await this.prisma.node.findMany({
       where: { serverId },
       select: { listenPort: true, statsPort: true },
     });
 
-    // Reserve both listenPort and statsPort of every existing node.
-    // xray stats API binds 127.0.0.1:<statsPort>; if a new node's listenPort
-    // matches that, its 0.0.0.0:<port> bind will fail with "address already in use".
+    // Reserve both listenPort and statsPort of every existing node so neither
+    // the new listen port nor its derived stats port (listenPort+20000) collides.
     const usedPorts = new Set<number>();
     for (const n of existingNodes) {
       usedPorts.add(n.listenPort);
       if (n.statsPort) usedPorts.add(n.statsPort);
     }
 
-    for (let i = 0; i < 100; i++) {
-      const port = Math.floor(Math.random() * 40001) + 10000;
-      // Also ensure the derived statsPort (port + 20000) doesn't collide.
+    // Scan [portBase, portBase+999] in order — deterministic, no randomness.
+    // Each preset has its own non-overlapping range so collisions between
+    // different protocol types are structurally impossible.
+    for (let i = 0; i < 1000; i++) {
+      const port = portBase + i;
       const derivedStats = port + 20000 <= 65535 ? port + 20000 : port - 20000;
       if (!usedPorts.has(port) && !usedPorts.has(derivedStats)) return port;
     }
-    throw new BadRequestException('No available port found on this server');
+    throw new BadRequestException(
+      `Port range [${portBase}–${portBase + 999}] is exhausted on this server`,
+    );
   }
 
   private async cleanupCloudflareDns(userId: string, recordId: string): Promise<void> {
