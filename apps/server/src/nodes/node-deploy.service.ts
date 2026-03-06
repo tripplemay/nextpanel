@@ -767,10 +767,17 @@ export class NodeDeployService {
       .update(configJson)
       .digest('hex');
 
+    // P2003 = FK constraint (node deleted), P2025 = record not found — both mean node is gone
+    const ignoreDeletedNode = (e: unknown) => {
+      const code = (e as { code?: string })?.code;
+      if (code === 'P2003' || code === 'P2025') return;
+      throw e;
+    };
+
     await Promise.all([
       this.prisma.configSnapshot.create({
         data: { nodeId, version, content: configJson, checksum, deployLog: logs.join('\n') },
-      }),
+      }).catch(ignoreDeletedNode),
       this.prisma.node.update({
         where: { id: nodeId },
         data: {
@@ -780,7 +787,7 @@ export class NodeDeployService {
           trafficUpBytes: success ? 0 : undefined,
           trafficDownBytes: success ? 0 : undefined,
         },
-      }),
+      }).catch(ignoreDeletedNode),
       this.operationLog.createLog({
         resourceType: 'node',
         resourceId: nodeId,
