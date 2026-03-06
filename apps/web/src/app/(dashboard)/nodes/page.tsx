@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { App, Button, Table, Tag, Space, Card, Spin, Modal, Input, Switch, Dropdown, Typography, Collapse, Empty } from 'antd';
+import { App, Button, Table, Tag, Space, Card, Spin, Modal, Input, Switch, Dropdown, Typography, Collapse, Empty, Tooltip } from 'antd';
 import { ApiOutlined, ShareAltOutlined, FileTextOutlined, EditOutlined, CloudUploadOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { nodesApi, serversApi } from '@/lib/api';
@@ -79,11 +79,13 @@ export default function NodesPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['nodes'],
     queryFn: () => nodesApi.list().then((r) => r.data),
+    refetchInterval: 10_000,
   });
 
   const { data: servers, isLoading: serversLoading } = useQuery({
     queryKey: ['servers'],
     queryFn: () => serversApi.list().then((r) => r.data),
+    refetchInterval: 10_000,
   });
 
   if (isError) message.error('加载节点失败');
@@ -295,12 +297,12 @@ export default function NodesPage() {
       ),
     },
     {
-      title: '↑上传',
+      title: <Tooltip title="自上次部署/重启起累计上传流量">↑上传</Tooltip>,
       width: 90,
       render: (_: unknown, r) => formatBytes(r.trafficUpBytes, r.statsPort !== null),
     },
     {
-      title: '↓下载',
+      title: <Tooltip title="自上次部署/重启起累计下载流量">↓下载</Tooltip>,
       width: 90,
       render: (_: unknown, r) => formatBytes(r.trafficDownBytes, r.statsPort !== null),
     },
