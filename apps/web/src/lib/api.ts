@@ -62,6 +62,8 @@ export const authApi = {
     ),
   register: (data: RegisterDto) =>
     api.post<{ id: string; username: string; role: string }>('/auth/register', data),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    api.patch<void>('/auth/change-password', { currentPassword, newPassword }),
 };
 
 // ── Servers ──────────────────────────────────────────

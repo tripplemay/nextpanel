@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import type { MenuProps } from 'antd';
 import { Layout, Menu, Typography, Avatar, Dropdown, Space } from 'antd';
 import {
   CloudServerOutlined,
@@ -14,22 +15,31 @@ import {
   SettingOutlined,
   TeamOutlined,
   KeyOutlined,
+  CloudOutlined,
+  LockOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/auth';
-import type { ItemType } from 'antd/es/menu/interface';
 
 const { Sider, Header, Content } = Layout;
 const { Text } = Typography;
 
-const baseMenuItems: ItemType[] = [
+const baseMenuItems: MenuProps['items'] = [
   { key: '/servers', icon: <CloudServerOutlined />, label: '服务器' },
   { key: '/nodes', icon: <NodeIndexOutlined />, label: '节点' },
   { key: '/subscriptions', icon: <LinkOutlined />, label: '订阅管理' },
   { key: '/audit-logs', icon: <AuditOutlined />, label: '审计日志' },
-  { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
+  {
+    key: 'settings',
+    icon: <SettingOutlined />,
+    label: '系统设置',
+    children: [
+      { key: '/settings/cloudflare', icon: <CloudOutlined />, label: 'Cloudflare DNS' },
+      { key: '/settings/account', icon: <LockOutlined />, label: '账户安全' },
+    ],
+  },
 ];
 
-const adminMenuItems: ItemType[] = [
+const adminMenuItems: MenuProps['items'] = [
   { type: 'divider' },
   {
     type: 'group',
@@ -46,6 +56,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const { user, token, logout } = useAuthStore();
   const [hydrated, setHydrated] = useState(false);
+  const [openKeys, setOpenKeys] = useState<string[]>([]);
 
   useEffect(() => {
     setHydrated(true);
@@ -54,6 +65,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     if (hydrated && !token) router.replace('/login');
   }, [hydrated, token, router]);
+
+  useEffect(() => {
+    if (pathname?.startsWith('/settings')) {
+      setOpenKeys((prev) => (prev.includes('settings') ? prev : [...prev, 'settings']));
+    }
+  }, [pathname]);
 
   if (!hydrated || !token) return null;
 
@@ -90,7 +107,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           theme="dark"
           mode="inline"
           selectedKeys={[pathname]}
-          onClick={({ key }) => router.push(key)}
+          openKeys={openKeys}
+          onOpenChange={setOpenKeys}
+          onClick={({ key }) => { if (!key.startsWith('settings')) router.push(key); }}
           items={user?.role === 'ADMIN' ? [...baseMenuItems, ...adminMenuItems] : baseMenuItems}
           style={{ marginTop: 8 }}
         />
