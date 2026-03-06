@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import type { MenuProps } from 'antd';
 import { Layout, Menu, Typography, Avatar, Dropdown, Space } from 'antd';
+import type { ItemType } from 'antd/es/menu/interface';
 import {
   CloudServerOutlined,
   NodeIndexOutlined,
@@ -23,7 +23,7 @@ import { useAuthStore } from '@/store/auth';
 const { Sider, Header, Content } = Layout;
 const { Text } = Typography;
 
-const baseMenuItems: MenuProps['items'] = [
+const baseMenuItems: ItemType[] = [
   { key: '/servers', icon: <CloudServerOutlined />, label: '服务器' },
   { key: '/nodes', icon: <NodeIndexOutlined />, label: '节点' },
   { key: '/subscriptions', icon: <LinkOutlined />, label: '订阅管理' },
@@ -39,7 +39,7 @@ const baseMenuItems: MenuProps['items'] = [
   },
 ];
 
-const adminMenuItems: MenuProps['items'] = [
+const adminMenuItems: ItemType[] = [
   { type: 'divider' },
   {
     type: 'group',

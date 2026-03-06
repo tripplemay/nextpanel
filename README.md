@@ -2,8 +2,8 @@
 
 <h1>NextPanel</h1>
 
-<p>轻量化代理节点管理面板，一站式部署、监控、订阅导出</p>
-<p><em>A lightweight proxy node management panel — deploy, monitor, and export subscriptions in one place</em></p>
+<p>帮助你在自己的服务器上建立安全的网络通道，完全由你掌控</p>
+<p><em>Self-hosted proxy infrastructure you deploy, own, and control</em></p>
 
 [![License](https://img.shields.io/github/license/tripplemay/nextpanel)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/tripplemay/nextpanel)](https://github.com/tripplemay/nextpanel/stargazers)
@@ -31,6 +31,7 @@
 | **轻量 Agent** | 安装到服务器后自动上报状态，无需手动维护 |
 | **审计日志** | 所有操作均记录，可追溯部署历史 |
 | **多用户权限** | Admin / Operator / Viewer 三级权限控制 |
+| **账户安全** | 支持在面板内修改密码，无需命令行操作 |
 
 ### 界面预览
 
@@ -100,7 +101,7 @@ cd /opt/apps/nextpanel/apps/server
 pnpm exec prisma db seed
 ```
 
-默认账号：`admin` / `admin123`（首次登录后请立即修改密码）
+默认账号：`admin` / `admin123`（首次登录后请前往「系统设置 → 账户安全」立即修改密码）
 
 #### 安装 Agent（可选）
 
@@ -173,7 +174,9 @@ git push origin main
 <details>
 <summary><b>忘记管理员密码怎么办？</b></summary>
 
-SSH 登录 VPS，执行以下命令重置密码：
+如果你仍可以登录面板，前往「系统设置 → 账户安全」直接修改密码即可。
+
+如果已无法登录，SSH 登录 VPS，通过 `prisma studio` 可视化修改密码哈希，或执行：
 
 ```bash
 cd /opt/apps/nextpanel/apps/server
@@ -181,8 +184,6 @@ pnpm exec prisma db execute --stdin <<EOF
 UPDATE "User" SET "passwordHash" = '$2b$10$替换为新的bcrypt哈希' WHERE username = 'admin';
 EOF
 ```
-
-或直接通过 `prisma studio` 可视化修改。
 
 </details>
 
@@ -204,6 +205,7 @@ EOF
 | **Lightweight Agent** | Install once, auto-reports server status continuously |
 | **Audit Logs** | Full operation history with deployment traceability |
 | **Role-based Access** | Admin / Operator / Viewer permission levels |
+| **Account Security** | Change password directly in the panel without command-line access |
 
 ### Screenshots
 
@@ -273,7 +275,7 @@ cd /opt/apps/nextpanel/apps/server
 pnpm exec prisma db seed
 ```
 
-Default credentials: `admin` / `admin123` — **change the password immediately after first login**.
+Default credentials: `admin` / `admin123` — **after first login, go to Settings → Account Security to change your password immediately**.
 
 #### Install Agent (optional)
 
@@ -343,7 +345,9 @@ Currently supported for Xray / V2Ray nodes only. Hysteria2 (Sing-Box) nodes show
 <details>
 <summary><b>I forgot my admin password. How do I reset it?</b></summary>
 
-SSH into your VPS and use `prisma studio` to update the password hash directly, or run a SQL update via `prisma db execute`.
+If you can still log in, go to **Settings → Account Security** to change your password directly in the panel.
+
+If you are locked out, SSH into your VPS and use `prisma studio` to update the password hash, or run a SQL update via `prisma db execute`.
 
 </details>
 
