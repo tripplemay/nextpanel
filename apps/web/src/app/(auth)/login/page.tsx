@@ -5,6 +5,7 @@ import { App, Form, Input, Button, Typography } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useQueryClient } from '@tanstack/react-query';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
 import AuthLayout from '@/components/auth/AuthLayout';
@@ -15,6 +16,7 @@ export default function LoginPage() {
   const { message } = App.useApp();
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
+  const qc = useQueryClient();
   const [loading, setLoading] = useState(false);
 
   async function onFinish(values: { username: string; password: string }) {
@@ -22,6 +24,7 @@ export default function LoginPage() {
     try {
       const res = await authApi.login(values.username, values.password);
       setAuth(res.data.accessToken, res.data.user);
+      qc.clear();
       router.push('/servers');
     } catch {
       message.error('用户名或密码错误');
