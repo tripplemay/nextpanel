@@ -111,6 +111,8 @@ jobs:
             grep -q '^GITHUB_REPO=' $APP_DIR/apps/server/.env \
               && sed -i 's|^GITHUB_REPO=.*|GITHUB_REPO=tripplemay/nextpanel-releases|' $APP_DIR/apps/server/.env \
               || echo 'GITHUB_REPO=tripplemay/nextpanel-releases' >> $APP_DIR/apps/server/.env
+            grep -q '^GFW_CHECK_FUNCTION_URL=' $APP_DIR/apps/server/.env \
+              || echo 'GFW_CHECK_FUNCTION_URL=https://1259731148-dkqsal68t7.ap-guangzhou.tencentscf.com' >> $APP_DIR/apps/server/.env
 
             # 先停服务，释放内存供构建使用
             pm2 stop all 2>/dev/null || true

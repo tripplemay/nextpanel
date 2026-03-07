@@ -48,7 +48,7 @@ export class IpCheckService {
     const server = await this.prisma.server.findFirst({ where: { id: serverId, userId } });
     if (!server) throw new NotFoundException(`Server ${serverId} not found`);
 
-    void this.runGfwCheck(serverId, server.ip);
+    void this.runGfwCheck(serverId, server.ip, server.sshPort);
   }
 
   /** Agent reports streaming check results */
@@ -129,20 +129,20 @@ export class IpCheckService {
     if (!this.gfw.isConfigured) return;
 
     const servers = await this.prisma.server.findMany({
-      select: { id: true, ip: true },
+      select: { id: true, ip: true, sshPort: true },
     });
 
     this.logger.log(`Running scheduled GFW check for ${servers.length} servers`);
 
     for (const server of servers) {
-      await this.runGfwCheck(server.id, server.ip);
+      await this.runGfwCheck(server.id, server.ip, server.sshPort);
     }
   }
 
   private async runCheck(serverId: string): Promise<void> {
     const server = await this.prisma.server.findUnique({
       where: { id: serverId },
-      select: { ip: true },
+      select: { ip: true, sshPort: true },
     });
     if (!server) return;
 
@@ -173,7 +173,7 @@ export class IpCheckService {
     }
 
     // Step 2: GFW check (panel-side via Serverless)
-    await this.runGfwCheck(serverId, server.ip);
+    await this.runGfwCheck(serverId, server.ip, server.sshPort);
 
     // Step 3: Streaming check task is picked up by Agent on next heartbeat
     // Status stays RUNNING until Agent reports back via reportResult()
@@ -181,8 +181,8 @@ export class IpCheckService {
     // Frontend shows partial results (IP info + GFW) immediately
   }
 
-  private async runGfwCheck(serverId: string, ip: string): Promise<void> {
-    const result = await this.gfw.check(ip);
+  private async runGfwCheck(serverId: string, ip: string, port: number): Promise<void> {
+    const result = await this.gfw.check(ip, port);
     if (result === null) return;
 
     await this.prisma.serverIpCheck.upsert({
