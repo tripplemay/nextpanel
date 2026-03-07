@@ -79,13 +79,24 @@ export default function SubscriptionsPage() {
     });
   }
 
-  const collapseItems = (data ?? []).map((sub) => ({
+  const collapseItems = (data ?? []).map((sub) => {
+    const totalCount = sub.nodes.length + (sub.externalNodes?.length ?? 0);
+    // Unified row list: managed nodes + external nodes
+    type UnifiedRow =
+      | { kind: 'managed'; id: string; name: string; protocol: string; listenPort: number; status: string; enabled: boolean }
+      | { kind: 'external'; id: string; name: string; protocol: string; listenPort: number };
+    const rows: UnifiedRow[] = [
+      ...sub.nodes.map((sn) => ({ kind: 'managed' as const, id: sn.node.id, name: sn.node.name, protocol: sn.node.protocol, listenPort: sn.node.listenPort, status: sn.node.status, enabled: sn.node.enabled })),
+      ...(sub.externalNodes ?? []).map((en) => ({ kind: 'external' as const, id: en.externalNode.id, name: en.externalNode.name, protocol: en.externalNode.protocol, listenPort: en.externalNode.port })),
+    ];
+
+    return ({
     key: sub.id,
     label: (
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
         <span style={{ fontWeight: 500, flexShrink: 0 }}>{sub.name}</span>
         <Typography.Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
-          {sub.nodes.length} 个节点
+          {totalCount} 个节点
         </Typography.Text>
         <div style={{ marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
           <Space size={4}>
@@ -124,22 +135,36 @@ export default function SubscriptionsPage() {
         </div>
       </div>
     ),
-    children: sub.nodes.length > 0 ? (
+    children: rows.length > 0 ? (
       <Table
-        rowKey={(sn) => sn.node.id}
+        rowKey="id"
         size="middle"
-        dataSource={sub.nodes}
-        pagination={sub.nodes.length > 10 ? { showTotal: (total) => `共 ${total} 条` } : false}
+        dataSource={rows}
+        pagination={rows.length > 10 ? { showTotal: (total) => `共 ${total} 条` } : false}
         columns={[
-          { title: '节点名称', render: (_: unknown, sn) => sn.node.name },
+          {
+            title: '节点名称',
+            render: (_: unknown, row: typeof rows[number]) => (
+              <Space size={4}>
+                {row.name}
+                {row.kind === 'managed'
+                  ? <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>托管</Tag>
+                  : <Tag color="orange" style={{ margin: 0, fontSize: 11 }}>外部</Tag>
+                }
+              </Space>
+            ),
+          },
           {
             title: '协议',
-            render: (_: unknown, sn) => <Tag color="blue">{sn.node.protocol}</Tag>,
+            render: (_: unknown, row: typeof rows[number]) => <Tag color="blue">{row.protocol}</Tag>,
           },
-          { title: '端口', render: (_: unknown, sn) => sn.node.listenPort },
+          { title: '端口', render: (_: unknown, row: typeof rows[number]) => row.listenPort },
           {
             title: '状态',
-            render: (_: unknown, sn) => <StatusTag status={sn.node.status} enabled={sn.node.enabled} />,
+            render: (_: unknown, row: typeof rows[number]) =>
+              row.kind === 'managed'
+                ? <StatusTag status={row.status} enabled={row.enabled} />
+                : <Tag>外部</Tag>,
           },
         ]}
       />
@@ -150,7 +175,7 @@ export default function SubscriptionsPage() {
         style={{ padding: '16px 0' }}
       />
     ),
-  }));
+  });});
 
   return (
     <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>

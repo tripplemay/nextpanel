@@ -29,7 +29,7 @@ export class SubscriptionsService {
     private config: ConfigService,
   ) {}
 
-  async create(name: string, nodeIds: string[], ownerId: string) {
+  async create(name: string, nodeIds: string[], ownerId: string, externalNodeIds?: string[]) {
     return this.prisma.subscription.create({
       data: {
         name,
@@ -37,8 +37,16 @@ export class SubscriptionsService {
         nodes: {
           create: nodeIds.map((nodeId) => ({ nodeId })),
         },
+        ...(externalNodeIds?.length && {
+          externalNodes: {
+            create: externalNodeIds.map((externalNodeId) => ({ externalNodeId })),
+          },
+        }),
       },
-      include: { nodes: { include: { node: true } } },
+      include: {
+        nodes: { include: { node: true } },
+        externalNodes: { include: { externalNode: true } },
+      },
     });
   }
 
@@ -51,12 +59,17 @@ export class SubscriptionsService {
             node: { select: { id: true, name: true, protocol: true, status: true, enabled: true, listenPort: true } },
           },
         },
+        externalNodes: {
+          include: {
+            externalNode: { select: { id: true, name: true, protocol: true, address: true, port: true } },
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async update(id: string, name: string | undefined, nodeIds: string[] | undefined, ownerId: string) {
+  async update(id: string, name: string | undefined, nodeIds: string[] | undefined, ownerId: string, externalNodeIds?: string[]) {
     const sub = await this.prisma.subscription.findFirst({ where: { id, ownerId } });
     if (!sub) throw new NotFoundException(`Subscription ${id} not found`);
 
@@ -70,8 +83,17 @@ export class SubscriptionsService {
             create: nodeIds.map((nodeId) => ({ nodeId })),
           },
         }),
+        ...(externalNodeIds !== undefined && {
+          externalNodes: {
+            deleteMany: {},
+            create: externalNodeIds.map((externalNodeId) => ({ externalNodeId })),
+          },
+        }),
       },
-      include: { nodes: { include: { node: { select: { id: true, name: true, protocol: true } } } } },
+      include: {
+        nodes: { include: { node: { select: { id: true, name: true, protocol: true } } } },
+        externalNodes: { include: { externalNode: { select: { id: true, name: true, protocol: true } } } },
+      },
     });
   }
 
@@ -152,6 +174,9 @@ export class SubscriptionsService {
             },
           },
         },
+        externalNodes: {
+          include: { externalNode: true },
+        },
       },
     });
 
@@ -170,6 +195,23 @@ export class SubscriptionsService {
         transport: node.transport,
         tls: node.tls,
         domain: node.domain,
+        credentials,
+      });
+    }
+
+    for (const { externalNode: en } of sub.externalNodes as { externalNode: { name: string; protocol: string; address: string; port: number; transport: string | null; tls: string; sni: string | null; path: string | null; uuid: string | null; password: string | null; method: string | null } }[]) {
+      const credentials: Record<string, string> = {};
+      if (en.uuid) credentials.uuid = en.uuid;
+      if (en.password) credentials.password = en.password;
+      if (en.method) credentials.method = en.method;
+      result.push({
+        name: en.name,
+        protocol: en.protocol,
+        host: en.address,
+        port: en.port,
+        transport: en.transport,
+        tls: en.tls,
+        domain: en.sni,
         credentials,
       });
     }

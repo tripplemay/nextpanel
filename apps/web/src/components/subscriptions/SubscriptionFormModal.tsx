@@ -3,8 +3,8 @@
 import { useEffect } from 'react';
 import { Modal, Form, Input, Select, App, Tag } from 'antd';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { subscriptionsApi, nodesApi } from '@/lib/api';
-import type { CreateSubscriptionDto, Subscription, Node } from '@/types/api';
+import { subscriptionsApi, nodesApi, externalNodesApi } from '@/lib/api';
+import type { CreateSubscriptionDto, Subscription, Node, ExternalNode } from '@/types/api';
 
 const STATUS_COLOR: Record<string, string> = {
   RUNNING: 'green',
@@ -27,12 +27,18 @@ export default function SubscriptionFormModal({
   subscription,
 }: Props) {
   const { message } = App.useApp();
-  const [form] = Form.useForm<CreateSubscriptionDto>();
+  const [form] = Form.useForm<CreateSubscriptionDto & { externalNodeIds?: string[] }>();
   const isEdit = !!subscription;
 
   const { data: nodes, isLoading: nodesLoading } = useQuery({
     queryKey: ['nodes'],
     queryFn: () => nodesApi.list().then((r) => r.data),
+    enabled: open,
+  });
+
+  const { data: externalNodes, isLoading: externalLoading } = useQuery({
+    queryKey: ['external-nodes'],
+    queryFn: () => externalNodesApi.list().then((r) => r.data),
     enabled: open,
   });
 
@@ -42,6 +48,7 @@ export default function SubscriptionFormModal({
         form.setFieldsValue({
           name: subscription.name,
           nodeIds: subscription.nodes.map((sn) => sn.node.id),
+          externalNodeIds: (subscription.externalNodes ?? []).map((en) => en.externalNode.id),
         });
       } else {
         form.resetFields();
@@ -80,6 +87,18 @@ export default function SubscriptionFormModal({
         <Tag color={STATUS_COLOR[n.status] ?? 'default'} style={{ margin: 0, fontSize: 11 }}>
           {n.status}
         </Tag>
+        <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>托管</Tag>
+      </span>
+    ),
+  }));
+
+  const externalNodeOptions = (externalNodes ?? []).map((n: ExternalNode) => ({
+    value: n.id,
+    label: (
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {n.name}
+        <span style={{ color: '#8c8c8c', fontSize: 12 }}>({n.protocol}:{n.port})</span>
+        <Tag color="orange" style={{ margin: 0, fontSize: 11 }}>外部</Tag>
       </span>
     ),
   }));
@@ -103,16 +122,32 @@ export default function SubscriptionFormModal({
 
         <Form.Item
           name="nodeIds"
-          label="包含节点"
-          rules={[{ required: true, message: '请至少选择一个节点' }]}
+          label="托管节点"
         >
           <Select
             mode="multiple"
-            placeholder="选择节点"
+            placeholder="选择托管节点"
             loading={nodesLoading}
             options={nodeOptions}
             filterOption={(input, option) => {
               const node = (nodes ?? []).find((n: Node) => n.id === option?.value);
+              if (!node) return false;
+              return (
+                node.name.toLowerCase().includes(input.toLowerCase()) ||
+                node.protocol.toLowerCase().includes(input.toLowerCase())
+              );
+            }}
+          />
+        </Form.Item>
+
+        <Form.Item name="externalNodeIds" label="外部节点">
+          <Select
+            mode="multiple"
+            placeholder="选择外部节点"
+            loading={externalLoading}
+            options={externalNodeOptions}
+            filterOption={(input, option) => {
+              const node = (externalNodes ?? []).find((n: ExternalNode) => n.id === option?.value);
               if (!node) return false;
               return (
                 node.name.toLowerCase().includes(input.toLowerCase()) ||

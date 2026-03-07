@@ -12,4 +12,10 @@ export class UpdateSubscriptionDto {
   @IsArray()
   @IsString({ each: true })
   nodeIds?: string[];
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  externalNodeIds?: string[];
 }

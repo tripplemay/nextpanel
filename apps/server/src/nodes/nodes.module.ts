@@ -16,6 +16,6 @@ import { CertModule } from '../common/cert/cert.module';
   imports: [AuditModule, OperationLogModule, CloudflareModule, CertModule],
   providers: [NodesService, NodeDeployService, CryptoService, XrayTestService, SingboxTestService, ConnectivityScheduler, CertRenewalScheduler],
   controllers: [NodesController],
-  exports: [NodesService, NodeDeployService],
+  exports: [NodesService, NodeDeployService, XrayTestService, SingboxTestService],
 })
 export class NodesModule {}

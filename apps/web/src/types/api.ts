@@ -49,11 +49,13 @@ export interface UpsertCloudflareSettingDto {
 export interface CreateSubscriptionDto {
   name: string;
   nodeIds: string[];
+  externalNodeIds?: string[];
 }
 
 export interface UpdateSubscriptionDto {
   name?: string;
   nodeIds?: string[];
+  externalNodeIds?: string[];
 }
 
 export interface RegisterDto {
@@ -136,11 +138,34 @@ export interface Node {
   updatedAt: string;
 }
 
+export interface ExternalNode {
+  id: string;
+  userId: string;
+  name: string;
+  protocol: string;
+  address: string;
+  port: number;
+  uuid: string | null;
+  password: string | null;
+  method: string | null;
+  transport: string | null;
+  tls: string;
+  sni: string | null;
+  path: string | null;
+  rawUri: string | null;
+  lastReachable: boolean | null;
+  lastLatency: number | null;
+  lastTestedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Subscription {
   id: string;
   name: string;
   token: string;
   nodes: Array<{ node: Pick<Node, 'id' | 'name' | 'protocol' | 'status' | 'enabled' | 'listenPort'> }>;
+  externalNodes: Array<{ externalNode: Pick<ExternalNode, 'id' | 'name' | 'protocol' | 'address' | 'port'> }>;
   createdAt: string;
 }
 

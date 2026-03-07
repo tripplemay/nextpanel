@@ -3,6 +3,7 @@ import { useAuthStore } from '@/store/auth';
 import type {
   Server,
   Node,
+  ExternalNode,
   Subscription,
   Metric,
   ConnectivityResult,
@@ -141,6 +142,14 @@ export const inviteCodesApi = {
   createCustom: (customCode: string, maxUses: number) =>
     api.post<InviteCode[]>('/invite-codes', { quantity: 1, maxUses, customCode }),
   remove: (id: string) => api.delete<void>(`/invite-codes/${id}`),
+};
+
+// ── External Nodes ────────────────────────────────────
+export const externalNodesApi = {
+  list: () => api.get<ExternalNode[]>('/external-nodes'),
+  import: (text: string) => api.post<{ success: number; failed: number; errors: string[] }>('/external-nodes/import', { text }),
+  test: (id: string) => api.post<ConnectivityResult>(`/external-nodes/${id}/test`),
+  remove: (id: string) => api.delete<void>(`/external-nodes/${id}`),
 };
 
 // ── Cloudflare ────────────────────────────────────────

@@ -21,6 +21,7 @@ model User {
   subscriptions     Subscription[]
   servers           Server[]
   nodes             Node[]
+  externalNodes     ExternalNode[]
   cloudflareSetting CloudflareSetting?
   inviteCodes       InviteCode[]
 }
@@ -223,7 +224,8 @@ model Subscription {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  nodes SubscriptionNode[]
+  nodes         SubscriptionNode[]
+  externalNodes ExternalSubscriptionNode[]
 }
 
 model SubscriptionNode {
@@ -233,6 +235,44 @@ model SubscriptionNode {
   nodeId         String
 
   @@id([subscriptionId, nodeId])
+}
+
+// ──────────────────────────── ExternalNode ────────────────────────────
+
+model ExternalNode {
+  id            String   @id @default(cuid())
+  owner         User     @relation(fields: [userId], references: [id])
+  userId        String
+  name          String
+  protocol      String
+  address       String
+  port          Int
+  uuid          String?
+  password      String?
+  method        String?
+  transport     String?
+  tls           String   @default("NONE")
+  sni           String?
+  path          String?
+  rawUri        String?
+  lastTestedAt  DateTime?
+  lastReachable Boolean?
+  lastLatency   Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  subscriptionNodes ExternalSubscriptionNode[]
+
+  @@index([userId])
+}
+
+model ExternalSubscriptionNode {
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  subscriptionId String
+  externalNode   ExternalNode @relation(fields: [externalNodeId], references: [id], onDelete: Cascade)
+  externalNodeId String
+
+  @@id([subscriptionId, externalNodeId])
 }
 
 // ──────────────────────────── AuditLog ────────────────────────────

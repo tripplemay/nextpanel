@@ -118,6 +118,19 @@ export class XrayTestService {
     });
   }
 
+  /** Public entry point for testing without a DB record (e.g., ExternalNode). */
+  testWithParams(params: {
+    protocol: string;
+    transport: string | null;
+    tls: string;
+    host: string;
+    port: number;
+    domain: string | null;
+    credentials: Record<string, string>;
+  }): Promise<TestResult> {
+    return this.withSemaphore(() => this.runTest(params));
+  }
+
   // ── Core test logic ────────────────────────────────────────────────────────
 
   private async runTest(node: {

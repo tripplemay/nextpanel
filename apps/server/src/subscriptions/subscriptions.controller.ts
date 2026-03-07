@@ -30,7 +30,7 @@ export class SubscriptionsController {
     @Body() dto: CreateSubscriptionDto,
     @CurrentUser() user: { id: string },
   ) {
-    return this.subscriptionsService.create(dto.name, dto.nodeIds, user.id);
+    return this.subscriptionsService.create(dto.name, dto.nodeIds, user.id, dto.externalNodeIds);
   }
 
   @Get()
@@ -50,7 +50,7 @@ export class SubscriptionsController {
     @Body() dto: UpdateSubscriptionDto,
     @CurrentUser() user: { id: string },
   ) {
-    return this.subscriptionsService.update(id, dto.name, dto.nodeIds, user.id);
+    return this.subscriptionsService.update(id, dto.name, dto.nodeIds, user.id, dto.externalNodeIds);
   }
 
   @Post(':id/refresh-token')

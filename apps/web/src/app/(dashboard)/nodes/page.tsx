@@ -499,15 +499,19 @@ export default function NodesPage() {
         extra={batchTestButton}
       />
       <Spin spinning={isLoading || serversLoading}>
-        <Collapse
-          activeKey={activeKeys}
-          onChange={(keys) => {
-            const activeSet = new Set(Array.isArray(keys) ? keys : [keys]);
-            setCollapsedIds(groups.map((g) => g.server.id).filter((id) => !activeSet.has(id)));
-          }}
-          items={collapseItems}
-          style={{ background: 'transparent' }}
-        />
+        {!isLoading && !serversLoading && (data ?? []).length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无节点" style={{ padding: '32px 0' }} />
+        ) : (
+          <Collapse
+            activeKey={activeKeys}
+            onChange={(keys) => {
+              const activeSet = new Set(Array.isArray(keys) ? keys : [keys]);
+              setCollapsedIds(groups.map((g) => g.server.id).filter((id) => !activeSet.has(id)));
+            }}
+            items={collapseItems}
+            style={{ background: 'transparent' }}
+          />
+        )}
       </Spin>
 
       <NodePresetModal

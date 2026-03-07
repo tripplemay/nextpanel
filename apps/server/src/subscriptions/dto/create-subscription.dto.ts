@@ -1,5 +1,5 @@
-import { IsString, IsArray } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsString, IsArray, IsOptional } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateSubscriptionDto {
   @ApiProperty()
@@ -10,4 +10,10 @@ export class CreateSubscriptionDto {
   @IsArray()
   @IsString({ each: true })
   nodeIds: string[];
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  externalNodeIds?: string[];
 }
