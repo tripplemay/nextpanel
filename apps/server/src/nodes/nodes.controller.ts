@@ -263,7 +263,7 @@ export class NodesController {
   }
 
   @Sse(':id/delete-stream')
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'OPERATOR')
   @ApiOperation({ summary: 'Stream undeploy logs and delete node via SSE' })
   deleteStream(
     @Param('id') id: string,
@@ -282,7 +282,7 @@ export class NodesController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'OPERATOR')
   @Audit('DELETE', 'node')
   remove(
     @Param('id') id: string,

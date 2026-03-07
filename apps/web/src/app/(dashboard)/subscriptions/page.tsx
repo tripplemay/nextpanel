@@ -1,15 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { App, Button, Table, Space, Card, Popconfirm, Modal, QRCode, Tabs, Input, Tag, Typography } from 'antd';
-import { QrcodeOutlined, CopyOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons';
+import { App, Button, Table, Space, Card, Tag, Typography, Collapse, Empty, QRCode, Tabs, Input, Modal } from 'antd';
+import { EditOutlined, ReloadOutlined, DeleteOutlined, ExportOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { subscriptionsApi } from '@/lib/api';
 import SubscriptionFormModal from '@/components/subscriptions/SubscriptionFormModal';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
 import type { Subscription } from '@/types/api';
-import type { ColumnType } from 'antd/es/table';
 
 interface SubFormat {
   key: string;
@@ -33,7 +32,6 @@ export default function SubscriptionsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Subscription | null>(null);
   const [linkTarget, setLinkTarget] = useState<SubFormat[] | null>(null);
-  const [qrUrl, setQrUrl] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['subscriptions'],
@@ -54,7 +52,6 @@ export default function SubscriptionsPage() {
     mutationFn: (id: string) => subscriptionsApi.refreshToken(id),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['subscriptions'] });
-      // Auto-open export modal with the new token
       setLinkTarget(getFormats(res.data.token));
       message.success('订阅链接已刷新，请重新导入');
     },
@@ -72,89 +69,88 @@ export default function SubscriptionsPage() {
     });
   }
 
-  const expandedRowRender = (record: Subscription) => (
-    <Table
-      rowKey={(sn) => sn.node.id}
-      size="small"
-      dataSource={record.nodes}
-      pagination={false}
-      columns={[
-        { title: '节点名称', render: (_: unknown, sn) => sn.node.name },
-        {
-          title: '协议',
-          render: (_: unknown, sn) => <Tag color="blue">{sn.node.protocol}</Tag>,
-        },
-        { title: '端口', render: (_: unknown, sn) => sn.node.listenPort },
-        {
-          title: '状态',
-          render: (_: unknown, sn) => <StatusTag status={sn.node.status} enabled={sn.node.enabled} />,
-        },
-      ]}
-      style={{ marginBlock: 0 }}
-    />
-  );
+  function confirmDelete(record: Subscription) {
+    modal.confirm({
+      title: '确认删除该订阅？',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: () => deleteMutation.mutate(record.id),
+    });
+  }
 
-  const columns: ColumnType<Subscription>[] = [
-    { title: '名称', dataIndex: 'name' },
-    {
-      title: '节点数',
-      render: (_: unknown, r) => (
-        <Typography.Text type="secondary">{r.nodes.length} 个节点</Typography.Text>
-      ),
-    },
-    {
-      title: '创建时间',
-      dataIndex: 'createdAt',
-      render: (v: string) => new Date(v).toLocaleString(),
-    },
-    {
-      title: '操作',
-      render: (_: unknown, record) => (
-        <Space size={4}>
-          <Button
-            size="small"
-            type="primary"
-            onClick={() => setLinkTarget(getFormats(record.token))}
-          >
-            导出链接
-          </Button>
-          <Button
-            size="small"
-            icon={<QrcodeOutlined />}
-            onClick={() => {
-              const base = `${window.location.origin}/api/subscriptions/link/${record.token}`;
-              setQrUrl(base);
-            }}
-          >
-            二维码
-          </Button>
-          <Button
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => setEditTarget(record)}
-          >
-            编辑
-          </Button>
-          <Button
-            size="small"
-            icon={<ReloadOutlined />}
-            loading={refreshTokenMutation.isPending}
-            onClick={() => confirmRefreshToken(record)}
-          >
-            刷新链接
-          </Button>
-          <Popconfirm
-            title="确认删除该订阅？"
-            onConfirm={() => deleteMutation.mutate(record.id)}
-            okText="删除"
-            okType="danger"
-          >
-            <Button size="small" danger>删除</Button>
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ];
+  const collapseItems = (data ?? []).map((sub) => ({
+    key: sub.id,
+    label: (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+        <span style={{ fontWeight: 500, flexShrink: 0 }}>{sub.name}</span>
+        <Typography.Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
+          {sub.nodes.length} 个节点
+        </Typography.Text>
+        <div style={{ marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
+          <Space size={4}>
+            <Button
+              size="small"
+              type="primary"
+              icon={<ExportOutlined />}
+              onClick={() => setLinkTarget(getFormats(sub.token))}
+            >
+              导出链接
+            </Button>
+            <Button
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => setEditTarget(sub)}
+            >
+              编辑
+            </Button>
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              loading={refreshTokenMutation.isPending}
+              onClick={() => confirmRefreshToken(sub)}
+            >
+              刷新链接
+            </Button>
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => confirmDelete(sub)}
+            >
+              删除
+            </Button>
+          </Space>
+        </div>
+      </div>
+    ),
+    children: sub.nodes.length > 0 ? (
+      <Table
+        rowKey={(sn) => sn.node.id}
+        size="middle"
+        dataSource={sub.nodes}
+        pagination={sub.nodes.length > 10 ? { showTotal: (total) => `共 ${total} 条` } : false}
+        columns={[
+          { title: '节点名称', render: (_: unknown, sn) => sn.node.name },
+          {
+            title: '协议',
+            render: (_: unknown, sn) => <Tag color="blue">{sn.node.protocol}</Tag>,
+          },
+          { title: '端口', render: (_: unknown, sn) => sn.node.listenPort },
+          {
+            title: '状态',
+            render: (_: unknown, sn) => <StatusTag status={sn.node.status} enabled={sn.node.enabled} />,
+          },
+        ]}
+      />
+    ) : (
+      <Empty
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        description="暂无节点"
+        style={{ padding: '16px 0' }}
+      />
+    ),
+  }));
 
   return (
     <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
@@ -163,16 +159,16 @@ export default function SubscriptionsPage() {
         addLabel="新增订阅"
         onAdd={() => setCreateOpen(true)}
       />
-      <Table
-        rowKey="id"
-        size="middle"
-        loading={isLoading}
-        dataSource={data}
-        columns={columns}
-        scroll={{ x: 'max-content' }}
-        pagination={{ showTotal: (total) => `共 ${total} 条` }}
-        expandable={{ expandedRowRender }}
-      />
+
+      {isLoading ? null : (data ?? []).length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无订阅" style={{ padding: '32px 0' }} />
+      ) : (
+        <Collapse
+          defaultActiveKey={(data ?? []).map((s) => s.id)}
+          items={collapseItems}
+          style={{ background: 'transparent' }}
+        />
+      )}
 
       {/* Create modal */}
       <SubscriptionFormModal
@@ -209,36 +205,25 @@ export default function SubscriptionsPage() {
               key: f.key,
               label: f.label,
               children: (
-                <Space.Compact style={{ width: '100%' }}>
-                  <Input value={f.url} readOnly />
-                  <Button
-                    icon={<CopyOutlined />}
-                    onClick={() => {
-                      navigator.clipboard.writeText(f.url);
-                      message.success('已复制');
-                    }}
-                  >
-                    复制
-                  </Button>
-                </Space.Compact>
+                <Space direction="vertical" style={{ width: '100%' }} size={16}>
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Input value={f.url} readOnly />
+                    <Button
+                      onClick={() => {
+                        navigator.clipboard.writeText(f.url);
+                        message.success('已复制');
+                      }}
+                    >
+                      复制
+                    </Button>
+                  </Space.Compact>
+                  <div style={{ display: 'flex', justifyContent: 'center' }}>
+                    <QRCode value={f.url} size={200} />
+                  </div>
+                </Space>
               ),
             }))}
           />
-        )}
-      </Modal>
-
-      {/* QR code modal */}
-      <Modal
-        open={!!qrUrl}
-        footer={null}
-        onCancel={() => setQrUrl(null)}
-        title="订阅二维码（通用格式）"
-        width={300}
-      >
-        {qrUrl && (
-          <div style={{ textAlign: 'center', padding: 16 }}>
-            <QRCode value={qrUrl} size={220} />
-          </div>
         )}
       </Modal>
     </Card>

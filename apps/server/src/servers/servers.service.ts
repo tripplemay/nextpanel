@@ -429,6 +429,7 @@ export class ServersService {
 
       if (isActive) {
         onLog('Agent 安装并启动成功！');
+        await this.prisma.server.update({ where: { id }, data: { status: 'ONLINE' } });
         return true;
       } else {
         const { stdout: journalOut } = await ssh.execCommand(

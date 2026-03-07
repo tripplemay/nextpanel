@@ -5,6 +5,7 @@ const mockPrisma = {
   server: {
     count: jest.fn(),
     update: jest.fn(),
+    findFirst: jest.fn(),
   },
   node: {
     count: jest.fn(),
@@ -29,7 +30,7 @@ describe('MetricsService', () => {
         .mockResolvedValueOnce(25) // totalNodes
         .mockResolvedValueOnce(20); // runningNodes
 
-      const result = await svc.getOverview();
+      const result = await svc.getOverview('user-1');
 
       expect(result).toEqual({
         totalServers: 10,
@@ -43,30 +44,31 @@ describe('MetricsService', () => {
       (mockPrisma.server.count as jest.Mock).mockResolvedValue(0);
       (mockPrisma.node.count as jest.Mock).mockResolvedValue(0);
 
-      await svc.getOverview();
+      await svc.getOverview('user-1');
 
       const serverCountCalls = (mockPrisma.server.count as jest.Mock).mock.calls;
       // Second call should have the ONLINE filter
-      expect(serverCountCalls[1][0]).toEqual({ where: { status: 'ONLINE' } });
+      expect(serverCountCalls[1][0]).toEqual({ where: { userId: 'user-1', status: 'ONLINE' } });
     });
 
     it('queries running nodes with status RUNNING filter', async () => {
       (mockPrisma.server.count as jest.Mock).mockResolvedValue(0);
       (mockPrisma.node.count as jest.Mock).mockResolvedValue(0);
 
-      await svc.getOverview();
+      await svc.getOverview('user-1');
 
       const nodeCountCalls = (mockPrisma.node.count as jest.Mock).mock.calls;
-      expect(nodeCountCalls[1][0]).toEqual({ where: { status: 'RUNNING' } });
+      expect(nodeCountCalls[1][0]).toEqual({ where: { userId: 'user-1', status: 'RUNNING' } });
     });
   });
 
   describe('getServerMetrics', () => {
     it('returns metrics for specified server', async () => {
       const fakeMetrics = [{ id: 'm1', cpu: 50, mem: 60 }];
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue({ id: 'srv-1' });
       (mockPrisma.serverMetric.findMany as jest.Mock).mockResolvedValue(fakeMetrics);
 
-      const result = await svc.getServerMetrics('srv-1');
+      const result = await svc.getServerMetrics('srv-1', 'user-1');
 
       expect(result).toBe(fakeMetrics);
       expect(mockPrisma.serverMetric.findMany).toHaveBeenCalledWith({
@@ -77,18 +79,20 @@ describe('MetricsService', () => {
     });
 
     it('uses custom limit when provided', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue({ id: 'srv-1' });
       (mockPrisma.serverMetric.findMany as jest.Mock).mockResolvedValue([]);
 
-      await svc.getServerMetrics('srv-1', 10);
+      await svc.getServerMetrics('srv-1', 'user-1', 10);
 
       const call = (mockPrisma.serverMetric.findMany as jest.Mock).mock.calls[0][0];
       expect(call.take).toBe(10);
     });
 
     it('defaults to 60 data points', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue({ id: 'srv-2' });
       (mockPrisma.serverMetric.findMany as jest.Mock).mockResolvedValue([]);
 
-      await svc.getServerMetrics('srv-2');
+      await svc.getServerMetrics('srv-2', 'user-1');
 
       const call = (mockPrisma.serverMetric.findMany as jest.Mock).mock.calls[0][0];
       expect(call.take).toBe(60);

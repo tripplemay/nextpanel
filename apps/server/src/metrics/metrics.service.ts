@@ -5,19 +5,22 @@ import { PrismaService } from '../prisma.service';
 export class MetricsService {
   constructor(private prisma: PrismaService) {}
 
-  async getOverview() {
+  async getOverview(userId: string) {
     const [totalServers, onlineServers, totalNodes, runningNodes] =
       await Promise.all([
-        this.prisma.server.count(),
-        this.prisma.server.count({ where: { status: 'ONLINE' } }),
-        this.prisma.node.count(),
-        this.prisma.node.count({ where: { status: 'RUNNING' } }),
+        this.prisma.server.count({ where: { userId } }),
+        this.prisma.server.count({ where: { userId, status: 'ONLINE' } }),
+        this.prisma.node.count({ where: { userId } }),
+        this.prisma.node.count({ where: { userId, status: 'RUNNING' } }),
       ]);
 
     return { totalServers, onlineServers, totalNodes, runningNodes };
   }
 
-  async getServerMetrics(serverId: string, limit = 60) {
+  async getServerMetrics(serverId: string, userId: string, limit = 60) {
+    // Verify ownership before returning metrics
+    const server = await this.prisma.server.findFirst({ where: { id: serverId, userId } });
+    if (!server) return [];
     return this.prisma.serverMetric.findMany({
       where: { serverId },
       orderBy: { timestamp: 'desc' },

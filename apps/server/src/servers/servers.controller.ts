@@ -81,7 +81,7 @@ export class ServersController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'OPERATOR')
   @Audit('DELETE', 'server')
   @ApiOperation({ summary: 'Delete a server. Adds ?force=true to skip SSH cleanup.' })
   remove(

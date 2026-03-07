@@ -37,6 +37,7 @@ export class AuditInterceptor implements NestInterceptor {
       params?: Record<string, string>;
       body?: Record<string, unknown>;
       ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
       correlationId?: string;
     }>();
 
@@ -73,7 +74,7 @@ export class AuditInterceptor implements NestInterceptor {
           resource: meta.resource,
           resourceId,
           diff,
-          ip: req.ip,
+          ip: (req.headers?.['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ?? req.ip,
           correlationId,
         });
       }),
