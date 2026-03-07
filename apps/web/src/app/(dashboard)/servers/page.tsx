@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, useEffect } from 'react';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
@@ -101,6 +101,18 @@ export default function ServersPage() {
     queryFn: () => serversApi.list().then((r) => r.data as Server[]),
     refetchInterval: 30_000,
   });
+
+  // Auto-open AgentInstallDrawer when navigated here with ?install=<id>
+  useEffect(() => {
+    if (!data) return;
+    const installId = new URLSearchParams(window.location.search).get('install');
+    if (!installId) return;
+    const server = data.find((s) => s.id === installId);
+    if (server) {
+      setInstallTarget(server);
+      router.replace('/servers');
+    }
+  }, [data, router]);
   if (isError) message.error('加载服务器失败');
 
   const deleteMutation = useMutation({

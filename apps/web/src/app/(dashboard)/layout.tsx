@@ -198,7 +198,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         open={addServerOpen}
         initialValues={null}
         onClose={() => setAddServerOpen(false)}
-        onSuccess={() => setAddServerOpen(false)}
+        onSuccess={(server) => {
+          setAddServerOpen(false);
+          if (server?.id) {
+            router.push(`/servers?install=${server.id}`);
+          }
+        }}
       />
     </Layout>
   );
