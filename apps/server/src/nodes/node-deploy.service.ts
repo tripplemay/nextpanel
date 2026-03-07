@@ -502,8 +502,7 @@ export class NodeDeployService {
     const isIp = /^[\d.]+$|^[0-9a-f:]+$/i.test(cn);
     const san = isIp ? `IP:${cn}` : `DNS:${cn}`;
     const { stderr: certErr } = await ssh.execCommand(
-      `mkdir -p ${certDir} && ` +
-      `[ -f ${certFile} ] || openssl req -x509 -newkey rsa:2048 ` +
+      `mkdir -p ${certDir} && openssl req -x509 -newkey rsa:2048 ` +
       `-keyout ${keyFile} -out ${certFile} -days 3650 -nodes -subj "/CN=${cn}" ` +
       `-addext "subjectAltName=${san}" 2>&1`,
     );
