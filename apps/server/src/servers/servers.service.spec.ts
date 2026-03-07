@@ -177,11 +177,31 @@ describe('ServersService', () => {
   });
 
   describe('remove', () => {
-    it('deletes the server after verifying it exists', async () => {
+    const flushPromises = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    it('returns DELETING status and fires background cleanup', async () => {
       (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.server.delete as jest.Mock).mockResolvedValue(fakeServer);
+
+      const result = await svc.remove('srv-1', 'user-id-1');
+      await flushPromises();
+
+      expect(result).toEqual({ status: 'DELETING' });
+      expect(mockPrisma.server.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'DELETING' }) }),
+      );
+    });
+
+    it('deletes the server after background cleanup with no nodes', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.server.delete as jest.Mock).mockResolvedValue(fakeServer);
 
       await svc.remove('srv-1', 'user-id-1');
+      await flushPromises();
 
       expect(mockPrisma.server.delete).toHaveBeenCalledWith({ where: { id: 'srv-1' } });
     });
@@ -190,6 +210,57 @@ describe('ServersService', () => {
       (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(null);
 
       await expect(svc.remove('bad', 'user-id-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('undeploys all nodes before deleting (best-effort)', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.delete as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([
+        { id: 'node-1', name: 'N1', userId: 'user-1', cfDnsRecordId: null },
+      ]);
+      (mockNodeDeploy.undeploy as jest.Mock).mockResolvedValue(undefined);
+
+      await svc.remove('srv-1', 'user-id-1');
+      await flushPromises();
+
+      expect(mockNodeDeploy.undeploy).toHaveBeenCalledWith('node-1');
+    });
+
+    it('sets server to ERROR state when a node undeploy fails (no delete)', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([
+        { id: 'node-1', name: 'N1', userId: 'user-1', cfDnsRecordId: null },
+      ]);
+      (mockNodeDeploy.undeploy as jest.Mock).mockRejectedValue(new Error('SSH failed'));
+
+      await svc.remove('srv-1', 'user-id-1');
+      await flushPromises();
+
+      // Server is set to ERROR, NOT deleted, when undeploy fails
+      expect(mockPrisma.server.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'ERROR' }) }),
+      );
+      expect(mockPrisma.server.delete).not.toHaveBeenCalled();
+    });
+
+    it('cleans up Cloudflare DNS records when nodes have cfDnsRecordId', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.delete as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([
+        { id: 'node-1', name: 'N1', userId: 'user-1', cfDnsRecordId: 'rec-abc' },
+      ]);
+      (mockNodeDeploy.undeploy as jest.Mock).mockResolvedValue(undefined);
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', zoneId: 'zone-1',
+      });
+
+      await svc.remove('srv-1', 'user-id-1');
+      await flushPromises();
+
+      expect(mockCfService.deleteRecord).toHaveBeenCalledWith('cf-token', 'zone-1', 'rec-abc');
     });
   });
 
@@ -263,6 +334,24 @@ describe('ServersService', () => {
     });
   });
 
+  describe('checkIp', () => {
+    it('returns exists=true when server with IP exists', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
+
+      const result = await svc.checkIp('1.2.3.4', 'user-id-1');
+
+      expect(result.exists).toBe(true);
+    });
+
+    it('returns exists=false when no server with IP exists', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(null);
+
+      const result = await svc.checkIp('9.9.9.9', 'user-id-1');
+
+      expect(result.exists).toBe(false);
+    });
+  });
+
   describe('installAgentStream', () => {
     const fakeServerWithToken = { ...fakeServer, sshAuthEnc: 'enc:secret', agentToken: 'tok-abc' };
 
@@ -278,6 +367,84 @@ describe('ServersService', () => {
       });
     }
 
+    /**
+     * Helper: build a full happy-path SSH command mock sequence for installAgent.
+     *
+     * Sequence (fresh install, not alreadyInstalled):
+     *  1. systemctl is-active nextpanel-agent       → { code: 1 }  (not installed)
+     *  2. sysctl -n tcp_congestion_control          → { stdout: 'cubic' } (BBR not active)
+     *  3. modprobe tcp_bbr                          → { code: 0 }
+     *  4. grep -q bbr /proc/sys/...                → { code: 1 }  (BBR not available)
+     *  5. sysctl.d TCP buffer config               → { code: 0 }
+     *  6. fd limits (grep or echo)                 → { code: 0 }
+     *  7. uname -m                                 → { stdout: arch }
+     *  8. curl github release                      → { stdout: '{"tag_name":"agent/v1.0"}' }
+     *  9. curl download binary                     → { code: 0 }
+     * 10. mkdir -p /etc/nextpanel                  → { stdout: '' }
+     * 11. echo | base64 -d > agent.json            → { stdout: '' }
+     * 12. echo | base64 -d > nextpanel-agent.service → { stdout: '' }
+     * 13. systemctl daemon-reload                  → { stdout: '' }
+     * 14. systemctl enable nextpanel-agent         → { stdout: '' }
+     * 15. systemctl start nextpanel-agent          → { code: 0 }
+     * 16. systemctl status nextpanel-agent         → { stdout: 'active' }
+     */
+    function mockFreshInstallSequence(arch: string) {
+      mockSsh.execCommand
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })           // 1. is-active (not installed)
+        .mockResolvedValueOnce({ stdout: 'cubic', stderr: '', code: 0 })      // 2. sysctl check (not bbr)
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // 3. modprobe
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })           // 4. grep bbr available (not supported)
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // 5. sysctl TCP buffer
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // 6. fd limits
+        .mockResolvedValueOnce({ stdout: arch, stderr: '' })                  // 7. uname -m
+        .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' }) // 8. github release
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // 9. download binary
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // 10. mkdir
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // 11. write config
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // 12. write service
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // 13. daemon-reload
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // 14. enable
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // 15. start
+        .mockResolvedValueOnce({ stdout: 'active', stderr: '' });             // 16. status
+    }
+
+    /**
+     * Helper: build mock sequence for upgrade path (alreadyInstalled=true).
+     *
+     * Sequence (upgrade, alreadyInstalled):
+     *  1. systemctl is-active                      → { code: 0 }  (installed)
+     *  2. sysctl -n tcp_congestion_control         → { stdout: 'cubic' }
+     *  3. modprobe tcp_bbr                         → { code: 0 }
+     *  4. grep -q bbr                              → { code: 1 }
+     *  5. sysctl TCP buffer                        → { code: 0 }
+     *  6. fd limits                                → { code: 0 }
+     *  7. uname -m                                 → { stdout: arch }
+     *  8. curl github release                      → { stdout: '{"tag_name":"agent/v1.0"}' }
+     *  9. systemctl stop (alreadyInstalled)        → { code: 0 }
+     * 10. curl download binary                     → { code: 0 }
+     * 11. mkdir                                    → { stdout: '' }
+     * 12. write config                             → { stdout: '' }
+     * 13. systemctl start                          → { code: 0 }
+     * 14. systemctl status                         → { stdout: 'active' }
+     */
+    function mockUpgradeSequence(arch: string) {
+      mockSsh.execCommand
+        .mockResolvedValueOnce({ code: 0, stdout: 'active', stderr: '' })     // 1. is-active (already installed)
+        .mockResolvedValueOnce({ stdout: 'cubic', stderr: '', code: 0 })      // 2. sysctl check
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // 3. modprobe
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })           // 4. grep bbr (not available)
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // 5. sysctl TCP buffer
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // 6. fd limits
+        .mockResolvedValueOnce({ stdout: arch, stderr: '' })                  // 7. uname -m
+        .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' }) // 8. github release
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // 9. stop (alreadyInstalled)
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // 10. download
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // 11. mkdir
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // 12. write config
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // 13. start
+        .mockResolvedValueOnce({ stdout: 'active', stderr: '' });             // 14. status
+    }
+
     it('emits manualCmd when PANEL_URL and GITHUB_REPO are set', async () => {
       process.env.PANEL_URL = 'https://panel.test';
       process.env.GITHUB_REPO = 'org/repo';
@@ -285,6 +452,11 @@ describe('ServersService', () => {
       // SSH connect succeeds; agent not active; arch detection, then fail on release fetch
       mockSsh.execCommand
         .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' }) // systemctl is-active
+        .mockResolvedValueOnce({ stdout: 'cubic', stderr: '' })     // sysctl check
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }) // modprobe
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' }) // grep bbr
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }) // TCP buffer
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }) // fd limits
         .mockResolvedValueOnce({ stdout: 'unsupported_arch', stderr: '' }); // uname -m → throw
 
       const events = await collectEvents('srv-1');
@@ -327,21 +499,11 @@ describe('ServersService', () => {
       delete process.env.GITHUB_REPO;
     });
 
-    it('returns true when agent is already running (activeCode === 0)', async () => {
+    it('returns true when agent is already running and upgrade succeeds', async () => {
       process.env.PANEL_URL = 'https://panel.test';
       process.env.GITHUB_REPO = 'org/repo';
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
-      mockSsh.execCommand
-        .mockResolvedValueOnce({ code: 0, stdout: 'active', stderr: '' })   // is-active (already installed)
-        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })          // BBR check (not supported)
-        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })             // uname -m
-        .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' }) // github release
-        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })          // stop service (alreadyInstalled)
-        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })          // download binary
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                   // mkdir
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                   // write config
-        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })          // start service
-        .mockResolvedValueOnce({ stdout: 'active', stderr: '' });            // status check
+      mockUpgradeSequence('x86_64');
 
       const events = await collectEvents('srv-1');
 
@@ -358,7 +520,12 @@ describe('ServersService', () => {
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
       mockSsh.execCommand
         .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' }) // is-active
-        .mockResolvedValueOnce({ stdout: 'mips', stderr: '' }); // uname -m
+        .mockResolvedValueOnce({ stdout: 'cubic', stderr: '' })     // sysctl check
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }) // modprobe
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' }) // grep bbr
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }) // TCP buffer
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }) // fd limits
+        .mockResolvedValueOnce({ stdout: 'mips', stderr: '' });     // uname -m
 
       const events = await collectEvents('srv-1');
 
@@ -375,19 +542,7 @@ describe('ServersService', () => {
       process.env.PANEL_URL = 'https://panel.test';
       process.env.GITHUB_REPO = 'org/repo';
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
-      mockSsh.execCommand
-        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })       // is-active
-        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })       // BBR check (not supported)
-        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })          // uname -m
-        .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' }) // curl github release
-        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })       // download
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // mkdir
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // write config
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // write service
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // daemon-reload
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // enable
-        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })       // start
-        .mockResolvedValueOnce({ stdout: 'active', stderr: '' });          // status
+      mockFreshInstallSequence('x86_64');
 
       const events = await collectEvents('srv-1');
 
@@ -403,19 +558,7 @@ describe('ServersService', () => {
       process.env.PANEL_URL = 'https://panel.test';
       process.env.GITHUB_REPO = 'org/repo';
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
-      mockSsh.execCommand
-        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })       // is-active
-        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })       // BBR check (not supported)
-        .mockResolvedValueOnce({ stdout: 'aarch64', stderr: '' })         // uname -m
-        .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' }) // github release
-        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })       // download
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // mkdir
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // write config
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // write service
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // daemon-reload
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // enable
-        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })       // start
-        .mockResolvedValueOnce({ stdout: 'active', stderr: '' });          // status
+      mockFreshInstallSequence('aarch64');
 
       const events = await collectEvents('srv-1');
 
@@ -432,6 +575,11 @@ describe('ServersService', () => {
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
       mockSsh.execCommand
         .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' }) // is-active
+        .mockResolvedValueOnce({ stdout: 'cubic', stderr: '' })     // sysctl check
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }) // modprobe
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' }) // grep bbr
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }) // TCP buffer
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }) // fd limits
         .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })    // uname -m
         .mockResolvedValueOnce({ stdout: '{}', stderr: '' });        // no tag_name
 
@@ -450,8 +598,13 @@ describe('ServersService', () => {
       process.env.GITHUB_REPO = 'org/repo';
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
       mockSsh.execCommand
-        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })       // is-active
-        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })          // uname -m
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })           // is-active
+        .mockResolvedValueOnce({ stdout: 'cubic', stderr: '' })               // sysctl check
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // modprobe
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })           // grep bbr
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // TCP buffer
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // fd limits
+        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })              // uname -m
         .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' }) // release
         .mockResolvedValueOnce({ code: 1, stdout: '', stderr: 'curl failed' }); // download
 
@@ -470,15 +623,20 @@ describe('ServersService', () => {
       process.env.GITHUB_REPO = 'org/repo';
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
       mockSsh.execCommand
-        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })       // is-active
-        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })          // uname -m
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })           // is-active
+        .mockResolvedValueOnce({ stdout: 'cubic', stderr: '' })               // sysctl check
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // modprobe
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })           // grep bbr
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // TCP buffer
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // fd limits
+        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })              // uname -m
         .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' }) // release
-        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })       // download
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // mkdir
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // write config
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // write service
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // daemon-reload
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })                 // enable
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // download
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // mkdir
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // write config
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // write service
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // daemon-reload
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // enable
         .mockResolvedValueOnce({ code: 1, stdout: '', stderr: 'start failed' }); // start
 
       const events = await collectEvents('srv-1');
@@ -499,6 +657,105 @@ describe('ServersService', () => {
       await collectEvents('srv-1');
 
       expect(mockSsh.dispose).toHaveBeenCalled();
+
+      delete process.env.PANEL_URL;
+      delete process.env.GITHUB_REPO;
+    });
+
+    it('enables BBR when BBR is available and applies it', async () => {
+      process.env.PANEL_URL = 'https://panel.test';
+      process.env.GITHUB_REPO = 'org/repo';
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
+      mockSsh.execCommand
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })           // is-active
+        .mockResolvedValueOnce({ stdout: 'cubic', stderr: '' })               // sysctl check (not bbr)
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // modprobe tcp_bbr
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // grep bbr available → 0 (BBR is available)
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // sysctl -w apply BBR
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // grep sysctl.conf (persist)
+        .mockResolvedValueOnce({ stdout: 'bbr', stderr: '' })                 // sysctl -n verify
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // TCP buffer
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // fd limits
+        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })              // uname -m
+        .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' }) // release
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // download
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // mkdir
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // write config
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // write service
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // daemon-reload
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // enable
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // start
+        .mockResolvedValueOnce({ stdout: 'active', stderr: '' });             // status
+
+      const events = await collectEvents('srv-1');
+      const logEvents = events.filter((e) => typeof e.data.log === 'string');
+      expect(logEvents.some((e) => (e.data.log as string).includes('BBR 已启用'))).toBe(true);
+
+      const doneEvent = events.find((e) => e.data.done === true);
+      expect(doneEvent?.data.success).toBe(true);
+
+      delete process.env.PANEL_URL;
+      delete process.env.GITHUB_REPO;
+    });
+
+    it('skips BBR config when BBR is already enabled', async () => {
+      process.env.PANEL_URL = 'https://panel.test';
+      process.env.GITHUB_REPO = 'org/repo';
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
+      mockSsh.execCommand
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })           // is-active
+        .mockResolvedValueOnce({ stdout: 'bbr', stderr: '' })                 // sysctl check → already bbr
+        // No modprobe or grep calls (BBR already active)
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // TCP buffer
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // fd limits
+        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })              // uname -m
+        .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' })
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // download
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // mkdir
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // config
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // service
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // daemon-reload
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // enable
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // start
+        .mockResolvedValueOnce({ stdout: 'active', stderr: '' });             // status
+
+      const events = await collectEvents('srv-1');
+      const logEvents = events.filter((e) => typeof e.data.log === 'string');
+      expect(logEvents.some((e) => (e.data.log as string).includes('BBR 已启用（无需重复配置）'))).toBe(true);
+
+      const doneEvent = events.find((e) => e.data.done === true);
+      expect(doneEvent?.data.success).toBe(true);
+
+      delete process.env.PANEL_URL;
+      delete process.env.GITHUB_REPO;
+    });
+
+    it('warns when BBR apply fails (container env)', async () => {
+      process.env.PANEL_URL = 'https://panel.test';
+      process.env.GITHUB_REPO = 'org/repo';
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServerWithToken);
+      mockSsh.execCommand
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })           // is-active
+        .mockResolvedValueOnce({ stdout: 'cubic', stderr: '' })               // sysctl check (not bbr)
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // modprobe
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // grep bbr available
+        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: '' })           // sysctl -w apply → fails
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // TCP buffer
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // fd limits
+        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })              // uname -m
+        .mockResolvedValueOnce({ stdout: '{"tag_name": "agent/v1.0"}', stderr: '' })
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // download
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // mkdir
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // config
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // service
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // daemon-reload
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })                    // enable
+        .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })           // start
+        .mockResolvedValueOnce({ stdout: 'active', stderr: '' });             // status
+
+      const events = await collectEvents('srv-1');
+      const logEvents = events.filter((e) => typeof e.data.log === 'string');
+      expect(logEvents.some((e) => (e.data.log as string).includes('BBR 配置失败'))).toBe(true);
 
       delete process.env.PANEL_URL;
       delete process.env.GITHUB_REPO;

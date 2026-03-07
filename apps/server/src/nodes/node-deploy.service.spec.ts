@@ -919,7 +919,8 @@ describe('NodeDeployService', () => {
         .mockResolvedValueOnce({ stderr: '' })             // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })             // systemctl stop
         .mockResolvedValueOnce({ stdout: '' })             // pkill
-        .mockResolvedValueOnce({ stdout: '' })             // fuser listenPort (no statsPort for V2RAY impl)
+        .mockResolvedValueOnce({ stdout: '' })             // fuser statsPort/tcp (V2RAY is xray-like, has statsPort)
+        .mockResolvedValueOnce({ stdout: '' })             // fuser listenPort/tcp
         .mockResolvedValueOnce({ stderr: '' })             // systemctl enable && start
         .mockResolvedValueOnce({ stdout: '' })             // openFirewallPort tcp
         .mockResolvedValueOnce({ stdout: 'active' });      // is-active

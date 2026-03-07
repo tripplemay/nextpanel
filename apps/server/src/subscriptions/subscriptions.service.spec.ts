@@ -9,6 +9,7 @@ const mockPrisma = {
     findMany: jest.fn(),
     findUnique: jest.fn(),
     findFirst: jest.fn(),
+    update: jest.fn(),
     delete: jest.fn(),
   },
 } as unknown as PrismaService;
@@ -121,27 +122,28 @@ describe('SubscriptionsService – generateClashContent', () => {
   });
 
   it('returns empty YAML when subscription has no active nodes', async () => {
-    (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue({ token: 'tok', nodes: [] });
+    (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue({ token: 'tok', name: 'My Sub', nodes: [] });
     const result = await svc.generateClashContent('tok');
-    expect(result).toContain('proxies: []');
-    expect(result).toContain('MATCH,DIRECT');
+    expect(result.content).toContain('proxies: []');
+    expect(result.content).toContain('MATCH,');
+    expect(result.name).toBe('My Sub');
   });
 
   it('returns YAML with proxies block for active VLESS node', async () => {
     (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue(makeSubWithNode('VLESS', {}));
     (mockNodes.getCredentials as jest.Mock).mockResolvedValue({ uuid: 'test-uuid' });
     const result = await svc.generateClashContent('tok');
-    expect(result).toContain('proxies:');
-    expect(result).toContain('type: vless');
-    expect(result).toContain('proxy-groups:');
-    expect(result).toContain('🚀 节点选择');
+    expect(result.content).toContain('proxies:');
+    expect(result.content).toContain('type: vless');
+    expect(result.content).toContain('proxy-groups:');
+    expect(result.content).toContain('🚀 节点选择');
   });
 
   it('includes node name in proxy-groups selector', async () => {
     (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue(makeSubWithNode('VMESS', {}));
     (mockNodes.getCredentials as jest.Mock).mockResolvedValue({ uuid: 'u1' });
     const result = await svc.generateClashContent('tok');
-    expect(result).toContain('My Node');
+    expect(result.content).toContain('My Node');
   });
 });
 
@@ -184,6 +186,48 @@ describe('SubscriptionsService – generateSingboxContent', () => {
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 
 describe('SubscriptionsService – CRUD', () => {
+  it('update throws NotFoundException when subscription not found', async () => {
+    (mockPrisma.subscription.findFirst as jest.Mock).mockResolvedValue(null);
+    await expect(svc.update('bad-id', 'New Name', undefined, 'owner-1')).rejects.toThrow(NotFoundException);
+  });
+
+  it('update renames subscription when name is provided', async () => {
+    const fakeSub = { id: 'sub-1', ownerId: 'owner-1' };
+    (mockPrisma.subscription.findFirst as jest.Mock).mockResolvedValue(fakeSub);
+    (mockPrisma.subscription.update as jest.Mock).mockResolvedValue(fakeSub);
+
+    await svc.update('sub-1', 'Renamed', undefined, 'owner-1');
+
+    const call = (mockPrisma.subscription.update as jest.Mock).mock.calls[0][0];
+    expect(call.data.name).toBe('Renamed');
+    expect(call.data.nodes).toBeUndefined();
+  });
+
+  it('update replaces nodes when nodeIds is provided', async () => {
+    const fakeSub = { id: 'sub-1', ownerId: 'owner-1' };
+    (mockPrisma.subscription.findFirst as jest.Mock).mockResolvedValue(fakeSub);
+    (mockPrisma.subscription.update as jest.Mock).mockResolvedValue(fakeSub);
+
+    await svc.update('sub-1', undefined, ['n1', 'n2'], 'owner-1');
+
+    const call = (mockPrisma.subscription.update as jest.Mock).mock.calls[0][0];
+    expect(call.data.nodes.create).toHaveLength(2);
+  });
+
+  it('refreshToken throws NotFoundException when subscription not found', async () => {
+    (mockPrisma.subscription.findFirst as jest.Mock).mockResolvedValue(null);
+    await expect(svc.refreshToken('bad-id', 'owner-1')).rejects.toThrow(NotFoundException);
+  });
+
+  it('refreshToken updates token and returns it', async () => {
+    const fakeSub = { id: 'sub-1', ownerId: 'owner-1' };
+    (mockPrisma.subscription.findFirst as jest.Mock).mockResolvedValue(fakeSub);
+    (mockPrisma.subscription.update as jest.Mock).mockResolvedValue({ id: 'sub-1', token: 'new-token' });
+
+    const result = await svc.refreshToken('sub-1', 'owner-1');
+    expect(result).toMatchObject({ token: 'new-token' });
+  });
+
   it('create calls prisma with correct data', async () => {
     (mockPrisma.subscription.create as jest.Mock).mockResolvedValue({ id: 'sub-1' });
     await svc.create('My Sub', ['n1', 'n2'], 'owner-1');
