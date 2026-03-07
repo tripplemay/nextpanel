@@ -82,7 +82,7 @@ export default function IpCheckCard({ serverId }: Props) {
     queryFn: () => ipCheckApi.get(serverId).then((r) => r.data),
     refetchInterval: (query) => {
       const data = query.state.data as ServerIpCheck | null;
-      if (!data || data.status === 'PENDING' || data.status === 'RUNNING') return 3000;
+      if (data && (data.status === 'PENDING' || data.status === 'RUNNING')) return 3000;
       return false;
     },
   });
@@ -94,7 +94,8 @@ export default function IpCheckCard({ serverId }: Props) {
     },
   });
 
-  const isChecking = !check || check.status === 'PENDING' || check.status === 'RUNNING';
+  const neverChecked = !check;
+  const isChecking = !!check && (check.status === 'PENDING' || check.status === 'RUNNING');
   const isFailed = check?.status === 'FAILED';
   const hasIpInfo = check && (check.ipType || check.asn);
   const hasStreamingInfo = check && (check.netflix || check.disney || isFailed);
@@ -116,6 +117,25 @@ export default function IpCheckCard({ serverId }: Props) {
     return (
       <Card title="IP 质量检测" size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }} extra={cardExtra}>
         <Skeleton active paragraph={{ rows: 6 }} />
+      </Card>
+    );
+  }
+
+  if (neverChecked) {
+    return (
+      <Card title="IP 质量检测" size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+        <div style={{ textAlign: 'center', padding: '24px 0' }}>
+          <Text type="secondary">尚未检测</Text>
+          <br />
+          <Button
+            type="primary"
+            style={{ marginTop: 12 }}
+            loading={triggerMutation.isPending}
+            onClick={() => triggerMutation.mutate()}
+          >
+            立即检测
+          </Button>
+        </div>
       </Card>
     );
   }
