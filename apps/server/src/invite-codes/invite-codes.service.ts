@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { CreateInviteCodesDto } from './dto/create-invite-codes.dto';
 
@@ -7,6 +7,15 @@ export class InviteCodesService {
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateInviteCodesDto, adminId: string) {
+    if (dto.customCode) {
+      const existing = await this.prisma.inviteCode.findUnique({ where: { code: dto.customCode } });
+      if (existing) throw new ConflictException(`邀请码 "${dto.customCode}" 已存在`);
+      const created = await this.prisma.inviteCode.create({
+        data: { code: dto.customCode, maxUses: dto.maxUses, createdBy: adminId },
+      });
+      return [created];
+    }
+
     const data = Array.from({ length: dto.quantity }, () => ({
       maxUses: dto.maxUses,
       createdBy: adminId,

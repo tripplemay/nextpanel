@@ -1,12 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { App, Form, Input, Button, Card, Typography } from 'antd';
+import { App, Form, Input, Button, Typography } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
+import AuthLayout from '@/components/auth/AuthLayout';
 
 const { Title, Text } = Typography;
 
@@ -30,36 +31,28 @@ export default function LoginPage() {
   }
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#f0f2f5',
-        padding: 16,
-      }}
-    >
-      <Card style={{ width: '100%', maxWidth: 380, boxShadow: '0 4px 24px rgba(0,0,0,0.08)' }}>
-        <Title level={3} style={{ textAlign: 'center', marginBottom: 32 }}>
-          NextPanel
-        </Title>
-        <Form layout="vertical" onFinish={onFinish}>
-          <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
-            <Input prefix={<UserOutlined />} placeholder="用户名" size="large" />
-          </Form.Item>
-          <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
-            <Input.Password prefix={<LockOutlined />} placeholder="密码" size="large" />
-          </Form.Item>
-          <Button type="primary" htmlType="submit" block size="large" loading={loading}>
-            登录
-          </Button>
-        </Form>
-        <div style={{ textAlign: 'center', marginTop: 16 }}>
-          <Text type="secondary">没有账号？</Text>{' '}
-          <Link href="/register">注册账号</Link>
-        </div>
-      </Card>
-    </div>
+    <AuthLayout>
+      <Title level={3} style={{ marginBottom: 4 }}>
+        欢迎回来
+      </Title>
+      <Text type="secondary" style={{ display: 'block', marginBottom: 32 }}>
+        登录你的 NextPanel 账号
+      </Text>
+      <Form layout="vertical" onFinish={onFinish}>
+        <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
+          <Input prefix={<UserOutlined />} placeholder="用户名" size="large" />
+        </Form.Item>
+        <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
+          <Input.Password prefix={<LockOutlined />} placeholder="密码" size="large" />
+        </Form.Item>
+        <Button type="primary" htmlType="submit" block size="large" loading={loading}>
+          登录
+        </Button>
+      </Form>
+      <div style={{ textAlign: 'center', marginTop: 16 }}>
+        <Text type="secondary">没有账号？</Text>{' '}
+        <Link href="/register">注册账号</Link>
+      </div>
+    </AuthLayout>
   );
 }

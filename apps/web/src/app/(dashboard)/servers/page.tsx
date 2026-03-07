@@ -233,7 +233,13 @@ export default function ServersPage() {
       dataIndex: 'name',
       render: (name, record) => (
         <Space direction="vertical" size={0}>
-          <Space size={4}>
+          <Space size={6}>
+            {record.countryCode && (
+              <span
+                className={`fi fi-${record.countryCode.toLowerCase()} fis`}
+                style={{ width: 18, height: 18, borderRadius: '50%', flexShrink: 0 }}
+              />
+            )}
             <a onClick={() => router.push(`/servers/${record.id}`)} style={{ fontWeight: 600 }}>
               {name}
             </a>

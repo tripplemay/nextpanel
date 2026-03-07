@@ -1,5 +1,5 @@
-import { IsInt, Min, Max } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsInt, Min, Max, IsOptional, IsString, Matches } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateInviteCodesDto {
   @ApiProperty({ description: 'Number of codes to generate', default: 1 })
@@ -12,4 +12,10 @@ export class CreateInviteCodesDto {
   @IsInt()
   @Min(1)
   maxUses: number = 1;
+
+  @ApiPropertyOptional({ description: 'Custom invite code (alphanumeric only). When set, quantity is ignored and exactly one code is created.' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-zA-Z0-9]+$/, { message: '邀请码只能包含字母和数字' })
+  customCode?: string;
 }

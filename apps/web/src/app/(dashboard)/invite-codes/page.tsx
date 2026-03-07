@@ -5,7 +5,7 @@ import {
   App, Card, Table, Tag, Button, Modal, Form, InputNumber, Space,
   Popconfirm, Typography, Input,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined, CopyOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, CopyOutlined, EditOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { inviteCodesApi } from '@/lib/api';
 import type { InviteCode } from '@/types/api';
@@ -17,9 +17,11 @@ export default function InviteCodesPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [customModalOpen, setCustomModalOpen] = useState(false);
   const [resultModalOpen, setResultModalOpen] = useState(false);
   const [generatedCodes, setGeneratedCodes] = useState<InviteCode[]>([]);
   const [form] = Form.useForm();
+  const [customForm] = Form.useForm();
 
   const { data: codes = [], isLoading } = useQuery({
     queryKey: ['invite-codes'],
@@ -38,6 +40,26 @@ export default function InviteCodesPage() {
       form.resetFields();
     },
     onError: () => message.error('生成失败'),
+  });
+
+  const customMutation = useMutation({
+    mutationFn: ({ customCode, maxUses }: { customCode: string; maxUses: number }) =>
+      inviteCodesApi.createCustom(customCode, maxUses).then((r) => r.data),
+    onSuccess: (newCodes) => {
+      queryClient.invalidateQueries({ queryKey: ['invite-codes'] });
+      setCustomModalOpen(false);
+      setGeneratedCodes(newCodes);
+      setResultModalOpen(true);
+      customForm.resetFields();
+    },
+    onError: (err: unknown) => {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 409) {
+        message.error('该邀请码已存在，请换一个');
+      } else {
+        message.error('创建失败');
+      }
+    },
   });
 
   const deleteMutation = useMutation({
@@ -110,9 +132,14 @@ export default function InviteCodesPage() {
       <PageHeader
         title="邀请码管理"
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
-            生成邀请码
-          </Button>
+          <Space>
+            <Button icon={<EditOutlined />} onClick={() => setCustomModalOpen(true)}>
+              自定义邀请码
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
+              生成邀请码
+            </Button>
+          </Space>
         }
       />
       <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
@@ -127,9 +154,45 @@ export default function InviteCodesPage() {
         />
       </Card>
 
-      {/* 创建邀请码 Modal */}
+      {/* 自定义邀请码 Modal */}
       <Modal
-        title="生成邀请码"
+        title="自定义邀请码"
+        open={customModalOpen}
+        onCancel={() => { setCustomModalOpen(false); customForm.resetFields(); }}
+        onOk={() => customForm.submit()}
+        confirmLoading={customMutation.isPending}
+        okText="创建"
+      >
+        <Form
+          form={customForm}
+          layout="vertical"
+          initialValues={{ maxUses: 1 }}
+          onFinish={(values) => customMutation.mutate(values)}
+          style={{ marginTop: 16 }}
+        >
+          <Form.Item
+            name="customCode"
+            label="邀请码"
+            rules={[
+              { required: true, message: '请输入邀请码' },
+              { pattern: /^[a-zA-Z0-9]+$/, message: '只能包含字母和数字' },
+            ]}
+          >
+            <Input placeholder="仅限字母和数字" />
+          </Form.Item>
+          <Form.Item
+            name="maxUses"
+            label="最大使用次数"
+            rules={[{ required: true }]}
+          >
+            <InputNumber min={1} style={{ width: '100%' }} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 批量生成邀请码 Modal */}
+      <Modal
+        title="批量生成邀请码"
         open={createModalOpen}
         onCancel={() => { setCreateModalOpen(false); form.resetFields(); }}
         onOk={() => form.submit()}

@@ -138,6 +138,8 @@ export const inviteCodesApi = {
   list: () => api.get<InviteCode[]>('/invite-codes'),
   create: (quantity: number, maxUses: number) =>
     api.post<InviteCode[]>('/invite-codes', { quantity, maxUses }),
+  createCustom: (customCode: string, maxUses: number) =>
+    api.post<InviteCode[]>('/invite-codes', { quantity: 1, maxUses, customCode }),
   remove: (id: string) => api.delete<void>(`/invite-codes/${id}`),
 };
 

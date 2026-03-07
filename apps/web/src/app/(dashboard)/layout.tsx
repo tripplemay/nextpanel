@@ -20,6 +20,8 @@ import {
   MenuOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/auth';
+import WelcomeModal from '@/components/common/WelcomeModal';
+import ServerFormModal from '@/components/servers/ServerFormModal';
 
 const { useBreakpoint } = Grid;
 
@@ -61,11 +63,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [hydrated, setHydrated] = useState(false);
   const [openKeys, setOpenKeys] = useState<string[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  const [addServerOpen, setAddServerOpen] = useState(false);
   const screens = useBreakpoint();
   const isMobile = !screens.md;
 
   useEffect(() => {
     setHydrated(true);
+    if (localStorage.getItem('showWelcome') === '1') {
+      localStorage.removeItem('showWelcome');
+      setWelcomeOpen(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -180,6 +188,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {children}
         </Content>
       </Layout>
+
+      <WelcomeModal
+        open={welcomeOpen}
+        onClose={() => setWelcomeOpen(false)}
+        onAddServer={() => setAddServerOpen(true)}
+      />
+      <ServerFormModal
+        open={addServerOpen}
+        initialValues={null}
+        onClose={() => setAddServerOpen(false)}
+        onSuccess={() => setAddServerOpen(false)}
+      />
     </Layout>
   );
 }

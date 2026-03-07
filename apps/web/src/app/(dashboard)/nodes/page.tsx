@@ -313,7 +313,7 @@ export default function NodesPage() {
     },
     {
       title: '连通性',
-      width: 130,
+      width: 90,
       render: (_: unknown, r) => {
         const sessionResult = testResults[r.id];
         const isTestingThis = testingId === r.id || (batchTesting && !sessionResult);
@@ -323,7 +323,7 @@ export default function NodesPage() {
         if (sessionResult) {
           if (sessionResult.reachable) {
             return (
-              <Space size={4}>
+              <Space direction="vertical" size={2}>
                 <Tag color="green" style={{ marginRight: 0 }}>{sessionResult.latency}ms</Tag>
                 <Typography.Text type="secondary" style={{ fontSize: 11 }}>{formatTimeAgo(sessionResult.testedAt)}</Typography.Text>
               </Space>
@@ -335,14 +335,14 @@ export default function NodesPage() {
         if (r.lastTestedAt) {
           if (r.lastReachable) {
             return (
-              <Space size={4}>
+              <Space direction="vertical" size={2}>
                 <Tag color="green" style={{ marginRight: 0 }}>{r.lastLatency}ms</Tag>
                 <Typography.Text type="secondary" style={{ fontSize: 11 }}>{formatTimeAgo(r.lastTestedAt)}</Typography.Text>
               </Space>
             );
           }
           return (
-            <Space size={4}>
+            <Space direction="vertical" size={2}>
               <Tag color="red" style={{ marginRight: 0 }}>失败</Tag>
               <Typography.Text type="secondary" style={{ fontSize: 11 }}>{formatTimeAgo(r.lastTestedAt)}</Typography.Text>
             </Space>
