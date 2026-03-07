@@ -209,7 +209,10 @@ export default function ServerDetailPage({
             <Button icon={<ArrowLeftOutlined />} onClick={() => router.push('/servers')}>
               {!isMobile && '返回'}
             </Button>
-            <Title level={4} style={{ margin: 0 }}>{server.name}</Title>
+            <div>
+              <Title level={4} style={{ margin: 0 }}>{server.name}</Title>
+              <Text type="secondary" style={{ fontSize: 12 }}>{server.ip}</Text>
+            </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingLeft: isMobile ? 0 : 4 }}>
           <StatusTag status={server.status} />
@@ -287,16 +290,14 @@ export default function ServerDetailPage({
         ))}
         <Col xs={12} sm={6}>
           <Card size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)', textAlign: 'center' }}>
-            <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>网速</div>
-            <div style={{ lineHeight: 2 }}>
-              <div style={{ fontSize: 13 }}>
-                <ArrowUpOutlined style={{ color: '#52c41a', marginRight: 4 }} />
-                {server.networkOut != null ? formatRate(server.networkOut) : '—'}
-              </div>
-              <div style={{ fontSize: 13 }}>
-                <ArrowDownOutlined style={{ color: '#1677ff', marginRight: 4 }} />
-                {server.networkIn != null ? formatRate(server.networkIn) : '—'}
-              </div>
+            <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>网速</div>
+            <div style={{ fontSize: 22, fontWeight: 600, color: '#52c41a', lineHeight: 1.3 }}>
+              <ArrowUpOutlined style={{ fontSize: 14, marginRight: 4 }} />
+              {server.networkOut != null ? formatRate(server.networkOut) : '—'}
+            </div>
+            <div style={{ fontSize: 14, color: '#1677ff', marginTop: 2 }}>
+              <ArrowDownOutlined style={{ fontSize: 12, marginRight: 4 }} />
+              {server.networkIn != null ? formatRate(server.networkIn) : '—'}
             </div>
           </Card>
         </Col>
@@ -351,7 +352,12 @@ export default function ServerDetailPage({
       <IpCheckCard serverId={id} />
 
       {/* 节点列表 */}
-      <Card title={`节点列表（${nodes.length}）`} size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+      <Card
+        title={`节点列表（${nodes.length}）`}
+        size="small"
+        style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+        extra={<Button size="small" onClick={() => router.push('/nodes')}>前往节点管理</Button>}
+      >
         <Table
           rowKey="id"
           size="middle"

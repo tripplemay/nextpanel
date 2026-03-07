@@ -19,6 +19,7 @@ import {
   Row,
   Col,
   Alert,
+  Progress,
 } from 'antd';
 import {
   AppstoreOutlined,
@@ -53,6 +54,13 @@ function formatRate(bytes: number | null | undefined): string {
   if (n < 1024) return `${n} B/s`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB/s`;
   return `${(n / 1024 / 1024).toFixed(1)} MB/s`;
+}
+
+function usageColor(pct: number | null | undefined): string {
+  if (pct == null) return '#1677ff';
+  if (pct < 70) return '#52c41a';
+  if (pct < 90) return '#faad14';
+  return '#ff4d4f';
 }
 
 function heartbeatColor(lastSeenAt: string | null): string {
@@ -243,21 +251,24 @@ export default function ServersPage() {
     {
       title: '名称',
       dataIndex: 'name',
+      width: 180,
       render: (name, record) => (
-        <Space direction="vertical" size={0}>
-          <Space size={6}>
+        <Space direction="vertical" size={0} style={{ maxWidth: '100%' }}>
+          <Space size={6} style={{ flexWrap: 'nowrap', overflow: 'hidden' }}>
             {record.countryCode && (
               <span
                 className={`fi fi-${record.countryCode.toLowerCase()} fis`}
                 style={{ width: 18, height: 18, borderRadius: '50%', flexShrink: 0 }}
               />
             )}
-            <a onClick={() => router.push(`/servers/${record.id}`)} style={{ fontWeight: 600 }}>
-              {name}
-            </a>
+            <Tooltip title={name}>
+              <a onClick={() => router.push(`/servers/${record.id}`)} style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
+                {name}
+              </a>
+            </Tooltip>
             {record.notes && (
               <Tooltip title={record.notes}>
-                <FileTextOutlined style={{ color: '#8c8c8c', fontSize: 12 }} />
+                <FileTextOutlined style={{ color: '#8c8c8c', fontSize: 12, flexShrink: 0 }} />
               </Tooltip>
             )}
           </Space>
@@ -265,8 +276,8 @@ export default function ServersPage() {
         </Space>
       ),
     },
-    { title: '区域', dataIndex: 'region' },
-    { title: '提供商', dataIndex: 'provider' },
+    { title: '区域', dataIndex: 'region', width: 100, ellipsis: true },
+    { title: '提供商', dataIndex: 'provider', width: 120, ellipsis: true },
     {
       title: '状态',
       dataIndex: 'status',
@@ -280,13 +291,27 @@ export default function ServersPage() {
       ),
     },
     {
-      title: 'CPU / 内存 / 磁盘',
+      title: '资源',
+      width: 140,
       render: (_: unknown, record) =>
         record.cpuUsage != null ? (
-          <Space direction="vertical" size={0} style={{ fontSize: 12 }}>
-            <span>CPU&nbsp;&nbsp;{record.cpuUsage.toFixed(1)}%</span>
-            <span>内存&nbsp;&nbsp;{record.memUsage?.toFixed(1) ?? '—'}%</span>
-            <span>磁盘&nbsp;&nbsp;{record.diskUsage?.toFixed(1) ?? '—'}%</span>
+          <Space direction="vertical" size={3} style={{ width: '100%' }}>
+            {(['cpuUsage', 'memUsage', 'diskUsage'] as const).map((key) => {
+              const labels: Record<string, string> = { cpuUsage: 'CPU', memUsage: '内存', diskUsage: '磁盘' };
+              const val = record[key];
+              return (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Text style={{ fontSize: 11, color: '#8c8c8c', width: 24, flexShrink: 0 }}>{labels[key]}</Text>
+                  <Progress
+                    percent={val != null ? Math.round(val) : 0}
+                    size="small"
+                    strokeColor={usageColor(val)}
+                    style={{ flex: 1, margin: 0 }}
+                    format={(p) => val != null ? `${p}%` : '—'}
+                  />
+                </div>
+              );
+            })}
           </Space>
         ) : (
           <span style={{ color: '#ccc' }}>—</span>

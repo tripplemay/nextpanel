@@ -12,6 +12,7 @@ import {
   FileTextOutlined,
   MoreOutlined,
 } from '@ant-design/icons';
+import { useRouter } from 'next/navigation';
 import StatusTag from '@/components/common/StatusTag';
 import type { Server } from '@/types/api';
 
@@ -61,19 +62,27 @@ export default function ServerCard({
   onForceDelete,
   onTestSsh,
 }: Props) {
+  const router = useRouter();
   const isDeleting = server.status === 'DELETING';
   const hasDeleteError = server.status === 'ERROR' && !!server.deleteError;
 
   return (
     <Card
       size="small"
-      style={{ borderRadius: 8, opacity: isDeleting ? 0.6 : 1 }}
+      style={{ borderRadius: 8, opacity: isDeleting ? 0.6 : 1, cursor: 'pointer' }}
       styles={{ body: { padding: 16 } }}
+      onClick={() => router.push(`/servers/${server.id}`)}
     >
       {/* 标题行 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
         <div style={{ minWidth: 0 }}>
           <Space size={4}>
+            {server.countryCode && (
+              <span
+                className={`fi fi-${server.countryCode.toLowerCase()} fis`}
+                style={{ width: 16, height: 16, borderRadius: '50%', flexShrink: 0 }}
+              />
+            )}
             <Text strong style={{ fontSize: 14 }} ellipsis>{server.name}</Text>
             {server.notes && (
               <Tooltip title={server.notes}>
@@ -84,6 +93,13 @@ export default function ServerCard({
           <div>
             <Text type="secondary" style={{ fontSize: 12 }}>{server.ip}</Text>
           </div>
+          {(server.region || server.provider) && (
+            <div>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                {[server.region, server.provider].filter(Boolean).join(' · ')}
+              </Text>
+            </div>
+          )}
         </div>
         {!isDeleting && !hasDeleteError && (
           <Dropdown
@@ -120,7 +136,7 @@ export default function ServerCard({
               ],
             }}
           >
-            <Button size="small" type="text" icon={<MoreOutlined />} />
+            <Button size="small" type="text" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
           </Dropdown>
         )}
       </div>
