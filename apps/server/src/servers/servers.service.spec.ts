@@ -4,6 +4,7 @@ import { CryptoService } from '../common/crypto/crypto.service';
 import { NodeDeployService } from '../nodes/node-deploy.service';
 import { CloudflareService } from '../cloudflare/cloudflare.service';
 import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.service';
+import { IpCheckService } from '../ip-check/ip-check.service';
 import { NotFoundException } from '@nestjs/common';
 
 // Mock node-ssh before importing ServersService
@@ -61,7 +62,11 @@ const mockCfSettings = {
   getDecryptedToken: jest.fn().mockResolvedValue(null),
 } as unknown as CloudflareSettingsService;
 
-const svc = new ServersService(mockPrisma, mockCrypto, mockNodeDeploy, mockCfService, mockCfSettings);
+const mockIpCheck = {
+  triggerCheck: jest.fn(),
+} as unknown as IpCheckService;
+
+const svc = new ServersService(mockPrisma, mockCrypto, mockNodeDeploy, mockCfService, mockCfSettings, mockIpCheck);
 
 const fakeServer = {
   id: 'srv-1', name: 'Test Server', ip: '1.2.3.4',

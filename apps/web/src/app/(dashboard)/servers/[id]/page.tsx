@@ -35,6 +35,7 @@ import {
 } from 'recharts';
 import { serversApi, metricsApi, nodesApi, operationLogsApi } from '@/lib/api';
 import StatusTag from '@/components/common/StatusTag';
+import IpCheckCard from '@/components/servers/IpCheckCard';
 import type { Node, Metric, OperationLogEntry } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
@@ -345,6 +346,9 @@ export default function ServerDetailPage({
           </Row>
         )}
       </Card>
+
+      {/* IP 质量检测 */}
+      <IpCheckCard serverId={id} />
 
       {/* 节点列表 */}
       <Card title={`节点列表（${nodes.length}）`} size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>

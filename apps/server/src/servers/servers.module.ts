@@ -7,9 +7,10 @@ import { PingScheduler } from './ping.scheduler';
 import { NodesModule } from '../nodes/nodes.module';
 import { OperationLogModule } from '../operation-log/operation-log.module';
 import { CloudflareModule } from '../cloudflare/cloudflare.module';
+import { IpCheckModule } from '../ip-check/ip-check.module';
 
 @Module({
-  imports: [NodesModule, OperationLogModule, CloudflareModule],
+  imports: [NodesModule, OperationLogModule, CloudflareModule, IpCheckModule],
   providers: [ServersService, CryptoService, PingScheduler, AutoSetupService],
   controllers: [ServersController],
   exports: [ServersService],

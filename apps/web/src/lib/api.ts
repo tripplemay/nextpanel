@@ -23,6 +23,7 @@ import type {
   RegisterDto,
   UserRecord,
   InviteCode,
+  ServerIpCheck,
 } from '@/types/api';
 
 export const api = axios.create({
@@ -103,6 +104,13 @@ export const subscriptionsApi = {
   update: (id: string, data: UpdateSubscriptionDto) => api.patch<Subscription>(`/subscriptions/${id}`, data),
   refreshToken: (id: string) => api.post<{ id: string; token: string }>(`/subscriptions/${id}/refresh-token`),
   delete: (id: string) => api.delete<void>(`/subscriptions/${id}`),
+};
+
+// ── IP Check ──────────────────────────────────────────
+export const ipCheckApi = {
+  get: (serverId: string) => api.get<ServerIpCheck | null>(`/ip-check/${serverId}`),
+  trigger: (serverId: string) => api.post<{ ok: boolean }>(`/ip-check/${serverId}/trigger`),
+  triggerGfw: (serverId: string) => api.post<{ ok: boolean }>(`/ip-check/${serverId}/gfw`),
 };
 
 // ── Metrics ───────────────────────────────────────────

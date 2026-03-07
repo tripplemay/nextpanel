@@ -98,7 +98,7 @@ export default function WelcomeModal({ open, onClose, onAddServer }: Props) {
       style={{ maxWidth: '95vw' }}
       footer={footer}
       closable
-      destroyOnClose
+      destroyOnHidden
     >
       <Steps
         current={current}

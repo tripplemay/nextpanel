@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { MetricsService } from '../metrics/metrics.service';
+import { IpCheckService } from '../ip-check/ip-check.service';
 
 export interface HeartbeatPayload {
   agentToken: string;
@@ -22,6 +23,7 @@ export class AgentService {
   constructor(
     private prisma: PrismaService,
     private metricsService: MetricsService,
+    private ipCheck: IpCheckService,
   ) {}
 
   async handleHeartbeat(payload: HeartbeatPayload) {
@@ -87,9 +89,13 @@ export class AgentService {
       select: { id: true, statsPort: true },
     });
 
+    // Return pending IP check task if any
+    const ipCheckTask = await this.ipCheck.getPendingTask(payload.agentToken);
+
     return {
       ok: true,
       xrayNodes: xrayNodes.map((n) => ({ nodeId: n.id, statsPort: n.statsPort })),
+      ...(ipCheckTask ? { ipCheckTask: { serverId: ipCheckTask.serverId } } : {}),
     };
   }
 }

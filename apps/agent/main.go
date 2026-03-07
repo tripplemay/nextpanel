@@ -26,12 +26,17 @@ type heartbeatPayload struct {
 	NodeTraffic  []nodeTrafficStat `json:"nodeTraffic,omitempty"`
 }
 
-type heartbeatResponse struct {
-	OK        bool       `json:"ok"`
-	XrayNodes []xrayNode `json:"xrayNodes,omitempty"`
+type ipCheckTask struct {
+	ServerID string `json:"serverId"`
 }
 
-func sendHeartbeat(cfg *Config, m *Metrics, traffic []nodeTrafficStat) ([]xrayNode, error) {
+type heartbeatResponse struct {
+	OK          bool         `json:"ok"`
+	XrayNodes   []xrayNode   `json:"xrayNodes,omitempty"`
+	IpCheckTask *ipCheckTask `json:"ipCheckTask,omitempty"`
+}
+
+func sendHeartbeat(cfg *Config, m *Metrics, traffic []nodeTrafficStat) (*heartbeatResponse, error) {
 	payload := heartbeatPayload{
 		AgentToken:   cfg.AgentToken,
 		AgentVersion: version,
@@ -63,7 +68,7 @@ func sendHeartbeat(cfg *Config, m *Metrics, traffic []nodeTrafficStat) ([]xrayNo
 	if err := json.NewDecoder(resp.Body).Decode(&hbResp); err != nil {
 		return nil, fmt.Errorf("解析响应失败: %w", err)
 	}
-	return hbResp.XrayNodes, nil
+	return &hbResp, nil
 }
 
 func main() {
@@ -75,6 +80,7 @@ func main() {
 	log.Printf("NextPanel Agent v%s 启动，面板地址: %s", version, cfg.ServerURL)
 
 	var xrayNodes []xrayNode
+	var ipCheckRunning bool
 
 	for {
 		m, err := collectMetrics()
@@ -82,13 +88,22 @@ func main() {
 			log.Printf("采集指标失败: %v", err)
 		} else {
 			traffic := collectNodeTraffic(xrayNodes)
-			newNodes, err := sendHeartbeat(cfg, m, traffic)
+			hbResp, err := sendHeartbeat(cfg, m, traffic)
 			if err != nil {
 				log.Printf("心跳发送失败: %v", err)
 			} else {
-				xrayNodes = newNodes
+				xrayNodes = hbResp.XrayNodes
 				log.Printf("心跳已发送 CPU=%.1f%% MEM=%.1f%% DISK=%.1f%% xrayNodes=%d",
 					m.CPU, m.Mem, m.Disk, len(xrayNodes))
+
+				// Run IP check task if assigned and not already running
+				if hbResp.IpCheckTask != nil && !ipCheckRunning {
+					ipCheckRunning = true
+					go func(serverId string) {
+						defer func() { ipCheckRunning = false }()
+						runIpCheck(cfg, serverId)
+					}(hbResp.IpCheckTask.ServerID)
+				}
 			}
 		}
 		time.Sleep(heartbeatInterval)

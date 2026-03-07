@@ -78,6 +78,7 @@ model Server {
 
   nodes        Node[]
   metrics      ServerMetric[]
+  ipCheck      ServerIpCheck?
 
   @@index([userId])
 }
@@ -342,6 +343,52 @@ model RuleCache {
   /// Raw text content fetched from upstream source
   content   String
   updatedAt DateTime @updatedAt
+}
+
+// ──────────────────────────── ServerIpCheck ────────────────────────────
+
+model ServerIpCheck {
+  id         String        @id @default(cuid())
+  server     Server        @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  serverId   String        @unique
+  status     IpCheckStatus @default(PENDING)
+  startedAt  DateTime?
+  finishedAt DateTime?
+  error      String?
+
+  /// IP basic info — fetched directly by panel via ip-api.com / ipinfo.io
+  ipType  String? /// RESIDENTIAL | DATACENTER
+  asn     String? /// e.g. AS45102
+  org     String? /// e.g. Alibaba Cloud
+  country String? /// ISO 3166-1 alpha-2, e.g. SG
+  city    String?
+
+  /// Streaming / AI checks — executed by Agent on the server
+  netflix        String? /// UNLOCKED | ORIGINALS_ONLY | BLOCKED
+  netflixRegion  String?
+  disney         String? /// AVAILABLE | BLOCKED
+  disneyRegion   String?
+  youtube        String? /// AVAILABLE | BLOCKED
+  youtubeRegion  String?
+  hulu           String? /// AVAILABLE | BLOCKED
+  bilibili       String? /// AVAILABLE | BLOCKED
+  openai         String? /// AVAILABLE | BLOCKED
+  claude         String? /// AVAILABLE | BLOCKED
+  gemini         String? /// AVAILABLE | BLOCKED
+
+  /// GFW check — executed via Serverless function inside China
+  gfwBlocked   Boolean?
+  gfwCheckedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum IpCheckStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
 }
 
 // ──────────────────────────── CloudflareSetting ────────────────────────────

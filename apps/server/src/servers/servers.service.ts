@@ -6,6 +6,7 @@ import { CryptoService } from '../common/crypto/crypto.service';
 import { NodeDeployService } from '../nodes/node-deploy.service';
 import { CloudflareService } from '../cloudflare/cloudflare.service';
 import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.service';
+import { IpCheckService } from '../ip-check/ip-check.service';
 import { connectSsh } from '../nodes/ssh/ssh.util';
 import { CreateServerDto } from './dto/create-server.dto';
 import { UpdateServerDto } from './dto/update-server.dto';
@@ -20,11 +21,12 @@ export class ServersService {
     private nodeDeploy: NodeDeployService,
     private cfService: CloudflareService,
     private cfSettings: CloudflareSettingsService,
+    private ipCheck: IpCheckService,
   ) {}
 
   async create(dto: CreateServerDto, userId: string) {
     const sshAuthEnc = this.crypto.encrypt(dto.sshAuth);
-    return this.prisma.server.create({
+    const server = await this.prisma.server.create({
       data: {
         userId,
         name: dto.name,
@@ -41,6 +43,11 @@ export class ServersService {
       },
       select: this.safeSelect(),
     });
+
+    // Fire-and-forget: trigger IP quality check asynchronously
+    this.ipCheck.triggerCheck(server.id);
+
+    return server;
   }
 
   async findAll(userId: string) {

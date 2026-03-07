@@ -87,6 +87,38 @@ export interface InviteCode {
 
 // ── Response types ────────────────────────────────────────────────────────────
 
+export interface ServerIpCheck {
+  id: string;
+  serverId: string;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  // IP basic info
+  ipType: 'RESIDENTIAL' | 'DATACENTER' | null;
+  asn: string | null;
+  org: string | null;
+  country: string | null;
+  city: string | null;
+  // Streaming / AI
+  netflix: 'UNLOCKED' | 'ORIGINALS_ONLY' | 'BLOCKED' | null;
+  netflixRegion: string | null;
+  disney: 'AVAILABLE' | 'BLOCKED' | null;
+  disneyRegion: string | null;
+  youtube: 'AVAILABLE' | 'BLOCKED' | null;
+  youtubeRegion: string | null;
+  hulu: 'AVAILABLE' | 'BLOCKED' | null;
+  bilibili: 'AVAILABLE' | 'BLOCKED' | null;
+  openai: 'AVAILABLE' | 'BLOCKED' | null;
+  claude: 'AVAILABLE' | 'BLOCKED' | null;
+  gemini: 'AVAILABLE' | 'BLOCKED' | null;
+  // GFW
+  gfwBlocked: boolean | null;
+  gfwCheckedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Server {
   id: string;
   name: string;

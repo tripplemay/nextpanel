@@ -16,6 +16,7 @@ import { RulesModule } from './rules/rules.module';
 import { InviteCodesModule } from './invite-codes/invite-codes.module';
 import { UsersModule } from './users/users.module';
 import { ExternalNodesModule } from './external-nodes/external-nodes.module';
+import { IpCheckModule } from './ip-check/ip-check.module';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 
 @Module({
@@ -36,6 +37,7 @@ import { AuditInterceptor } from './common/interceptors/audit.interceptor';
     InviteCodesModule,
     UsersModule,
     ExternalNodesModule,
+    IpCheckModule,
   ],
   providers: [
     {

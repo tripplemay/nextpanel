@@ -1,6 +1,7 @@
 import { AgentService } from './agent.service';
 import { PrismaService } from '../prisma.service';
 import { MetricsService } from '../metrics/metrics.service';
+import { IpCheckService } from '../ip-check/ip-check.service';
 import { UnauthorizedException } from '@nestjs/common';
 
 const mockPrisma = {
@@ -18,7 +19,11 @@ const mockMetrics = {
   record: jest.fn().mockResolvedValue(undefined),
 } as unknown as MetricsService;
 
-const svc = new AgentService(mockPrisma, mockMetrics);
+const mockIpCheck = {
+  getPendingTask: jest.fn().mockResolvedValue(null),
+} as unknown as IpCheckService;
+
+const svc = new AgentService(mockPrisma, mockMetrics, mockIpCheck);
 
 const fakeServer = { id: 'srv-1', agentToken: 'tok-abc' };
 
