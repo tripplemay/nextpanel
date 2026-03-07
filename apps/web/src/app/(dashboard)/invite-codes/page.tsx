@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import {
-  App, Card, Table, Tag, Button, Modal, Form, InputNumber, Space,
-  Popconfirm, Typography, Input,
+  App, Card, Table, Button, Modal, Form, InputNumber, Space,
+  Popconfirm, Typography, Input, Tabs, Progress, Statistic, Row, Col,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined, CopyOutlined, EditOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -13,6 +13,24 @@ import PageHeader from '@/components/common/PageHeader';
 
 const { Text } = Typography;
 
+function UsageProgress({ usedCount, maxUses }: { usedCount: number; maxUses: number }) {
+  const percent = Math.round((usedCount / maxUses) * 100);
+  const status = percent >= 100 ? 'exception' : percent >= 50 ? 'normal' : 'success';
+  return (
+    <Space size={8} style={{ width: '100%', minWidth: 140 }}>
+      <Progress
+        percent={percent}
+        size="small"
+        status={status}
+        style={{ flex: 1, minWidth: 80, marginBottom: 0 }}
+      />
+      <Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+        {usedCount}/{maxUses}
+      </Text>
+    </Space>
+  );
+}
+
 export default function InviteCodesPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
@@ -20,6 +38,7 @@ export default function InviteCodesPage() {
   const [customModalOpen, setCustomModalOpen] = useState(false);
   const [resultModalOpen, setResultModalOpen] = useState(false);
   const [generatedCodes, setGeneratedCodes] = useState<InviteCode[]>([]);
+  const [activeTab, setActiveTab] = useState('all');
   const [form] = Form.useForm();
   const [customForm] = Form.useForm();
 
@@ -76,6 +95,14 @@ export default function InviteCodesPage() {
     navigator.clipboard.writeText(text).then(() => message.success('已复制全部邀请码'));
   }
 
+  const availableCodes = codes.filter((c) => c.usedCount < c.maxUses);
+  const exhaustedCodes = codes.filter((c) => c.usedCount >= c.maxUses);
+
+  const filteredCodes =
+    activeTab === 'available' ? availableCodes :
+    activeTab === 'exhausted' ? exhaustedCodes :
+    codes;
+
   const columns = [
     {
       title: '邀请码',
@@ -86,15 +113,10 @@ export default function InviteCodesPage() {
     {
       title: '使用情况',
       key: 'usage',
-      width: 120,
-      render: (_: unknown, record: InviteCode) => {
-        const exhausted = record.usedCount >= record.maxUses;
-        return (
-          <Tag color={exhausted ? 'default' : 'green'}>
-            {record.usedCount} / {record.maxUses}
-          </Tag>
-        );
-      },
+      width: 200,
+      render: (_: unknown, record: InviteCode) => (
+        <UsageProgress usedCount={record.usedCount} maxUses={record.maxUses} />
+      ),
     },
     {
       title: '创建者',
@@ -127,6 +149,12 @@ export default function InviteCodesPage() {
     },
   ];
 
+  const tabItems = [
+    { key: 'all', label: `全部 (${codes.length})` },
+    { key: 'available', label: `可用 (${availableCodes.length})` },
+    { key: 'exhausted', label: `已用完 (${exhaustedCodes.length})` },
+  ];
+
   return (
     <>
       <PageHeader
@@ -142,17 +170,46 @@ export default function InviteCodesPage() {
           </Space>
         }
       />
+
+      {/* 统计概览 */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={8}>
+          <Card size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+            <Statistic title="总邀请码" value={codes.length} />
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+            <Statistic title="可用" value={availableCodes.length} valueStyle={{ color: '#52c41a' }} />
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+            <Statistic title="已用完" value={exhaustedCodes.length} valueStyle={{ color: '#d9d9d9' }} />
+          </Card>
+        </Col>
+      </Row>
+
       <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={tabItems}
+          style={{ marginBottom: 8 }}
+        />
         <Table
           size="middle"
           rowKey="id"
           loading={isLoading}
-          dataSource={codes}
+          dataSource={filteredCodes}
           columns={columns}
           scroll={{ x: 'max-content' }}
           pagination={{ showTotal: (total) => `共 ${total} 条` }}
+          rowClassName={(record) => record.usedCount >= record.maxUses ? 'row-exhausted' : ''}
         />
       </Card>
+
+      <style>{`.row-exhausted td { opacity: 0.45; }`}</style>
 
       {/* 自定义邀请码 Modal */}
       <Modal
