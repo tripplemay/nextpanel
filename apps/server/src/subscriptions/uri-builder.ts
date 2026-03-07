@@ -186,6 +186,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       add('port', port);
       add('password', creds.password ?? '');
       if (domain) add('sni', domain);
+      add('skip-cert-verify', true);
       break;
     }
 
@@ -289,7 +290,7 @@ export function buildSingboxOutbound(node: NodeExportInfo): Record<string, unkno
         server: host,
         server_port: port,
         password: creds.password ?? '',
-        tls: { enabled: true, ...(domain ? { server_name: domain } : {}) },
+        tls: { enabled: true, insecure: true, ...(domain ? { server_name: domain } : {}) },
       };
 
     case 'HTTP':
