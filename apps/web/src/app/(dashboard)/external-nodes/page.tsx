@@ -180,13 +180,13 @@ export default function ExternalNodesPage() {
         width={560}
       >
         <div style={{ marginBottom: 8, color: '#8c8c8c', fontSize: 13 }}>
-          支持粘贴单个或多个 URI（vmess:// vless:// ss:// trojan:// hysteria2://），或 Base64 编码的订阅内容
+          支持以下格式：订阅链接（https://...）、Base64 编码的订阅内容、单个或多个 URI（vmess:// vless:// ss:// trojan:// hysteria2://）
         </div>
         <TextArea
           rows={8}
           value={importText}
           onChange={(e) => setImportText(e.target.value)}
-          placeholder={`vmess://...\nvless://...\nss://...`}
+          placeholder={`https://example.com/sub/token\n或\nvmess://...\nvless://...`}
           style={{ fontFamily: 'monospace', fontSize: 12 }}
         />
       </Modal>

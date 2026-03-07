@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { XrayTestService } from '../nodes/xray-test/xray-test.service';
 import { SingboxTestService } from '../nodes/singbox-test/singbox-test.service';
@@ -6,6 +6,8 @@ import { parseSubscriptionText } from './uri-parser';
 
 @Injectable()
 export class ExternalNodesService {
+  private readonly logger = new Logger(ExternalNodesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly xrayTest: XrayTestService,
@@ -19,8 +21,25 @@ export class ExternalNodesService {
     });
   }
 
+  private async resolveText(text: string): Promise<string> {
+    const trimmed = text.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      this.logger.log(`Fetching subscription URL: ${trimmed}`);
+      const res = await fetch(trimmed, {
+        headers: { 'User-Agent': 'ClashForAndroid/2.5.12' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) {
+        throw new BadRequestException(`订阅链接请求失败：HTTP ${res.status}`);
+      }
+      return await res.text();
+    }
+    return trimmed;
+  }
+
   async import(userId: string, text: string) {
-    const { nodes, failed } = parseSubscriptionText(text);
+    const resolved = await this.resolveText(text);
+    const { nodes, failed } = parseSubscriptionText(resolved);
     if (nodes.length === 0) {
       return { success: 0, failed, errors: ['未能解析出任何有效节点'] };
     }
