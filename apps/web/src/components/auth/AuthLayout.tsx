@@ -6,6 +6,7 @@ import {
   CloudServerOutlined,
   NodeIndexOutlined,
   LinkOutlined,
+  ImportOutlined,
 } from '@ant-design/icons';
 
 const { useBreakpoint } = Grid;
@@ -26,6 +27,11 @@ const features = [
     icon: <LinkOutlined style={{ fontSize: 18 }} />,
     title: '订阅管理',
     desc: '生成 Clash / Sing-Box 订阅',
+  },
+  {
+    icon: <ImportOutlined style={{ fontSize: 18 }} />,
+    title: '节点托管',
+    desc: '托管已有节点，统一订阅管理',
   },
 ];
 

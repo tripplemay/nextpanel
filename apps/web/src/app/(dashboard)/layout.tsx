@@ -31,7 +31,7 @@ const { Text } = Typography;
 
 const baseMenuItems: ItemType[] = [
   { key: '/servers', icon: <CloudServerOutlined />, label: '服务器' },
-  { key: '/nodes', icon: <NodeIndexOutlined />, label: '节点' },
+  { key: '/nodes', icon: <NodeIndexOutlined />, label: '节点管理' },
   { key: '/external-nodes', icon: <ImportOutlined />, label: '外部节点' },
   { key: '/subscriptions', icon: <LinkOutlined />, label: '订阅管理' },
   { key: '/audit-logs', icon: <AuditOutlined />, label: '审计日志' },
