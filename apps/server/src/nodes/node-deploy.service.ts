@@ -498,10 +498,14 @@ export class NodeDeployService {
     const certFile = `${certDir}/${nodeId}.crt`;
     const keyFile = `${certDir}/${nodeId}.key`;
     log(`Ensuring self-signed TLS certificate at ${certFile}...`);
+    // Determine SAN type: IP address or DNS name
+    const isIp = /^[\d.]+$|^[0-9a-f:]+$/i.test(cn);
+    const san = isIp ? `IP:${cn}` : `DNS:${cn}`;
     const { stderr: certErr } = await ssh.execCommand(
       `mkdir -p ${certDir} && ` +
       `[ -f ${certFile} ] || openssl req -x509 -newkey rsa:2048 ` +
-      `-keyout ${keyFile} -out ${certFile} -days 3650 -nodes -subj "/CN=${cn}" 2>&1`,
+      `-keyout ${keyFile} -out ${certFile} -days 3650 -nodes -subj "/CN=${cn}" ` +
+      `-addext "subjectAltName=${san}" 2>&1`,
     );
     if (certErr) log(`TLS cert warning: ${certErr}`);
     else log(`TLS certificate ready`);
