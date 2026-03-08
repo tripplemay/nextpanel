@@ -18,6 +18,7 @@ export interface HeartbeatPayload {
 
 interface LatestVersionCache {
   version: string;
+  tagName: string;
   releaseNotes: string;
   fetchedAt: number;
 }
@@ -45,20 +46,48 @@ export class AgentService {
 
     const repo = this.config.get<string>('GITHUB_REPO') ?? 'tripplemay/nextpanel-releases';
     try {
-      const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+      // Step 1: get latest release tag
+      const releaseRes = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
         headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'nextpanel-server' },
         signal: AbortSignal.timeout(10_000),
       });
-      if (!res.ok) throw new Error(`GitHub API returned ${res.status}`);
-      const data = await res.json() as { tag_name: string; body?: string };
-      const version = data.tag_name.replace(/^v/, '');
-      const releaseNotes = data.body ?? '';
-      this.latestVersionCache = { version, releaseNotes, fetchedAt: Date.now() };
+      if (!releaseRes.ok) throw new Error(`GitHub API returned ${releaseRes.status}`);
+      const data = await releaseRes.json() as { tag_name: string };
+
+      // Extract semver from tag like "agent/v1.4.0" or "v1.4.0"
+      const match = data.tag_name.match(/(\d+\.\d+\.\d+)/);
+      const version = match ? match[1] : data.tag_name;
+      const tagName = data.tag_name;
+
+      // Step 2: fetch RELEASE_NOTES.md for Chinese release notes
+      const notesRes = await fetch(
+        `https://raw.githubusercontent.com/${repo}/main/RELEASE_NOTES.md`,
+        { signal: AbortSignal.timeout(10_000) },
+      );
+      let releaseNotes = '';
+      if (notesRes.ok) {
+        const md = await notesRes.text();
+        releaseNotes = this.parseReleaseNotes(md, version);
+      }
+
+      this.latestVersionCache = { version, tagName, releaseNotes, fetchedAt: Date.now() };
       return { version, releaseNotes };
     } catch (err) {
       this.logger.warn(`Failed to fetch latest agent version: ${err}`);
       return this.latestVersionCache ?? { version: '', releaseNotes: '' };
     }
+  }
+
+  /** Extract the section for `version` from RELEASE_NOTES.md */
+  private parseReleaseNotes(md: string, version: string): string {
+    const escaped = version.replace(/\./g, '\\.');
+    const sectionRe = new RegExp(`^##\\s+v?${escaped}\\b.*$`, 'm');
+    const start = md.search(sectionRe);
+    if (start === -1) return '';
+    const afterHeading = md.slice(start).indexOf('\n') + 1;
+    const rest = md.slice(start + afterHeading);
+    const nextSection = rest.search(/^##\s/m);
+    return (nextSection === -1 ? rest : rest.slice(0, nextSection)).trim();
   }
 
   async handleHeartbeat(payload: HeartbeatPayload) {
@@ -135,11 +164,12 @@ export class AgentService {
     let updateCommand: { version: string; downloadUrl: string } | undefined;
     if (server.pendingAgentUpdate) {
       const { version } = await this.getLatestVersion();
-      if (version) {
+      const tagName = this.latestVersionCache?.tagName;
+      if (version && tagName) {
         const repo = this.config.get<string>('GITHUB_REPO') ?? 'tripplemay/nextpanel-releases';
         updateCommand = {
           version,
-          downloadUrl: `https://github.com/${repo}/releases/download/v${version}/agent-linux-amd64`,
+          downloadUrl: `https://github.com/${repo}/releases/download/${tagName}/agent-linux-amd64`,
         };
       }
     }

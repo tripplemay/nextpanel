@@ -109,6 +109,7 @@ export default function ServersPage() {
   // 批量选择
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
   const [bulkTestingIds, setBulkTestingIds] = useState<Set<string>>(new Set());
+  const [upgradingIds, setUpgradingIds] = useState<Set<string>>(new Set());
 
   // 筛选状态
   const [searchText, setSearchText] = useState('');
@@ -136,6 +137,9 @@ export default function ServersPage() {
       message.success('更新指令已下发，Agent 将在下次心跳时开始更新');
     },
     onError: () => message.error('下发更新指令失败'),
+    onSettled: (_data, _err, id) => {
+      setUpgradingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+    },
   });
 
   const agentUpdateBatchMutation = useMutation({
@@ -415,29 +419,19 @@ export default function ServersPage() {
               v{record.agentVersion}
             </span>
             {isOutdated && latestAgent && (
-              <>
-                <Popover
-                  title={`v${latestAgent.version} 更新内容`}
-                  content={
-                    <div style={{ maxWidth: 320, whiteSpace: 'pre-wrap', fontSize: 12 }}>
-                      {latestAgent.releaseNotes || '暂无更新说明'}
-                    </div>
-                  }
-                  trigger="click"
-                >
-                  <InfoCircleOutlined style={{ fontSize: 11, color: '#8c8c8c', cursor: 'pointer' }} />
-                </Popover>
-                <Tooltip title={`升级到 v${latestAgent.version}`}>
-                  <Button
-                    type="link"
-                    size="small"
-                    icon={<UpCircleOutlined />}
-                    style={{ padding: 0, height: 'auto', fontSize: 12, color: '#1677ff' }}
-                    loading={agentUpdateMutation.isPending}
-                    onClick={() => agentUpdateMutation.mutate(record.id)}
-                  />
-                </Tooltip>
-              </>
+              <Tooltip title={`升级到 v${latestAgent.version}`}>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<UpCircleOutlined />}
+                  style={{ padding: 0, height: 'auto', fontSize: 12, color: '#1677ff' }}
+                  loading={upgradingIds.has(record.id)}
+                  onClick={() => {
+                    setUpgradingIds((prev) => new Set([...prev, record.id]));
+                    agentUpdateMutation.mutate(record.id);
+                  }}
+                />
+              </Tooltip>
             )}
           </Space>
         );
@@ -605,6 +599,17 @@ export default function ServersPage() {
               <span>
                 <UpCircleOutlined style={{ color: '#faad14' }} /> {upgradableIds.length} 台服务器的 Agent 可升级到 v{latestAgent?.version}
               </span>
+              <Popover
+                title={`v${latestAgent?.version} 更新内容`}
+                content={
+                  <div style={{ maxWidth: 360, whiteSpace: 'pre-wrap', fontSize: 12 }}>
+                    {latestAgent?.releaseNotes || '暂无更新说明'}
+                  </div>
+                }
+                trigger="click"
+              >
+                <Button size="small" icon={<InfoCircleOutlined />}>查看更新内容</Button>
+              </Popover>
               <Button
                 size="small"
                 icon={<SyncOutlined />}
