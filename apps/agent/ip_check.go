@@ -4,128 +4,169 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
+	"strconv"
 	"strings"
-	"time"
 )
 
+const browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+
 type ipCheckResult struct {
-	AgentToken   string `json:"agentToken"`
-	Netflix      string `json:"netflix,omitempty"`
+	AgentToken    string `json:"agentToken"`
+	Netflix       string `json:"netflix,omitempty"`
 	NetflixRegion string `json:"netflixRegion,omitempty"`
-	Disney       string `json:"disney,omitempty"`
-	DisneyRegion string `json:"disneyRegion,omitempty"`
-	Youtube      string `json:"youtube,omitempty"`
+	Disney        string `json:"disney,omitempty"`
+	DisneyRegion  string `json:"disneyRegion,omitempty"`
+	Youtube       string `json:"youtube,omitempty"`
 	YoutubeRegion string `json:"youtubeRegion,omitempty"`
-	Hulu         string `json:"hulu,omitempty"`
-	Bilibili     string `json:"bilibili,omitempty"`
-	Openai       string `json:"openai,omitempty"`
-	Claude       string `json:"claude,omitempty"`
-	Gemini       string `json:"gemini,omitempty"`
-	Success      bool   `json:"success"`
-	Error        string `json:"error,omitempty"`
+	Hulu          string `json:"hulu,omitempty"`
+	Bilibili      string `json:"bilibili,omitempty"`
+	Openai        string `json:"openai,omitempty"`
+	Claude        string `json:"claude,omitempty"`
+	Gemini        string `json:"gemini,omitempty"`
+	Success       bool   `json:"success"`
+	Error         string `json:"error,omitempty"`
+}
+
+type curlResult struct {
+	StatusCode int
+	Body       string
+	FinalURL   string
+}
+
+// runCurl executes curl with browser-like headers.
+// Returns status code, response body (up to 64 KB), and final redirected URL.
+func runCurl(timeoutSec int, url string) (curlResult, error) {
+	tmpFile, err := os.CreateTemp("", "ipcheck-*.html")
+	if err != nil {
+		return curlResult{}, fmt.Errorf("create temp file: %w", err)
+	}
+	tmpName := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmpName)
+
+	args := []string{
+		"-s",
+		"-L",
+		"--max-time", strconv.Itoa(timeoutSec),
+		"--max-redirs", "5",
+		"-A", browserUA,
+		"-H", "Accept-Language: en-US,en;q=0.9",
+		"-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		"-o", tmpName,
+		"-w", "%{http_code}\n%{url_effective}",
+		url,
+	}
+
+	var stdout bytes.Buffer
+	cmd := exec.Command("curl", args...)
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return curlResult{}, fmt.Errorf("curl: %w", err)
+	}
+
+	lines := strings.SplitN(strings.TrimSpace(stdout.String()), "\n", 2)
+	var res curlResult
+	if len(lines) >= 1 {
+		res.StatusCode, _ = strconv.Atoi(strings.TrimSpace(lines[0]))
+	}
+	if len(lines) >= 2 {
+		res.FinalURL = strings.TrimSpace(lines[1])
+	}
+
+	// Read body — limit to 64 KB
+	f, err := os.Open(tmpName)
+	if err == nil {
+		defer f.Close()
+		buf := make([]byte, 64*1024)
+		n, _ := f.Read(buf)
+		res.Body = string(buf[:n])
+	}
+
+	return res, nil
 }
 
 func runIpCheck(cfg *Config, serverId string) {
 	log.Printf("开始 IP 质量检测 (serverId=%s)", serverId)
+
+	if _, err := exec.LookPath("curl"); err != nil {
+		log.Printf("curl 未找到，跳过 IP 质量检测")
+		reportIpCheckResult(cfg, serverId, ipCheckResult{
+			AgentToken: cfg.AgentToken,
+			Success:    false,
+			Error:      "curl 未安装，无法执行检测",
+		})
+		return
+	}
 
 	result := ipCheckResult{
 		AgentToken: cfg.AgentToken,
 		Success:    true,
 	}
 
-	// Netflix
 	netflixStatus, netflixRegion := checkNetflix()
 	result.Netflix = netflixStatus
 	result.NetflixRegion = netflixRegion
 
-	// Disney+
 	disneyStatus, disneyRegion := checkDisney()
 	result.Disney = disneyStatus
 	result.DisneyRegion = disneyRegion
 
-	// YouTube Premium
 	youtubeStatus, youtubeRegion := checkYoutube()
 	result.Youtube = youtubeStatus
 	result.YoutubeRegion = youtubeRegion
 
-	// Hulu
-	result.Hulu = checkSimple("https://www.hulu.com/", "hulu.com", 10)
-
-	// Bilibili 港澳台
+	result.Hulu = checkSimpleURL("https://www.hulu.com/", 10)
 	result.Bilibili = checkBilibili()
-
-	// OpenAI
-	result.Openai = checkSimple("https://chat.openai.com/", "openai.com", 10)
-
-	// Claude
-	result.Claude = checkSimple("https://claude.ai/", "claude.ai", 10)
-
-	// Gemini
-	result.Gemini = checkSimple("https://gemini.google.com/", "gemini.google.com", 10)
+	result.Openai = checkSimpleURL("https://ios.chat.openai.com/", 10)
+	result.Claude = checkSimpleURL("https://claude.ai/", 10)
+	result.Gemini = checkSimpleURL("https://gemini.google.com/", 10)
 
 	reportIpCheckResult(cfg, serverId, result)
-	log.Printf("IP 质量检测完成 (serverId=%s) netflix=%s disney=%s", serverId, result.Netflix, result.Disney)
+	log.Printf("IP 质量检测完成 (serverId=%s) netflix=%s openai=%s claude=%s", serverId, result.Netflix, result.Openai, result.Claude)
 }
 
 func checkNetflix() (status string, region string) {
-	client := &http.Client{Timeout: 12 * time.Second}
-
-	// Check non-original content availability
-	resp, err := client.Get("https://www.netflix.com/title/70143836")
+	// Check licensed (non-original) content — Breaking Bad
+	res, err := runCurl(12, "https://www.netflix.com/title/70143836")
 	if err != nil {
 		return "BLOCKED", ""
 	}
-	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-	bodyStr := string(body)
-
-	if resp.StatusCode == 404 || strings.Contains(bodyStr, "not available") {
-		// Try self-produced content
-		resp2, err2 := client.Get("https://www.netflix.com/title/80018499")
-		if err2 != nil || resp2.StatusCode == 404 {
-			return "BLOCKED", ""
-		}
-		defer resp2.Body.Close()
-		return "ORIGINALS_ONLY", ""
+	unavailable := strings.Contains(res.Body, "not available") || strings.Contains(res.Body, "isn't available")
+	if res.StatusCode == 200 && !unavailable {
+		return "UNLOCKED", extractNetflixRegion(res.FinalURL, res.Body)
 	}
 
-	if resp.StatusCode == 200 {
-		// Extract region from page
-		region = extractNetflixRegion(bodyStr, resp)
-		return "UNLOCKED", region
+	// Check Netflix original — House of Cards
+	res2, err := runCurl(12, "https://www.netflix.com/title/80018499")
+	if err != nil || res2.StatusCode != 200 {
+		return "BLOCKED", ""
 	}
-
-	return "BLOCKED", ""
+	return "ORIGINALS_ONLY", ""
 }
 
-func extractNetflixRegion(body string, resp *http.Response) string {
-	// Try to get country from response URL or page content
-	finalURL := resp.Request.URL.String()
-	if strings.Contains(finalURL, "netflix.com/") {
-		// Extract country code from URL path like /us/ or /gb/
-		parts := strings.Split(finalURL, "/")
-		for i, p := range parts {
-			if p == "title" && i > 0 {
-				candidate := parts[i-1]
-				if len(candidate) == 2 {
-					return strings.ToUpper(candidate)
-				}
+func extractNetflixRegion(finalURL, body string) string {
+	// Parse from redirect URL: netflix.com/hk/title/... → HK
+	parts := strings.Split(finalURL, "/")
+	for i, p := range parts {
+		if p == "title" && i > 0 {
+			candidate := parts[i-1]
+			if len(candidate) == 2 && candidate != "en" {
+				return strings.ToUpper(candidate)
 			}
 		}
 	}
 
-	// Search for country code in body
-	markers := []string{`"countryCode":"`, `"country_code":"`}
-	for _, marker := range markers {
-		idx := strings.Index(body, marker)
-		if idx != -1 {
+	// Fallback: parse from body JSON
+	for _, marker := range []string{`"countryCode":"`, `"country_code":"`} {
+		if idx := strings.Index(body, marker); idx != -1 {
 			start := idx + len(marker)
-			end := strings.Index(body[start:], `"`)
-			if end > 0 && end <= 3 {
+			if end := strings.Index(body[start:], `"`); end > 0 && end <= 3 {
 				return strings.ToUpper(body[start : start+end])
 			}
 		}
@@ -134,83 +175,52 @@ func extractNetflixRegion(body string, resp *http.Response) string {
 }
 
 func checkDisney() (status string, region string) {
-	client := &http.Client{Timeout: 12 * time.Second}
-	resp, err := client.Get("https://www.disneyplus.com/")
-	if err != nil {
+	res, err := runCurl(12, "https://www.disneyplus.com/")
+	if err != nil || res.StatusCode != 200 {
 		return "BLOCKED", ""
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 200 {
-		finalURL := resp.Request.URL.String()
-		// Extract region from redirect URL
-		for _, part := range strings.Split(finalURL, "/") {
-			if len(part) == 2 && part == strings.ToLower(part) {
-				return "AVAILABLE", strings.ToUpper(part)
-			}
+	for _, part := range strings.Split(res.FinalURL, "/") {
+		if len(part) == 2 && part == strings.ToLower(part) {
+			return "AVAILABLE", strings.ToUpper(part)
 		}
-		return "AVAILABLE", ""
 	}
-	return "BLOCKED", ""
+	return "AVAILABLE", ""
 }
 
 func checkYoutube() (status string, region string) {
-	client := &http.Client{Timeout: 12 * time.Second}
-	resp, err := client.Get("https://www.youtube.com/premium")
-	if err != nil {
+	res, err := runCurl(12, "https://www.youtube.com/premium")
+	if err != nil || res.StatusCode != 200 {
 		return "BLOCKED", ""
 	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 32*1024))
-	bodyStr := string(body)
-
-	if resp.StatusCode != 200 {
+	if strings.Contains(res.Body, "is not available") || strings.Contains(res.Body, "not available in your country") {
 		return "BLOCKED", ""
 	}
-
-	if strings.Contains(bodyStr, "is not available") || strings.Contains(bodyStr, "not available in your country") {
-		return "BLOCKED", ""
-	}
-
-	// Try to extract GL (geographic location) from page
-	idx := strings.Index(bodyStr, `"GL":"`)
-	if idx != -1 {
+	if idx := strings.Index(res.Body, `"GL":"`); idx != -1 {
 		start := idx + 6
-		end := strings.Index(bodyStr[start:], `"`)
-		if end > 0 && end <= 3 {
-			return "AVAILABLE", bodyStr[start : start+end]
+		if end := strings.Index(res.Body[start:], `"`); end > 0 && end <= 3 {
+			return "AVAILABLE", res.Body[start : start+end]
 		}
 	}
 	return "AVAILABLE", ""
 }
 
 func checkBilibili() string {
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get("https://www.bilibili.com/bangumi/play/ss32982")
-	if err != nil {
+	res, err := runCurl(10, "https://www.bilibili.com/bangumi/play/ss32982")
+	if err != nil || res.StatusCode != 200 {
 		return "BLOCKED"
 	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
-	bodyStr := string(body)
-
-	if strings.Contains(bodyStr, "抱歉") || strings.Contains(bodyStr, "地区") || resp.StatusCode != 200 {
+	if strings.Contains(res.Body, "抱歉") || strings.Contains(res.Body, "地区") {
 		return "BLOCKED"
 	}
 	return "AVAILABLE"
 }
 
-func checkSimple(url string, domain string, timeoutSec int) string {
-	client := &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
-	resp, err := client.Get(url)
+func checkSimpleURL(url string, timeoutSec int) string {
+	res, err := runCurl(timeoutSec, url)
 	if err != nil {
 		return "BLOCKED"
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+	if res.StatusCode >= 200 && res.StatusCode < 400 {
 		return "AVAILABLE"
 	}
 	return "BLOCKED"
