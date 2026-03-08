@@ -4,6 +4,16 @@ import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 import { Card, Space, Tag, Typography, Progress, Dropdown, Button, Tooltip } from 'antd';
+
+function GfwDot({ gfwBlocked }: { gfwBlocked: boolean | null | undefined }) {
+  const color = gfwBlocked === false ? '#52c41a' : gfwBlocked === true ? '#ff4d4f' : '#d9d9d9';
+  const label = gfwBlocked === false ? '未被封锁' : gfwBlocked === true ? '已被封锁' : 'GFW 未检测';
+  return (
+    <Tooltip title={label}>
+      <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
+    </Tooltip>
+  );
+}
 import {
   CheckCircleOutlined,
   CloudDownloadOutlined,
@@ -90,9 +100,10 @@ export default function ServerCard({
               </Tooltip>
             )}
           </Space>
-          <div>
+          <Space size={4}>
             <Text type="secondary" style={{ fontSize: 12 }}>{server.ip}</Text>
-          </div>
+            <GfwDot gfwBlocked={server.ipCheck?.gfwBlocked} />
+          </Space>
           {(server.region || server.provider) && (
             <div>
               <Text type="secondary" style={{ fontSize: 11 }}>

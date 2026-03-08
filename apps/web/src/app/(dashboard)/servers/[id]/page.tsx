@@ -20,6 +20,7 @@ import {
   Empty,
   Badge,
   Statistic,
+  Tooltip as AntTooltip,
 } from 'antd';
 import { ArrowLeftOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
@@ -43,6 +44,16 @@ dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
 
 const { Title, Text } = Typography;
+
+function GfwDot({ gfwBlocked }: { gfwBlocked: boolean | null | undefined }) {
+  const color = gfwBlocked === false ? '#52c41a' : gfwBlocked === true ? '#ff4d4f' : '#d9d9d9';
+  const label = gfwBlocked === false ? '未被封锁' : gfwBlocked === true ? '已被封锁' : 'GFW 未检测';
+  return (
+    <AntTooltip title={label}>
+      <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
+    </AntTooltip>
+  );
+}
 
 const CHART_WINDOW = 60;
 
@@ -211,7 +222,10 @@ export default function ServerDetailPage({
             </Button>
             <div>
               <Title level={4} style={{ margin: 0 }}>{server.name}</Title>
-              <Text type="secondary" style={{ fontSize: 12 }}>{server.ip}</Text>
+              <Space size={6}>
+                <Text type="secondary" style={{ fontSize: 12 }}>{server.ip}</Text>
+                <GfwDot gfwBlocked={server.ipCheck?.gfwBlocked} />
+              </Space>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingLeft: isMobile ? 0 : 4 }}>

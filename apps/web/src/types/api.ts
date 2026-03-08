@@ -144,6 +144,7 @@ export interface Server {
   deleteError: string | null;
   createdAt: string;
   updatedAt: string;
+  ipCheck?: { gfwBlocked: boolean | null } | null;
 }
 
 export interface Node {

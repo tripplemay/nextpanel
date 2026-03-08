@@ -53,7 +53,7 @@ export class ServersService {
   async findAll(userId: string) {
     return this.prisma.server.findMany({
       where: { userId },
-      select: this.safeSelect(),
+      select: { ...this.safeSelect(), ipCheck: { select: { gfwBlocked: true } } },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -61,7 +61,7 @@ export class ServersService {
   async findOne(id: string, userId: string) {
     const server = await this.prisma.server.findFirst({
       where: { id, userId },
-      select: this.safeSelect(),
+      select: { ...this.safeSelect(), ipCheck: { select: { gfwBlocked: true } } },
     });
     if (!server) throw new NotFoundException(`Server ${id} not found`);
     return server;

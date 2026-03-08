@@ -19,7 +19,6 @@ import {
   Row,
   Col,
   Alert,
-  Progress,
 } from 'antd';
 import {
   AppstoreOutlined,
@@ -61,6 +60,16 @@ function usageColor(pct: number | null | undefined): string {
   if (pct < 70) return '#52c41a';
   if (pct < 90) return '#faad14';
   return '#ff4d4f';
+}
+
+function GfwDot({ gfwBlocked }: { gfwBlocked: boolean | null }) {
+  const color = gfwBlocked === false ? '#52c41a' : gfwBlocked === true ? '#ff4d4f' : '#d9d9d9';
+  const label = gfwBlocked === false ? '未被封锁' : gfwBlocked === true ? '已被封锁' : 'GFW 未检测';
+  return (
+    <Tooltip title={label}>
+      <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
+    </Tooltip>
+  );
 }
 
 function heartbeatColor(lastSeenAt: string | null): string {
@@ -272,12 +281,14 @@ export default function ServersPage() {
               </Tooltip>
             )}
           </Space>
-          <small style={{ color: '#888' }}>{record.ip}</small>
+          <Space size={4}>
+            <small style={{ color: '#888' }}>{record.ip}</small>
+            <GfwDot gfwBlocked={record.ipCheck?.gfwBlocked ?? null} />
+          </Space>
         </Space>
       ),
     },
     { title: '区域', dataIndex: 'region', width: 100, ellipsis: true },
-    { title: '提供商', dataIndex: 'provider', width: 120, ellipsis: true },
     {
       title: '状态',
       dataIndex: 'status',
@@ -292,23 +303,19 @@ export default function ServersPage() {
     },
     {
       title: '资源',
-      width: 140,
+      width: 120,
       render: (_: unknown, record) =>
         record.cpuUsage != null ? (
-          <Space direction="vertical" size={3} style={{ width: '100%' }}>
+          <Space direction="vertical" size={2}>
             {(['cpuUsage', 'memUsage', 'diskUsage'] as const).map((key) => {
               const labels: Record<string, string> = { cpuUsage: 'CPU', memUsage: '内存', diskUsage: '磁盘' };
               const val = record[key];
               return (
                 <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <Text style={{ fontSize: 11, color: '#8c8c8c', width: 24, flexShrink: 0 }}>{labels[key]}</Text>
-                  <Progress
-                    percent={val != null ? Math.round(val) : 0}
-                    size="small"
-                    strokeColor={usageColor(val)}
-                    style={{ flex: 1, margin: 0 }}
-                    format={(p) => val != null ? `${p}%` : '—'}
-                  />
+                  <Text style={{ fontSize: 12, fontWeight: 500, color: usageColor(val) }}>
+                    {val != null ? `${Math.round(val)}%` : '—'}
+                  </Text>
                 </div>
               );
             })}
@@ -334,11 +341,6 @@ export default function ServersPage() {
         const color = ms <= 50 ? '#52c41a' : ms <= 150 ? '#faad14' : '#ff4d4f';
         return <span style={{ color, fontWeight: 500 }}>{ms} ms</span>;
       },
-    },
-    {
-      title: 'Agent 版本',
-      dataIndex: 'agentVersion',
-      render: (v: string | null) => v ?? <span style={{ color: '#ccc' }}>未连接</span>,
     },
     {
       title: '标签',
