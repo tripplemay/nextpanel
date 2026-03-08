@@ -150,25 +150,52 @@ describe('AgentService', () => {
       });
     });
 
-    it('delivers updateCommand and clears flag when pendingAgentUpdate is true', async () => {
+    it('delivers updateCommand but keeps flag set while agent is still on old version', async () => {
       const serverWithUpdate = { ...fakeServer, pendingAgentUpdate: true };
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(serverWithUpdate);
       (mockPrisma.server.update as jest.Mock).mockResolvedValue(serverWithUpdate);
 
-      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        json: async () => ({ tag_name: 'v2.0.0', body: 'New features' }),
-      } as Response);
+      // getLatestVersion makes two fetches: GitHub releases API, then RELEASE_NOTES.md
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v2.0.0' }) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response); // RELEASE_NOTES.md not required
 
+      // Agent reports old version — update is still in progress
       const result = await svc.handleHeartbeat({
         agentToken: 'tok-abc', agentVersion: '1.4.0',
         cpu: 0, mem: 0, disk: 0, networkIn: 0, networkOut: 0,
       });
 
+      // Command should be sent so agent can download
       expect(result.updateCommand).toMatchObject({
         version: '2.0.0',
         downloadUrl: expect.stringContaining('v2.0.0'),
       });
+      // Flag must NOT be cleared — agent hasn't updated yet
+      const updateCall = (mockPrisma.server.update as jest.Mock).mock.calls[0][0];
+      expect(updateCall.data).not.toHaveProperty('pendingAgentUpdate');
+      fetchSpy.mockRestore();
+    });
+
+    it('clears pendingAgentUpdate flag once agent reports the target version', async () => {
+      const serverWithUpdate = { ...fakeServer, pendingAgentUpdate: true };
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(serverWithUpdate);
+      (mockPrisma.server.update as jest.Mock).mockResolvedValue(serverWithUpdate);
+
+      // getLatestVersion makes two fetches: GitHub releases API, then RELEASE_NOTES.md
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v2.0.0' }) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response);
+
+      // Agent reports the new version — update is complete
+      const result = await svc.handleHeartbeat({
+        agentToken: 'tok-abc', agentVersion: '2.0.0',
+        cpu: 0, mem: 0, disk: 0, networkIn: 0, networkOut: 0,
+      });
+
+      // No command needed — agent is already on the target version
+      expect(result.updateCommand).toBeUndefined();
+      // Flag should now be cleared
       expect(mockPrisma.server.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ pendingAgentUpdate: false }) }),
       );
@@ -190,32 +217,33 @@ describe('AgentService', () => {
   });
 
   describe('getLatestVersion', () => {
-    it('fetches version from GitHub API', async () => {
-      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        json: async () => ({ tag_name: 'v1.5.0', body: '# Release notes' }),
-      } as Response);
+    // getLatestVersion makes two fetches per call:
+    //   1. GitHub releases API → JSON with tag_name
+    //   2. RELEASE_NOTES.md   → plain text
 
-      // Clear internal cache by creating new instance
+    it('fetches version from GitHub API and release notes from RELEASE_NOTES.md', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v1.5.0' }) } as Response)
+        .mockResolvedValueOnce({ ok: true, text: async () => '## 1.5.0\n- New feature' } as Response);
+
       const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
       const result = await freshSvc.getLatestVersion();
 
       expect(result.version).toBe('1.5.0');
-      expect(result.releaseNotes).toBe('# Release notes');
+      expect(result.releaseNotes).toContain('New feature');
       fetchSpy.mockRestore();
     });
 
     it('returns cached result within TTL without fetching again', async () => {
-      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        json: async () => ({ tag_name: 'v1.5.0', body: 'notes' }),
-      } as Response);
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v1.5.0' }) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response);
 
       const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
       await freshSvc.getLatestVersion();
       await freshSvc.getLatestVersion(); // second call should use cache
 
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(fetchSpy).toHaveBeenCalledTimes(2); // 2 fetches for the first call, 0 for the second
       fetchSpy.mockRestore();
     });
 
@@ -230,10 +258,9 @@ describe('AgentService', () => {
     });
 
     it('strips leading "v" from tag_name', async () => {
-      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        json: async () => ({ tag_name: 'v3.0.0', body: '' }),
-      } as Response);
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v3.0.0' }) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response);
 
       const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
       const result = await freshSvc.getLatestVersion();

@@ -117,9 +117,28 @@ export class AgentService {
       lastSeenAt: new Date(),
     };
 
-    // Consume pendingAgentUpdate flag — clear it so we only send the command once
+    // Handle pending agent update.
+    // Keep pendingAgentUpdate=true (and show "更新中..." in UI) until the agent actually reports
+    // the new version — not just until the command is sent. This prevents the banner from
+    // disappearing immediately after the first heartbeat while the agent is still downloading.
+    let updateCommand: { version: string; downloadUrl: string } | undefined;
     if (server.pendingAgentUpdate) {
-      updateData.pendingAgentUpdate = false;
+      const { version } = await this.getLatestVersion();
+      const tagName = this.latestVersionCache?.tagName;
+      if (version && tagName) {
+        if (payload.agentVersion === version) {
+          // Agent has successfully updated to the target version — clear the flag.
+          updateData.pendingAgentUpdate = false;
+        } else {
+          // Agent hasn't updated yet — keep the flag set and re-deliver the command.
+          // The agent guards against concurrent updates with selfUpdateRunning, so re-sending is safe.
+          const repo = this.config.get<string>('GITHUB_REPO') ?? 'tripplemay/nextpanel-releases';
+          updateCommand = {
+            version,
+            downloadUrl: `https://github.com/${repo}/releases/download/${tagName}/agent-linux-amd64`,
+          };
+        }
+      }
     }
 
     await this.prisma.server.update({ where: { id: server.id }, data: updateData });
@@ -159,20 +178,6 @@ export class AgentService {
 
     // Return pending IP check task if any
     const ipCheckTask = await this.ipCheck.getPendingTask(payload.agentToken);
-
-    // If pendingAgentUpdate was set, deliver update command
-    let updateCommand: { version: string; downloadUrl: string } | undefined;
-    if (server.pendingAgentUpdate) {
-      const { version } = await this.getLatestVersion();
-      const tagName = this.latestVersionCache?.tagName;
-      if (version && tagName) {
-        const repo = this.config.get<string>('GITHUB_REPO') ?? 'tripplemay/nextpanel-releases';
-        updateCommand = {
-          version,
-          downloadUrl: `https://github.com/${repo}/releases/download/${tagName}/agent-linux-amd64`,
-        };
-      }
-    }
 
     return {
       ok: true,

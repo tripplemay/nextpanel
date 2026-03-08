@@ -461,11 +461,11 @@ export class ServersService {
   }
 
   async agentUpdateBatch(ids: string[], userId: string) {
-    await this.prisma.server.updateMany({
+    const { count } = await this.prisma.server.updateMany({
       where: { id: { in: ids }, userId },
       data: { pendingAgentUpdate: true },
     });
-    return { ok: true, count: ids.length };
+    return { ok: true, count };
   }
 
   /** Returns a select object that excludes sshAuthEnc */
