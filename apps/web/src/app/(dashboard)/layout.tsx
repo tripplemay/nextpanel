@@ -21,6 +21,7 @@ import {
   ImportOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/auth';
+import { authApi } from '@/lib/api';
 import WelcomeModal from '@/components/common/WelcomeModal';
 import ServerFormModal from '@/components/servers/ServerFormModal';
 
@@ -95,7 +96,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       key: 'logout',
       icon: <LogoutOutlined />,
       label: '退出登录',
-      onClick: () => {
+      onClick: async () => {
+        try { await authApi.logout(); } catch { /* 本地状态仍需清除 */ }
         logout();
         router.push('/login');
       },

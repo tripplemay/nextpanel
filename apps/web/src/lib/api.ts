@@ -65,6 +65,7 @@ export const authApi = {
     api.post<{ id: string; username: string; role: string }>('/auth/register', data),
   changePassword: (currentPassword: string, newPassword: string) =>
     api.patch<void>('/auth/change-password', { currentPassword, newPassword }),
+  logout: () => api.post<void>('/auth/logout'),
 };
 
 // ── Servers ──────────────────────────────────────────
