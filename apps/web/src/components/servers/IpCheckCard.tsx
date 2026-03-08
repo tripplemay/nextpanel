@@ -1,13 +1,13 @@
 'use client';
 
-import { Button, Card, Descriptions, Skeleton, Tag, Space, Typography, Tooltip } from 'antd';
+import { Button, Card, Collapse, Descriptions, Skeleton, Table, Tabs, Tag, Space, Typography, Tooltip } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 import { ipCheckApi } from '@/lib/api';
-import type { ServerIpCheck } from '@/types/api';
+import type { ServerIpCheck, RouteData, OutboundNode, InboundNode } from '@/types/api';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -71,6 +71,128 @@ function IpTypeTag({ ipType }: { ipType: string | null }) {
     <Tag color={ipType === 'RESIDENTIAL' ? 'green' : 'orange'}>
       {ipType === 'RESIDENTIAL' ? '原生 IP' : '机房 IP'}
     </Tag>
+  );
+}
+
+const CITIES = ['北京', '上海', '广州'];
+const ISPS   = ['联通', '电信', '移动'];
+
+function msText(ms: number) {
+  if (ms < 0) return <Text type="secondary">超时</Text>;
+  const color = ms < 80 ? '#52c41a' : ms < 150 ? '#faad14' : '#ff4d4f';
+  return <Text style={{ color }}>{ms.toFixed(1)} ms</Text>;
+}
+
+function RouteInboundTable({ inbound }: { inbound: InboundNode[] }) {
+  // Build a map: isp → city → node
+  const map = new Map<string, Map<string, InboundNode>>();
+  for (const n of inbound) {
+    if (!map.has(n.isp)) map.set(n.isp, new Map());
+    map.get(n.isp)!.set(n.city, n);
+  }
+
+  const source = inbound[0]?.source;
+
+  return (
+    <div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: 'left', padding: '4px 8px', color: '#8c8c8c', fontWeight: 400 }}>运营商</th>
+            {CITIES.map((c) => (
+              <th key={c} style={{ textAlign: 'center', padding: '4px 8px', color: '#8c8c8c', fontWeight: 400 }}>{c}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {ISPS.map((isp) => (
+            <tr key={isp}>
+              <td style={{ padding: '4px 8px' }}><Tag>{isp}</Tag></td>
+              {CITIES.map((city) => {
+                const node = map.get(isp)?.get(city);
+                return (
+                  <td key={city} style={{ textAlign: 'center', padding: '4px 8px' }}>
+                    {node ? msText(node.pingMs) : <Text type="secondary">—</Text>}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {source && (
+        <div style={{ marginTop: 4, fontSize: 11, color: '#bfbfbf' }}>数据来源: {source}</div>
+      )}
+    </div>
+  );
+}
+
+function RouteOutboundList({ outbound }: { outbound: OutboundNode[] }) {
+  const items = outbound.map((node) => ({
+    key: `${node.isp}-${node.city}`,
+    label: (
+      <Space>
+        <Tag>{node.isp}</Tag>
+        <Text>{node.city}</Text>
+        {msText(node.pingMs)}
+        {node.loss > 0 && <Text type="secondary" style={{ fontSize: 12 }}>丢包 {node.loss}/3</Text>}
+      </Space>
+    ),
+    children: node.hops && node.hops.length > 0 ? (
+      <Table
+        size="small"
+        pagination={false}
+        dataSource={node.hops.map((h) => ({ ...h, key: h.n }))}
+        columns={[
+          { title: '#', dataIndex: 'n', width: 40 },
+          { title: 'IP', dataIndex: 'ip', render: (ip: string) => ip === '*' ? <Text type="secondary">*</Text> : ip },
+          { title: 'ASN', dataIndex: 'asn', render: (v?: string) => v ? <Text type="secondary" style={{ fontSize: 12 }}>{v}</Text> : '—' },
+          { title: '机构', dataIndex: 'org', render: (v?: string) => v ?? '—' },
+          { title: '延迟', dataIndex: 'ms', render: (ms: number) => msText(ms) },
+        ]}
+      />
+    ) : <Text type="secondary">无路由数据</Text>,
+  }));
+
+  return <Collapse size="small" ghost items={items} />;
+}
+
+function RouteTab({ routeData, isChecking }: { routeData: RouteData | null; isChecking: boolean }) {
+  if (isChecking) {
+    return <Skeleton active paragraph={{ rows: 5 }} />;
+  }
+  if (!routeData) {
+    return (
+      <div style={{ textAlign: 'center', padding: '24px 0', color: '#8c8c8c' }}>
+        暂无路由数据，点击「重新检测」获取（需 Agent v1.4.0+）
+      </div>
+    );
+  }
+
+  return (
+    <Space direction="vertical" style={{ width: '100%' }} size={16}>
+      <div>
+        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+          去程（中国 → 节点）
+        </Text>
+        {routeData.inbound && routeData.inbound.length > 0
+          ? <RouteInboundTable inbound={routeData.inbound} />
+          : <Text type="secondary">去程检测暂不可用</Text>
+        }
+      </div>
+      <div>
+        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+          回程（节点 → 中国）
+        </Text>
+        {routeData.outbound && routeData.outbound.length > 0
+          ? <RouteOutboundList outbound={routeData.outbound} />
+          : <Text type="secondary">回程数据为空</Text>
+        }
+      </div>
+      <Text type="secondary" style={{ fontSize: 11 }}>
+        检测时间: {dayjs(routeData.checkedAt).format('MM-DD HH:mm')}
+      </Text>
+    </Space>
   );
 }
 
@@ -140,13 +262,8 @@ export default function IpCheckCard({ serverId }: Props) {
     );
   }
 
-  return (
-    <Card
-      title="IP 质量检测"
-      size="small"
-      style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
-      extra={cardExtra}
-    >
+  const streamingTab = (
+    <>
       <Descriptions column={1} size="small" styles={{ label: { width: 140 } }}>
         {/* IP 基本信息 */}
         <Descriptions.Item label="IP 类型">
@@ -167,10 +284,8 @@ export default function IpCheckCard({ serverId }: Props) {
           )}
         </Descriptions.Item>
 
-        {/* 分隔 */}
         <Descriptions.Item label=" " style={{ paddingBottom: 0 }}><div /></Descriptions.Item>
 
-        {/* 流媒体 */}
         <Descriptions.Item label="Netflix">
           {hasStreamingInfo
             ? <NetflixStatus netflix={check.netflix} region={check.netflixRegion} />
@@ -197,7 +312,6 @@ export default function IpCheckCard({ serverId }: Props) {
             : <Skeleton.Input size="small" style={{ width: 80, height: 20 }} active={isChecking} />}
         </Descriptions.Item>
 
-        {/* AI 服务 */}
         <Descriptions.Item label=" " style={{ paddingBottom: 0 }}><div /></Descriptions.Item>
         <Descriptions.Item label="OpenAI">
           {hasStreamingInfo
@@ -215,7 +329,6 @@ export default function IpCheckCard({ serverId }: Props) {
             : <Skeleton.Input size="small" style={{ width: 80, height: 20 }} active={isChecking} />}
         </Descriptions.Item>
 
-        {/* GFW */}
         <Descriptions.Item label=" " style={{ paddingBottom: 0 }}><div /></Descriptions.Item>
         <Descriptions.Item label="GFW 封锁">
           {check
@@ -229,6 +342,23 @@ export default function IpCheckCard({ serverId }: Props) {
           <Text type="secondary" style={{ fontSize: 12 }}>检测失败: {check.error}</Text>
         </div>
       )}
+    </>
+  );
+
+  return (
+    <Card
+      title="IP 质量检测"
+      size="small"
+      style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+      extra={cardExtra}
+    >
+      <Tabs
+        size="small"
+        items={[
+          { key: 'streaming', label: '流媒体 / AI', children: streamingTab },
+          { key: 'route',     label: '路由测试',    children: <RouteTab routeData={check?.routeData ?? null} isChecking={isChecking} /> },
+        ]}
+      />
     </Card>
   );
 }

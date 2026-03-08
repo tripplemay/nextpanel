@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsObject } from 'class-validator';
 
 export class ReportIpCheckResultDto {
   @IsString()
@@ -47,6 +47,10 @@ export class ReportIpCheckResultDto {
   @IsString()
   @IsOptional()
   gemini?: string;
+
+  @IsObject()
+  @IsOptional()
+  routeData?: Record<string, unknown>;
 
   @IsBoolean()
   @IsOptional()

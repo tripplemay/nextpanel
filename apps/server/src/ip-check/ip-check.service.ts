@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma.service';
 import { IpInfoService } from './ip-info.service';
 import { GfwCheckService } from './gfw-check.service';
+import { RouteCheckService } from './route-check/route-check.service';
 import { ReportIpCheckResultDto } from './dto/report-result.dto';
 
 @Injectable()
@@ -13,6 +14,7 @@ export class IpCheckService {
     private readonly prisma: PrismaService,
     private readonly ipInfo: IpInfoService,
     private readonly gfw: GfwCheckService,
+    private readonly routeCheck: RouteCheckService,
   ) {}
 
   /** Called after server creation — fire-and-forget */
@@ -56,6 +58,7 @@ export class IpCheckService {
     // Verify the agent token belongs to this server
     const server = await this.prisma.server.findFirst({
       where: { id: serverId, agentToken: dto.agentToken },
+      select: { id: true, ip: true },
     });
     if (!server) throw new NotFoundException('Server not found or token mismatch');
 
@@ -74,6 +77,15 @@ export class IpCheckService {
       return;
     }
 
+    // If agent reported routeData (outbound/回程), merge with inbound (去程) from panel
+    let finalRouteData: Record<string, unknown> | undefined;
+    if (dto.routeData) {
+      const inbound = await this.routeCheck.checkInbound(server.ip);
+      finalRouteData = inbound
+        ? { ...dto.routeData, inbound }
+        : dto.routeData;
+    }
+
     await this.prisma.serverIpCheck.update({
       where: { serverId },
       data: {
@@ -90,6 +102,7 @@ export class IpCheckService {
         openai: dto.openai,
         claude: dto.claude,
         gemini: dto.gemini,
+        ...(finalRouteData ? { routeData: finalRouteData } : {}),
       },
     });
   }

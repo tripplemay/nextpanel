@@ -115,8 +115,42 @@ export interface ServerIpCheck {
   // GFW
   gfwBlocked: boolean | null;
   gfwCheckedAt: string | null;
+  // Route check
+  routeData: RouteData | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RouteHop {
+  n: number;
+  ip: string;
+  asn?: string;
+  org?: string;
+  ms: number; // -1 = timeout
+}
+
+export interface OutboundNode {
+  isp: string;
+  city: string;
+  ip: string;
+  pingMs: number; // -1 = unreachable
+  tcpMs: number;
+  loss: number;
+  hops?: RouteHop[];
+}
+
+export interface InboundNode {
+  isp: string;
+  city: string;
+  pingMs: number;
+  loss: number;
+  source: string;
+}
+
+export interface RouteData {
+  checkedAt: string;
+  outbound: OutboundNode[];
+  inbound?: InboundNode[];
 }
 
 export interface Server {

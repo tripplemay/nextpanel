@@ -391,6 +391,10 @@ model ServerIpCheck {
   gfwBlocked   Boolean?
   gfwCheckedAt DateTime?
 
+  /// Route check — go/return path latency + traceroute to 9 Chinese ISP nodes
+  /// Structure: { checkedAt, outbound: RouteNodeResult[], inbound: InboundResult[] }
+  routeData Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

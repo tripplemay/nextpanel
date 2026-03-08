@@ -15,20 +15,21 @@ import (
 const browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
 type ipCheckResult struct {
-	AgentToken    string `json:"agentToken"`
-	Netflix       string `json:"netflix,omitempty"`
-	NetflixRegion string `json:"netflixRegion,omitempty"`
-	Disney        string `json:"disney,omitempty"`
-	DisneyRegion  string `json:"disneyRegion,omitempty"`
-	Youtube       string `json:"youtube,omitempty"`
-	YoutubeRegion string `json:"youtubeRegion,omitempty"`
-	Hulu          string `json:"hulu,omitempty"`
-	Bilibili      string `json:"bilibili,omitempty"`
-	Openai        string `json:"openai,omitempty"`
-	Claude        string `json:"claude,omitempty"`
-	Gemini        string `json:"gemini,omitempty"`
-	Success       bool   `json:"success"`
-	Error         string `json:"error,omitempty"`
+	AgentToken    string     `json:"agentToken"`
+	Netflix       string     `json:"netflix,omitempty"`
+	NetflixRegion string     `json:"netflixRegion,omitempty"`
+	Disney        string     `json:"disney,omitempty"`
+	DisneyRegion  string     `json:"disneyRegion,omitempty"`
+	Youtube       string     `json:"youtube,omitempty"`
+	YoutubeRegion string     `json:"youtubeRegion,omitempty"`
+	Hulu          string     `json:"hulu,omitempty"`
+	Bilibili      string     `json:"bilibili,omitempty"`
+	Openai        string     `json:"openai,omitempty"`
+	Claude        string     `json:"claude,omitempty"`
+	Gemini        string     `json:"gemini,omitempty"`
+	RouteData     *RouteData `json:"routeData,omitempty"`
+	Success       bool       `json:"success"`
+	Error         string     `json:"error,omitempty"`
 }
 
 type curlResult struct {
@@ -125,6 +126,11 @@ func runIpCheck(cfg *Config, serverId string) {
 	result.Openai = checkSimpleURL("https://ios.chat.openai.com/", 10)
 	result.Claude = checkSimpleURL("https://claude.ai/", 10)
 	result.Gemini = checkSimpleURL("https://gemini.google.com/", 10)
+
+	// Route check (回程): node → 9 Chinese ISP IPs, runs concurrently with total 90s timeout
+	log.Printf("开始回程路由检测 (serverId=%s)", serverId)
+	result.RouteData = runRouteCheck()
+	log.Printf("回程路由检测完成 (serverId=%s)", serverId)
 
 	reportIpCheckResult(cfg, serverId, result)
 	log.Printf("IP 质量检测完成 (serverId=%s) netflix=%s openai=%s claude=%s", serverId, result.Netflix, result.Openai, result.Claude)
