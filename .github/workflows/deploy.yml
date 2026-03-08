@@ -166,7 +166,7 @@ jobs:
             find $APP_DIR -name "*.tsbuildinfo" -delete
 
             # 顺序构建（避免并行 OOM），限制 Node 堆内存
-            export NODE_OPTIONS="--max-old-space-size=384"
+            export NODE_OPTIONS="--max-old-space-size=1024"
             export NEXT_TELEMETRY_DISABLED=1
             pnpm -r --workspace-concurrency=1 build
             unset NODE_OPTIONS NEXT_TELEMETRY_DISABLED
