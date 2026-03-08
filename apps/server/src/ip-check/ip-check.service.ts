@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { IpInfoService } from './ip-info.service';
 import { GfwCheckService } from './gfw-check.service';
@@ -78,12 +79,12 @@ export class IpCheckService {
     }
 
     // If agent reported routeData (outbound/回程), merge with inbound (去程) from panel
-    let finalRouteData: Record<string, unknown> | undefined;
+    let finalRouteData: Prisma.InputJsonValue | undefined;
     if (dto.routeData) {
       const inbound = await this.routeCheck.checkInbound(server.ip);
-      finalRouteData = inbound
+      finalRouteData = (inbound
         ? { ...dto.routeData, inbound }
-        : dto.routeData;
+        : dto.routeData) as Prisma.InputJsonValue;
     }
 
     await this.prisma.serverIpCheck.update({
