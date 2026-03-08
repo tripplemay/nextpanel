@@ -5,11 +5,16 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { Cron } from '@nestjs/schedule';
 import * as bcrypt from 'bcrypt';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+
+const MAX_LOGIN_ATTEMPTS = 10;
+const LOCKOUT_MINUTES = 15;
 
 @Injectable()
 export class AuthService {
@@ -23,15 +28,57 @@ export class AuthService {
       where: { username: dto.username },
     });
 
-    if (!user || !(await bcrypt.compare(dto.password, user.passwordHash))) {
+    // Use constant-time path to avoid username enumeration
+    if (!user) {
+      await bcrypt.compare(dto.password, '$2b$12$placeholderHashToAvoidTimingLeak000000000000000000000');
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const token = this.jwt.sign({ sub: user.id, role: user.role });
+    // Check lockout
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      const remainingMin = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60_000);
+      throw new UnauthorizedException(`账号已锁定，请 ${remainingMin} 分钟后再试`);
+    }
+
+    const valid = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!valid) {
+      const attempts = user.loginAttempts + 1;
+      const update: { loginAttempts: number; lockedUntil?: Date } = { loginAttempts: attempts };
+      if (attempts >= MAX_LOGIN_ATTEMPTS) {
+        update.lockedUntil = new Date(Date.now() + LOCKOUT_MINUTES * 60_000);
+        update.loginAttempts = 0;
+      }
+      await this.prisma.user.update({ where: { id: user.id }, data: update });
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Reset failed attempts on successful login
+    if (user.loginAttempts > 0 || user.lockedUntil) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { loginAttempts: 0, lockedUntil: null },
+      });
+    }
+
+    const jti = randomUUID();
+    const token = this.jwt.sign({ sub: user.id, role: user.role, jti });
     return {
       accessToken: token,
       user: { id: user.id, username: user.username, role: user.role },
     };
+  }
+
+  async logout(jti: string, expiresAt: Date): Promise<void> {
+    await this.prisma.revokedToken.upsert({
+      where: { jti },
+      create: { jti, expiresAt },
+      update: {},
+    });
+  }
+
+  async isTokenRevoked(jti: string): Promise<boolean> {
+    const token = await this.prisma.revokedToken.findUnique({ where: { jti } });
+    return !!token;
   }
 
   async register(dto: RegisterDto) {
@@ -76,5 +123,13 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(dto.newPassword, 12);
     await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+  }
+
+  /** Purge expired revoked tokens daily to keep the table small */
+  @Cron('0 3 * * *')
+  async purgeExpiredTokens(): Promise<void> {
+    await this.prisma.revokedToken.deleteMany({
+      where: { expiresAt: { lt: new Date() } },
+    });
   }
 }

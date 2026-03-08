@@ -16,9 +16,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub: string; role: string }) {
+  async validate(payload: { sub: string; role: string; jti?: string; exp?: number }) {
+    if (payload.jti) {
+      const revoked = await this.authService.isTokenRevoked(payload.jti);
+      if (revoked) throw new UnauthorizedException();
+    }
+
     const user = await this.authService.validateById(payload.sub);
     if (!user) throw new UnauthorizedException();
-    return user;
+
+    // Attach jti and exp so logout endpoint can read them via @CurrentUser()
+    return { ...user, jti: payload.jti, tokenExp: payload.exp };
   }
 }
