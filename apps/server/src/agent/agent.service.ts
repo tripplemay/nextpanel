@@ -30,6 +30,9 @@ export class AgentService {
   private readonly prevNetwork = new Map<string, { in: number; out: number }>();
   /** Cache latest GitHub release for 1 hour */
   private latestVersionCache: LatestVersionCache | null = null;
+  /** Tracks when each server's pendingAgentUpdate was first observed, for timeout purposes */
+  private readonly pendingUpdateSince = new Map<string, number>();
+  private readonly PENDING_UPDATE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
   constructor(
     private prisma: PrismaService,
@@ -121,14 +124,23 @@ export class AgentService {
     // Keep pendingAgentUpdate=true (and show "更新中..." in UI) until the agent actually reports
     // the new version — not just until the command is sent. This prevents the banner from
     // disappearing immediately after the first heartbeat while the agent is still downloading.
+    // Safety valve: if we can't build the update command for 15 minutes (e.g. GitHub unreachable),
+    // clear the flag to unblock the UI and let the user retry.
     let updateCommand: { version: string; downloadUrl: string } | undefined;
     if (server.pendingAgentUpdate) {
+      const now = Date.now();
+      if (!this.pendingUpdateSince.has(server.id)) {
+        this.pendingUpdateSince.set(server.id, now);
+      }
+
       const { version } = await this.getLatestVersion();
       const tagName = this.latestVersionCache?.tagName;
+
       if (version && tagName) {
         if (payload.agentVersion === version) {
           // Agent has successfully updated to the target version — clear the flag.
           updateData.pendingAgentUpdate = false;
+          this.pendingUpdateSince.delete(server.id);
         } else {
           // Agent hasn't updated yet — keep the flag set and re-deliver the command.
           // The agent guards against concurrent updates with selfUpdateRunning, so re-sending is safe.
@@ -138,7 +150,14 @@ export class AgentService {
             downloadUrl: `https://github.com/${repo}/releases/download/${tagName}/agent-linux-amd64`,
           };
         }
+      } else if (now - (this.pendingUpdateSince.get(server.id) ?? now) > this.PENDING_UPDATE_TIMEOUT_MS) {
+        // Can't fetch latest version (GitHub unreachable) and 15 min have elapsed — give up to unblock UI.
+        this.logger.warn(`Agent update for server ${server.id} timed out after 15 min, clearing flag`);
+        updateData.pendingAgentUpdate = false;
+        this.pendingUpdateSince.delete(server.id);
       }
+    } else {
+      this.pendingUpdateSince.delete(server.id);
     }
 
     await this.prisma.server.update({ where: { id: server.id }, data: updateData });
