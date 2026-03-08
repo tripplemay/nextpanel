@@ -42,6 +42,7 @@ jobs:
           envs: CERTBOT_EMAIL,DOMAIN
           script: |
             set -e
+            trap 'echo ">>> DEPLOY FAILED at line $LINENO (exit $?)" >&2' ERR
             DOMAIN="${DOMAIN}"
             APP_DIR="/opt/apps/nextpanel"
             SETUP_DONE="/opt/.nextpanel_setup_done"
