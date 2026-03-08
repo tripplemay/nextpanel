@@ -177,6 +177,33 @@ describe('AgentService', () => {
       fetchSpy.mockRestore();
     });
 
+    it('clears pendingAgentUpdate flag after timeout even when command is being delivered (e.g. agent too old)', async () => {
+      const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
+      const serverWithUpdate = { ...fakeServer, id: 'srv-timeout', pendingAgentUpdate: true };
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(serverWithUpdate);
+      (mockPrisma.server.update as jest.Mock).mockResolvedValue(serverWithUpdate);
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]);
+
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v2.0.0' }) } as Response)
+        .mockResolvedValueOnce({ ok: false } as Response);
+
+      // Backdate the pendingUpdateSince entry so elapsed > TIMEOUT
+      (freshSvc as any).pendingUpdateSince.set('srv-timeout', Date.now() - 16 * 60 * 1000);
+
+      const result = await freshSvc.handleHeartbeat({
+        agentToken: 'tok-abc', agentVersion: '1.4.0',
+        cpu: 0, mem: 0, disk: 0, networkIn: 0, networkOut: 0,
+      });
+
+      // Timed out — no command, flag cleared
+      expect(result.updateCommand).toBeUndefined();
+      expect(mockPrisma.server.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ pendingAgentUpdate: false }) }),
+      );
+      fetchSpy.mockRestore();
+    });
+
     it('clears pendingAgentUpdate flag once agent reports the target version', async () => {
       const serverWithUpdate = { ...fakeServer, pendingAgentUpdate: true };
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(serverWithUpdate);
