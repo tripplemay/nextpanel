@@ -38,6 +38,7 @@ const mockPrisma = {
     findFirst: jest.fn(),
     findUnique: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
     delete: jest.fn(),
   },
   node: {
@@ -764,6 +765,40 @@ describe('ServersService', () => {
 
       delete process.env.PANEL_URL;
       delete process.env.GITHUB_REPO;
+    });
+  });
+});
+
+describe('ServersService – agentUpdate', () => {
+  it('sets pendingAgentUpdate=true for the server', async () => {
+    (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue({ id: 'srv-1', userId: 'user-1' });
+    (mockPrisma.server.update as jest.Mock).mockResolvedValue({ id: 'srv-1' });
+
+    const result = await svc.agentUpdate('srv-1', 'user-1');
+
+    expect(result).toEqual({ ok: true });
+    expect(mockPrisma.server.update).toHaveBeenCalledWith({
+      where: { id: 'srv-1' },
+      data: { pendingAgentUpdate: true },
+    });
+  });
+
+  it('throws NotFoundException when server not found', async () => {
+    (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(null);
+    await expect(svc.agentUpdate('bad-id', 'user-1')).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('ServersService – agentUpdateBatch', () => {
+  it('sets pendingAgentUpdate=true for multiple servers', async () => {
+    (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+    const result = await svc.agentUpdateBatch(['srv-1', 'srv-2'], 'user-1');
+
+    expect(result).toEqual({ ok: true, count: 2 });
+    expect(mockPrisma.server.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['srv-1', 'srv-2'] }, userId: 'user-1' },
+      data: { pendingAgentUpdate: true },
     });
   });
 });

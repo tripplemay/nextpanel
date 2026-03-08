@@ -132,5 +132,114 @@ describe('AgentService', () => {
 
       expect(mockPrisma.node.updateMany).not.toHaveBeenCalled();
     });
+
+    it('updates nodeTraffic when nodeTraffic payload is provided', async () => {
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.node.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      await svc.handleHeartbeat({
+        agentToken: 'tok-abc', agentVersion: 'v1',
+        cpu: 0, mem: 0, disk: 0, networkIn: 0, networkOut: 0,
+        nodeTraffic: [{ nodeId: 'n1', upBytes: 100, downBytes: 200 }],
+      });
+
+      expect(mockPrisma.node.updateMany).toHaveBeenCalledWith({
+        where: { id: 'n1', serverId: 'srv-1' },
+        data: { trafficUpBytes: 100, trafficDownBytes: 200 },
+      });
+    });
+
+    it('delivers updateCommand and clears flag when pendingAgentUpdate is true', async () => {
+      const serverWithUpdate = { ...fakeServer, pendingAgentUpdate: true };
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(serverWithUpdate);
+      (mockPrisma.server.update as jest.Mock).mockResolvedValue(serverWithUpdate);
+
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ tag_name: 'v2.0.0', body: 'New features' }),
+      } as Response);
+
+      const result = await svc.handleHeartbeat({
+        agentToken: 'tok-abc', agentVersion: '1.4.0',
+        cpu: 0, mem: 0, disk: 0, networkIn: 0, networkOut: 0,
+      });
+
+      expect(result.updateCommand).toMatchObject({
+        version: '2.0.0',
+        downloadUrl: expect.stringContaining('v2.0.0'),
+      });
+      expect(mockPrisma.server.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ pendingAgentUpdate: false }) }),
+      );
+      fetchSpy.mockRestore();
+    });
+
+    it('returns ipCheckTask when pending task exists', async () => {
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+      (mockIpCheck.getPendingTask as jest.Mock).mockResolvedValue({ serverId: 'srv-1' });
+
+      const result = await svc.handleHeartbeat({
+        agentToken: 'tok-abc', agentVersion: 'v1',
+        cpu: 0, mem: 0, disk: 0, networkIn: 0, networkOut: 0,
+      });
+
+      expect(result.ipCheckTask).toEqual({ serverId: 'srv-1' });
+    });
+  });
+
+  describe('getLatestVersion', () => {
+    it('fetches version from GitHub API', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ tag_name: 'v1.5.0', body: '# Release notes' }),
+      } as Response);
+
+      // Clear internal cache by creating new instance
+      const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
+      const result = await freshSvc.getLatestVersion();
+
+      expect(result.version).toBe('1.5.0');
+      expect(result.releaseNotes).toBe('# Release notes');
+      fetchSpy.mockRestore();
+    });
+
+    it('returns cached result within TTL without fetching again', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ tag_name: 'v1.5.0', body: 'notes' }),
+      } as Response);
+
+      const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
+      await freshSvc.getLatestVersion();
+      await freshSvc.getLatestVersion(); // second call should use cache
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      fetchSpy.mockRestore();
+    });
+
+    it('returns empty version on fetch failure with no cache', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockRejectedValue(new Error('Network error'));
+
+      const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
+      const result = await freshSvc.getLatestVersion();
+
+      expect(result.version).toBe('');
+      fetchSpy.mockRestore();
+    });
+
+    it('strips leading "v" from tag_name', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ tag_name: 'v3.0.0', body: '' }),
+      } as Response);
+
+      const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
+      const result = await freshSvc.getLatestVersion();
+
+      expect(result.version).toBe('3.0.0');
+      fetchSpy.mockRestore();
+    });
   });
 });

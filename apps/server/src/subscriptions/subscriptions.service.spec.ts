@@ -27,16 +27,27 @@ beforeEach(() => jest.clearAllMocks());
 
 interface MockSub {
   token: string;
+  ownerId?: string;
+  name?: string;
   nodes: Array<{ node: {
     id: string; name: string; protocol: string;
     listenPort: number; enabled: boolean; status: string;
     domain: string | null; server: { ip: string };
+    transport?: string | null; tls?: string;
+  }}>;
+  externalNodes: Array<{ externalNode: {
+    name: string; protocol: string; address: string; port: number;
+    transport: string | null; tls: string; sni: string | null;
+    path: string | null; uuid: string | null; password: string | null;
+    method: string | null;
   }}>;
 }
 
 function makeSubWithNode(protocol: string, _creds: Record<string, string>): MockSub {
   return {
     token: 'tok',
+    ownerId: 'owner-1',
+    name: 'Test Sub',
     nodes: [{
       node: {
         id: 'n1',
@@ -46,9 +57,12 @@ function makeSubWithNode(protocol: string, _creds: Record<string, string>): Mock
         enabled: true,
         status: 'RUNNING',
         domain: null,
+        transport: null,
+        tls: 'NONE',
         server: { ip: '1.2.3.4' },
       },
     }],
+    externalNodes: [],
   };
 }
 
@@ -122,7 +136,7 @@ describe('SubscriptionsService – generateClashContent', () => {
   });
 
   it('returns empty YAML when subscription has no active nodes', async () => {
-    (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue({ token: 'tok', name: 'My Sub', nodes: [] });
+    (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue({ token: 'tok', name: 'My Sub', nodes: [], externalNodes: [] });
     const result = await svc.generateClashContent('tok');
     expect(result.content).toContain('proxies: []');
     expect(result.content).toContain('MATCH,');
@@ -166,7 +180,7 @@ describe('SubscriptionsService – generateSingboxContent', () => {
   });
 
   it('uses "direct" fallback when no active nodes', async () => {
-    (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue({ token: 'tok', nodes: [] });
+    (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue({ token: 'tok', nodes: [], externalNodes: [] });
     const result = await svc.generateSingboxContent('tok');
     const parsed = JSON.parse(result) as { outbounds: Array<{ type: string; default?: string }> };
     const selector = parsed.outbounds.find((o) => o.type === 'selector');
@@ -254,5 +268,53 @@ describe('SubscriptionsService – CRUD', () => {
     (mockPrisma.subscription.delete as jest.Mock).mockResolvedValue(fakeSub);
     const result = await svc.remove('sub-1', 'user-id-1');
     expect(result).toBe(fakeSub);
+  });
+});
+
+// ── External nodes in subscription content ────────────────────────────────────
+
+function makeExternalNode(protocol: string) {
+  return {
+    externalNode: {
+      name: 'Ext Node',
+      protocol,
+      address: '5.6.7.8',
+      port: 9090,
+      transport: null,
+      tls: 'TLS',
+      sni: 'ext.example.com',
+      path: null,
+      uuid: protocol === 'VLESS' ? 'ext-uuid' : null,
+      password: protocol === 'TROJAN' ? 'ext-pass' : null,
+      method: null,
+    },
+  };
+}
+
+describe('SubscriptionsService – external nodes in content', () => {
+  it('generateContent includes external VLESS node', async () => {
+    (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue({
+      token: 'tok', ownerId: 'owner-1', nodes: [], externalNodes: [makeExternalNode('VLESS')],
+    });
+    const result = await svc.generateContent('tok');
+    const decoded = Buffer.from(result, 'base64').toString();
+    expect(decoded).toContain('vless://');
+  });
+
+  it('generateClashContent includes external node in proxies', async () => {
+    (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue({
+      token: 'tok', ownerId: 'owner-1', name: 'My Sub', nodes: [], externalNodes: [makeExternalNode('VLESS')],
+    });
+    const result = await svc.generateClashContent('tok');
+    expect(result.content).toContain('Ext Node');
+  });
+
+  it('generateSingboxContent includes external node outbound', async () => {
+    (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue({
+      token: 'tok', ownerId: 'owner-1', nodes: [], externalNodes: [makeExternalNode('TROJAN')],
+    });
+    const result = await svc.generateSingboxContent('tok');
+    const parsed = JSON.parse(result) as { outbounds: Array<{ type: string }> };
+    expect(parsed.outbounds.some((o) => o.type === 'trojan')).toBe(true);
   });
 });

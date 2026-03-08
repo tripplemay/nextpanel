@@ -72,7 +72,7 @@ describe('AuthService', () => {
 
       await svc.login({ username: 'admin', password: 'correct' });
 
-      expect(mockJwt.sign).toHaveBeenCalledWith({ sub: 'u1', role: 'ADMIN' });
+      expect(mockJwt.sign).toHaveBeenCalledWith(expect.objectContaining({ sub: 'u1', role: 'ADMIN' }));
     });
   });
 
