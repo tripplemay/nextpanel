@@ -2,6 +2,7 @@ import { AgentService } from './agent.service';
 import { PrismaService } from '../prisma.service';
 import { MetricsService } from '../metrics/metrics.service';
 import { IpCheckService } from '../ip-check/ip-check.service';
+import { ConfigService } from '@nestjs/config';
 import { UnauthorizedException } from '@nestjs/common';
 
 const mockPrisma = {
@@ -23,9 +24,13 @@ const mockIpCheck = {
   getPendingTask: jest.fn().mockResolvedValue(null),
 } as unknown as IpCheckService;
 
-const svc = new AgentService(mockPrisma, mockMetrics, mockIpCheck);
+const mockConfig = {
+  get: jest.fn().mockReturnValue('tripplemay/nextpanel-releases'),
+} as unknown as ConfigService;
 
-const fakeServer = { id: 'srv-1', agentToken: 'tok-abc' };
+const svc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
+
+const fakeServer = { id: 'srv-1', agentToken: 'tok-abc', pendingAgentUpdate: false };
 
 beforeEach(() => jest.clearAllMocks());
 

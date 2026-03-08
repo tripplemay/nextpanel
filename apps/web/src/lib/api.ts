@@ -153,6 +153,16 @@ export const inviteCodesApi = {
   remove: (id: string) => api.delete<void>(`/invite-codes/${id}`),
 };
 
+// ── Agent ─────────────────────────────────────────────
+export const agentApi = {
+  latestVersion: () =>
+    api.get<{ version: string; releaseNotes: string }>('/agent/latest-version'),
+  update: (serverId: string) =>
+    api.post<{ ok: boolean }>(`/servers/${serverId}/agent-update`),
+  updateBatch: (ids: string[]) =>
+    api.post<{ ok: boolean; count: number }>('/servers/agent-update-batch', { ids }),
+};
+
 // ── External Nodes ────────────────────────────────────
 export const externalNodesApi = {
   list: () => api.get<ExternalNode[]>('/external-nodes'),

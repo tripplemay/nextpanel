@@ -10,6 +10,7 @@ import {
   UseGuards,
   Sse,
   MessageEvent,
+  HttpCode,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -104,6 +105,28 @@ export class ServersController {
     @CurrentUser() user: { id: string },
   ) {
     return this.serversService.testSsh(id, user.id);
+  }
+
+  @Post(':id/agent-update')
+  @Roles('ADMIN', 'OPERATOR')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Queue agent self-update for a server' })
+  agentUpdate(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.serversService.agentUpdate(id, user.id);
+  }
+
+  @Post('agent-update-batch')
+  @Roles('ADMIN', 'OPERATOR')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Queue agent self-update for multiple servers' })
+  agentUpdateBatch(
+    @Body('ids') ids: string[],
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.serversService.agentUpdateBatch(ids, user.id);
   }
 
   @Sse(':id/install-agent')

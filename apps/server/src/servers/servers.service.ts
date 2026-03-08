@@ -450,6 +450,24 @@ export class ServersService {
     }
   }
 
+  async agentUpdate(id: string, userId: string) {
+    const server = await this.prisma.server.findFirst({ where: { id, userId } });
+    if (!server) throw new NotFoundException('Server not found');
+    await this.prisma.server.update({
+      where: { id },
+      data: { pendingAgentUpdate: true },
+    });
+    return { ok: true };
+  }
+
+  async agentUpdateBatch(ids: string[], userId: string) {
+    await this.prisma.server.updateMany({
+      where: { id: { in: ids }, userId },
+      data: { pendingAgentUpdate: true },
+    });
+    return { ok: true, count: ids.length };
+  }
+
   /** Returns a select object that excludes sshAuthEnc */
   private safeSelect() {
     return {
@@ -474,6 +492,7 @@ export class ServersService {
       lastSeenAt: true,
       agentVersion: true,
       agentToken: true,
+      pendingAgentUpdate: true,
       deleteError: true,
       createdAt: true,
       updatedAt: true,

@@ -79,10 +79,11 @@ model Server {
   networkIn    Float?
   networkOut   Float?
   pingMs       Int?
-  lastSeenAt   DateTime?
-  agentVersion String?
-  agentToken   String       @unique @default(cuid())
-  deleteError  String?
+  lastSeenAt          DateTime?
+  agentVersion        String?
+  agentToken          String       @unique @default(cuid())
+  pendingAgentUpdate  Boolean      @default(false)
+  deleteError         String?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 

@@ -1,0 +1,1 @@
+ALTER TABLE "Server" ADD COLUMN "pendingAgentUpdate" BOOLEAN NOT NULL DEFAULT false;

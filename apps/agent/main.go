@@ -30,10 +30,16 @@ type ipCheckTask struct {
 	ServerID string `json:"serverId"`
 }
 
+type updateCommand struct {
+	Version     string `json:"version"`
+	DownloadURL string `json:"downloadUrl"`
+}
+
 type heartbeatResponse struct {
-	OK          bool         `json:"ok"`
-	XrayNodes   []xrayNode   `json:"xrayNodes,omitempty"`
-	IpCheckTask *ipCheckTask `json:"ipCheckTask,omitempty"`
+	OK            bool           `json:"ok"`
+	XrayNodes     []xrayNode     `json:"xrayNodes,omitempty"`
+	IpCheckTask   *ipCheckTask   `json:"ipCheckTask,omitempty"`
+	UpdateCommand *updateCommand `json:"updateCommand,omitempty"`
 }
 
 func sendHeartbeat(cfg *Config, m *Metrics, traffic []nodeTrafficStat) (*heartbeatResponse, error) {
@@ -81,6 +87,7 @@ func main() {
 
 	var xrayNodes []xrayNode
 	var ipCheckRunning bool
+	var selfUpdateRunning bool
 
 	for {
 		m, err := collectMetrics()
@@ -103,6 +110,22 @@ func main() {
 						defer func() { ipCheckRunning = false }()
 						runIpCheck(cfg, serverId)
 					}(hbResp.IpCheckTask.ServerID)
+				}
+
+				// Self-update if server delivered an update command
+				if hbResp.UpdateCommand != nil && !selfUpdateRunning {
+					cmd := hbResp.UpdateCommand
+					if cmd.Version != version {
+						selfUpdateRunning = true
+						go func(ver, url string) {
+							log.Printf("收到更新指令：v%s → v%s，开始自更新...", version, ver)
+							if err := selfUpdate(url); err != nil {
+								log.Printf("自更新失败: %v", err)
+								selfUpdateRunning = false
+							}
+							// selfUpdate exits the process on success; PM2 restarts it
+						}(cmd.Version, cmd.DownloadURL)
+					}
 				}
 			}
 		}

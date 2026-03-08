@@ -12,6 +12,7 @@ import {
   Space,
   Card,
   Tooltip,
+  Popover,
   Dropdown,
   Input,
   Select,
@@ -28,11 +29,14 @@ import {
   DeleteOutlined,
   EditOutlined,
   FileTextOutlined,
+  InfoCircleOutlined,
   MoreOutlined,
+  SyncOutlined,
+  UpCircleOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { serversApi } from '@/lib/api';
+import { serversApi, agentApi } from '@/lib/api';
 import ServerFormModal from '@/components/servers/ServerFormModal';
 import AgentInstallDrawer from '@/components/servers/AgentInstallDrawer';
 import AutoSetupDrawer from '@/components/servers/AutoSetupDrawer';
@@ -117,6 +121,30 @@ export default function ServersPage() {
     queryKey: ['servers'],
     queryFn: () => serversApi.list().then((r) => r.data as Server[]),
     refetchInterval: 30_000,
+  });
+
+  const { data: latestAgent } = useQuery({
+    queryKey: ['agent-latest-version'],
+    queryFn: () => agentApi.latestVersion().then((r) => r.data),
+    staleTime: 60 * 60 * 1000,
+  });
+
+  const agentUpdateMutation = useMutation({
+    mutationFn: (id: string) => agentApi.update(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['servers'] });
+      message.success('更新指令已下发，Agent 将在下次心跳时开始更新');
+    },
+    onError: () => message.error('下发更新指令失败'),
+  });
+
+  const agentUpdateBatchMutation = useMutation({
+    mutationFn: (ids: string[]) => agentApi.updateBatch(ids),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['servers'] });
+      message.success(`已向 ${res.data.count} 台服务器下发更新指令`);
+    },
+    onError: () => message.error('批量下发更新指令失败'),
   });
 
   // Auto-open AgentInstallDrawer when navigated here with ?install=<id>
@@ -256,6 +284,22 @@ export default function ServersPage() {
     });
   }, [data, searchText, statusFilter, tagsFilter, regionFilter]);
 
+  const upgradableIds = useMemo(() => {
+    if (!data || !latestAgent?.version) return [];
+    return data
+      .filter((s) => s.agentVersion && s.agentVersion !== latestAgent.version && !s.pendingAgentUpdate)
+      .map((s) => s.id);
+  }, [data, latestAgent]);
+
+  const handleBulkAgentUpdate = () => {
+    modal.confirm({
+      title: `确认升级 ${upgradableIds.length} 台服务器的 Agent？`,
+      content: `将从 当前版本 升级到 v${latestAgent?.version}，升级在后台完成，无需 SSH 窗口。`,
+      okText: '确认升级',
+      onOk: () => agentUpdateBatchMutation.mutate(upgradableIds),
+    });
+  };
+
   const columns: ColumnType<Server>[] = [
     {
       title: '名称',
@@ -346,6 +390,58 @@ export default function ServersPage() {
       title: '标签',
       dataIndex: 'tags',
       render: (tags: string[]) => tags.map((t) => <Tag key={t}>{t}</Tag>),
+    },
+    {
+      title: 'Agent',
+      width: 120,
+      render: (_: unknown, record) => {
+        if (!record.agentVersion) return <span style={{ color: '#ccc' }}>—</span>;
+
+        const isOutdated = latestAgent?.version && record.agentVersion !== latestAgent.version;
+        const isPending = record.pendingAgentUpdate;
+
+        if (isPending) {
+          return (
+            <Space size={4}>
+              <SyncOutlined spin style={{ color: '#1677ff', fontSize: 12 }} />
+              <span style={{ fontSize: 12, color: '#1677ff' }}>更新中...</span>
+            </Space>
+          );
+        }
+
+        return (
+          <Space size={4}>
+            <span style={{ fontSize: 12, color: isOutdated ? '#faad14' : '#8c8c8c' }}>
+              v{record.agentVersion}
+            </span>
+            {isOutdated && latestAgent && (
+              <>
+                <Popover
+                  title={`v${latestAgent.version} 更新内容`}
+                  content={
+                    <div style={{ maxWidth: 320, whiteSpace: 'pre-wrap', fontSize: 12 }}>
+                      {latestAgent.releaseNotes || '暂无更新说明'}
+                    </div>
+                  }
+                  trigger="click"
+                >
+                  <InfoCircleOutlined style={{ fontSize: 11, color: '#8c8c8c', cursor: 'pointer' }} />
+                </Popover>
+                <Tooltip title={`升级到 v${latestAgent.version}`}>
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<UpCircleOutlined />}
+                    style={{ padding: 0, height: 'auto', fontSize: 12, color: '#1677ff' }}
+                    loading={agentUpdateMutation.isPending}
+                    onClick={() => agentUpdateMutation.mutate(record.id)}
+                  />
+                </Tooltip>
+              </>
+            )}
+          </Space>
+        );
+      },
     },
     {
       title: '操作',
@@ -496,6 +592,30 @@ export default function ServersPage() {
             </Space>
           }
           type="info"
+          showIcon={false}
+        />
+      )}
+
+      {/* Agent 可升级提示 */}
+      {upgradableIds.length > 0 && (
+        <Alert
+          style={{ marginBottom: 12 }}
+          message={
+            <Space>
+              <span>
+                <UpCircleOutlined style={{ color: '#faad14' }} /> {upgradableIds.length} 台服务器的 Agent 可升级到 v{latestAgent?.version}
+              </span>
+              <Button
+                size="small"
+                icon={<SyncOutlined />}
+                loading={agentUpdateBatchMutation.isPending}
+                onClick={handleBulkAgentUpdate}
+              >
+                一键升级全部
+              </Button>
+            </Space>
+          }
+          type="warning"
           showIcon={false}
         />
       )}
