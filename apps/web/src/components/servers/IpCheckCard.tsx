@@ -177,7 +177,7 @@ function RouteTab({ routeData, isChecking }: { routeData: RouteData | null; isCh
         </Text>
         {routeData.inbound && routeData.inbound.length > 0
           ? <RouteInboundTable inbound={routeData.inbound} />
-          : <Text type="secondary">去程检测暂不可用</Text>
+          : <Text type="secondary">去程数据暂不支持</Text>
         }
       </div>
       <div>

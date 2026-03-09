@@ -40,14 +40,14 @@ export class RouteCheckService {
   /**
    * Fetches 去程 (inbound) ping data: Chinese nodes → nodeIp.
    * Returns null if all providers are unavailable.
+   *
+   * TODO: itdog (api.itdog.cn/ping → 404) and chinaz (api.ping.chinaz.com → DNS fail)
+   * are both broken. Inbound check is temporarily disabled until a working provider
+   * is found. Remove the early-return below to re-enable.
    */
-  async checkInbound(nodeIp: string): Promise<InboundNode[] | null> {
-    this.logger.log(`Checking inbound route for ${nodeIp}`);
-    const result = await this.health.checkInbound(nodeIp);
-    if (result) {
-      this.logger.log(`Inbound route check complete for ${nodeIp}, source: ${result[0]?.source}`);
-    }
-    return result;
+  async checkInbound(_nodeIp: string): Promise<InboundNode[] | null> {
+    this.logger.debug('Inbound check disabled: no working providers (itdog/chinaz both down)');
+    return null;
   }
 
   /** Merges agent-reported outbound data with panel-fetched inbound data. */

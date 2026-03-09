@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	version           = "1.5.0"
+	version           = "1.5.1"
 	heartbeatInterval = 10 * time.Second
 )
 
@@ -84,6 +84,8 @@ func main() {
 	}
 
 	log.Printf("NextPanel Agent v%s 启动，面板地址: %s", version, cfg.ServerURL)
+
+	ensureNexttrace()
 
 	var xrayNodes []xrayNode
 	var ipCheckRunning bool
