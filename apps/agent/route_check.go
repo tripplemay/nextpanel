@@ -148,41 +148,49 @@ func nexttrace(ip string) []RouteHop {
 		return traceroute(ip)
 	}
 
-	// nexttrace --json outputs NDJSON: one JSON object per line
-	type ntHop struct {
-		Sended   int     `json:"Sended"`
-		Recived  int     `json:"Recived"`
-		Avg      float64 `json:"Avg"`
-		Address  string  `json:"Address"`
-		Org      string  `json:"Org"` // "AS4134 China Telecom"
+	// NTrace-core --json outputs NDJSON: one JSON object per hop.
+	// Format: {"TTL":n,"Avg":ms,"Addrs":["ip"],"Hosts":[{"ASN":"AS4134","Isp":"China Telecom"}]}
+	type ntHost struct {
+		ASN string `json:"ASN"`
+		Isp string `json:"Isp"`
 	}
-	type ntLine struct {
-		Hop ntHop `json:"hop"`
+	type ntHop struct {
+		TTL   int      `json:"TTL"`
+		Avg   float64  `json:"Avg"`
+		Addrs []string `json:"Addrs"`
+		Hosts []ntHost `json:"Hosts"`
 	}
 
 	var hops []RouteHop
-	for n, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for lineNum, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		var parsed ntLine
+		var parsed ntHop
 		if err := json.Unmarshal([]byte(line), &parsed); err != nil {
 			continue
 		}
-		h := parsed.Hop
-		hop := RouteHop{N: n + 1, IP: h.Address, Ms: h.Avg}
-		if h.Address == "" || h.Address == "*" {
-			hop.IP = "*"
-			hop.Ms = -1
+		ttl := parsed.TTL
+		if ttl == 0 {
+			ttl = lineNum + 1
 		}
-		if h.Org != "" {
-			parts := strings.SplitN(h.Org, " ", 2)
-			if len(parts) >= 1 && strings.HasPrefix(parts[0], "AS") {
-				hop.ASN = parts[0]
+		hopIP := "*"
+		if len(parsed.Addrs) > 0 && parsed.Addrs[0] != "" && parsed.Addrs[0] != "*" {
+			hopIP = parsed.Addrs[0]
+		}
+		ms := parsed.Avg
+		if hopIP == "*" {
+			ms = -1
+		}
+		hop := RouteHop{N: ttl, IP: hopIP, Ms: ms}
+		if len(parsed.Hosts) > 0 {
+			h := parsed.Hosts[0]
+			if h.ASN != "" {
+				hop.ASN = h.ASN
 			}
-			if len(parts) >= 2 {
-				hop.Org = strings.TrimSpace(parts[1])
+			if h.Isp != "" {
+				hop.Org = h.Isp
 			}
 		}
 		hops = append(hops, hop)
