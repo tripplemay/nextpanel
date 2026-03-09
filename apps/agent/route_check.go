@@ -148,50 +148,77 @@ func nexttrace(ip string) []RouteHop {
 		return traceroute(ip)
 	}
 
-	// NTrace-core --json outputs NDJSON: one JSON object per hop.
-	// Format: {"TTL":n,"Avg":ms,"Addrs":["ip"],"Hosts":[{"ASN":"AS4134","Isp":"China Telecom"}]}
-	type ntHost struct {
-		ASN string `json:"ASN"`
-		Isp string `json:"Isp"`
+	// NTrace-core --json outputs a single JSON object on one line (not NDJSON).
+	// May be preceded by ANSI-colored status lines.
+	// Format: {"Hops":[[{"TTL":1,"Address":{"IP":"x.x.x.x"},"RTT":9209627,"Geo":{"asnumber":"4134","isp":"...","owner":"..."}}],...],"TraceMapUrl":"..."}
+	// RTT is in nanoseconds.
+	type ntAddress struct {
+		IP string `json:"IP"`
 	}
-	type ntHop struct {
-		TTL   int      `json:"TTL"`
-		Avg   float64  `json:"Avg"`
-		Addrs []string `json:"Addrs"`
-		Hosts []ntHost `json:"Hosts"`
+	type ntGeo struct {
+		ASNumber string `json:"asnumber"`
+		ISP      string `json:"isp"`
+		Owner    string `json:"owner"`
+	}
+	type ntHopEntry struct {
+		TTL     int       `json:"TTL"`
+		Address ntAddress `json:"Address"`
+		RTT     int64     `json:"RTT"` // nanoseconds
+		Geo     ntGeo     `json:"Geo"`
+		Success bool      `json:"Success"`
+	}
+	type ntResult struct {
+		Hops [][]ntHopEntry `json:"Hops"`
+	}
+
+	// Strip ANSI escape codes, find the line starting with '{'
+	ansiRe := regexp.MustCompile(`\x1b\[[0-9;]*[mGKHFJA-Z]`)
+	var jsonLine string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(ansiRe.ReplaceAllString(line, ""))
+		if strings.HasPrefix(line, "{") {
+			jsonLine = line
+			break
+		}
+	}
+	if jsonLine == "" {
+		return traceroute(ip)
+	}
+
+	var result ntResult
+	if err := json.Unmarshal([]byte(jsonLine), &result); err != nil {
+		return traceroute(ip)
 	}
 
 	var hops []RouteHop
-	for lineNum, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	for _, hopGroup := range result.Hops {
+		if len(hopGroup) == 0 {
 			continue
 		}
-		var parsed ntHop
-		if err := json.Unmarshal([]byte(line), &parsed); err != nil {
-			continue
+		// Use first successful entry, fall back to first entry
+		h := hopGroup[0]
+		for _, entry := range hopGroup {
+			if entry.Success && entry.Address.IP != "" {
+				h = entry
+				break
+			}
 		}
-		ttl := parsed.TTL
-		if ttl == 0 {
-			ttl = lineNum + 1
+		hopIP := h.Address.IP
+		if hopIP == "" || !h.Success {
+			hopIP = "*"
 		}
-		hopIP := "*"
-		if len(parsed.Addrs) > 0 && parsed.Addrs[0] != "" && parsed.Addrs[0] != "*" {
-			hopIP = parsed.Addrs[0]
-		}
-		ms := parsed.Avg
+		ms := math.Round(float64(h.RTT)/1_000_000.0*10) / 10 // ns → ms
 		if hopIP == "*" {
 			ms = -1
 		}
-		hop := RouteHop{N: ttl, IP: hopIP, Ms: ms}
-		if len(parsed.Hosts) > 0 {
-			h := parsed.Hosts[0]
-			if h.ASN != "" {
-				hop.ASN = h.ASN
-			}
-			if h.Isp != "" {
-				hop.Org = h.Isp
-			}
+		hop := RouteHop{N: h.TTL, IP: hopIP, Ms: ms}
+		if h.Geo.ASNumber != "" {
+			hop.ASN = "AS" + h.Geo.ASNumber
+		}
+		if h.Geo.ISP != "" {
+			hop.Org = h.Geo.ISP
+		} else if h.Geo.Owner != "" {
+			hop.Org = strings.TrimSpace(h.Geo.Owner)
 		}
 		hops = append(hops, hop)
 	}
