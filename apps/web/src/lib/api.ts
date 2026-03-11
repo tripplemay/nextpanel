@@ -5,6 +5,7 @@ import type {
   Node,
   ExternalNode,
   Subscription,
+  SubscriptionShare,
   Metric,
   ConnectivityResult,
   PaginatedResponse,
@@ -105,6 +106,9 @@ export const subscriptionsApi = {
   update: (id: string, data: UpdateSubscriptionDto) => api.patch<Subscription>(`/subscriptions/${id}`, data),
   refreshToken: (id: string) => api.post<{ id: string; token: string }>(`/subscriptions/${id}/refresh-token`),
   delete: (id: string) => api.delete<void>(`/subscriptions/${id}`),
+  listShares: (id: string) => api.get<SubscriptionShare[]>(`/subscriptions/${id}/shares`),
+  addShare: (id: string, userId: string) => api.post<SubscriptionShare>(`/subscriptions/${id}/shares`, { userId }),
+  removeShare: (id: string, userId: string) => api.delete<void>(`/subscriptions/${id}/shares/${userId}`),
 };
 
 // ── IP Check ──────────────────────────────────────────
@@ -139,6 +143,7 @@ export const operationLogsApi = {
 // ── Users ─────────────────────────────────────────────
 export const usersApi = {
   list: () => api.get<UserRecord[]>('/users'),
+  listViewers: () => api.get<UserRecord[]>('/users/viewers'),
   updateRole: (id: string, role: string) => api.patch<UserRecord>(`/users/${id}/role`, { role }),
   remove: (id: string) => api.delete<void>(`/users/${id}`),
 };

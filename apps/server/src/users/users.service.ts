@@ -18,6 +18,14 @@ export class UsersService {
     });
   }
 
+  findByRole(role: UserRole) {
+    return this.prisma.user.findMany({
+      where: { role },
+      select: { id: true, username: true, role: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   async updateRole(id: string, role: UserRole, requesterId: string) {
     if (id === requesterId) {
       throw new ForbiddenException('Cannot change your own role');

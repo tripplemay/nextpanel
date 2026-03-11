@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service';
 import { NodesService } from '../nodes/nodes.service';
@@ -64,8 +64,74 @@ export class SubscriptionsService {
             externalNode: { select: { id: true, name: true, protocol: true, address: true, port: true } },
           },
         },
+        shares: { select: { id: true, userId: true } },
       },
       orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /** List subscriptions shared with a VIEWER user */
+  async findSharedWith(userId: string) {
+    const shares = await this.prisma.subscriptionShare.findMany({
+      where: { userId },
+      include: {
+        subscription: {
+          include: {
+            nodes: {
+              include: {
+                node: { select: { id: true, name: true, protocol: true, status: true, enabled: true, listenPort: true } },
+              },
+            },
+            externalNodes: {
+              include: {
+                externalNode: { select: { id: true, name: true, protocol: true, address: true, port: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return shares.map((s) => ({ ...s.subscription, shareToken: s.shareToken }));
+  }
+
+  // ─── Share management ─────────────────────────────────────────────────────
+
+  async addShare(subscriptionId: string, userId: string, ownerId: string) {
+    const sub = await this.prisma.subscription.findFirst({ where: { id: subscriptionId, ownerId } });
+    if (!sub) throw new NotFoundException(`Subscription ${subscriptionId} not found`);
+
+    const existing = await this.prisma.subscriptionShare.findUnique({
+      where: { subscriptionId_userId: { subscriptionId, userId } },
+    });
+    if (existing) throw new ConflictException('Already shared with this user');
+
+    return this.prisma.subscriptionShare.create({
+      data: { subscriptionId, userId },
+      include: { user: { select: { id: true, username: true, role: true } } },
+    });
+  }
+
+  async removeShare(subscriptionId: string, userId: string, ownerId: string) {
+    const sub = await this.prisma.subscription.findFirst({ where: { id: subscriptionId, ownerId } });
+    if (!sub) throw new NotFoundException(`Subscription ${subscriptionId} not found`);
+
+    const share = await this.prisma.subscriptionShare.findUnique({
+      where: { subscriptionId_userId: { subscriptionId, userId } },
+    });
+    if (!share) throw new NotFoundException('Share not found');
+
+    return this.prisma.subscriptionShare.delete({ where: { id: share.id } });
+  }
+
+  async listShares(subscriptionId: string, ownerId: string) {
+    const sub = await this.prisma.subscription.findFirst({ where: { id: subscriptionId, ownerId } });
+    if (!sub) throw new NotFoundException(`Subscription ${subscriptionId} not found`);
+
+    return this.prisma.subscriptionShare.findMany({
+      where: { subscriptionId },
+      include: { user: { select: { id: true, username: true, role: true } } },
+      orderBy: { createdAt: 'asc' },
     });
   }
 
@@ -117,7 +183,7 @@ export class SubscriptionsService {
 
   /** Base64-encoded subscription (V2Ray / Xray universal format) */
   async generateContent(token: string): Promise<string> {
-    const nodes = await this.fetchActiveNodes(token);
+    const nodes = await this.fetchActiveNodes({ token });
     const lines = nodes.map((n) => buildShareUri(n)).filter((u): u is string => u !== null);
     return Buffer.from(lines.join('\n')).toString('base64');
   }
@@ -125,14 +191,14 @@ export class SubscriptionsService {
   /** Clash / Mihomo YAML subscription */
   async generateClashContent(token: string): Promise<{ content: string; name: string }> {
     const sub = await this.prisma.subscription.findUnique({ where: { token }, select: { name: true } });
-    const nodes = await this.fetchActiveNodes(token);
+    const nodes = await this.fetchActiveNodes({ token });
     const panelUrl = this.config.get<string>('PANEL_URL') ?? 'http://localhost:3001';
     return { content: buildClashSubscription(nodes, panelUrl), name: sub?.name ?? 'clash' };
   }
 
   /** Sing-box JSON subscription */
   async generateSingboxContent(token: string): Promise<string> {
-    const nodes = await this.fetchActiveNodes(token);
+    const nodes = await this.fetchActiveNodes({ token });
 
     const outbounds = nodes
       .map((n) => buildSingboxOutbound(n))
@@ -161,24 +227,78 @@ export class SubscriptionsService {
     return JSON.stringify(config, null, 2);
   }
 
+  /** Base64-encoded subscription via shareToken (VIEWER) */
+  async generateContentByShareToken(shareToken: string): Promise<string> {
+    const nodes = await this.fetchActiveNodes({ shareToken });
+    const lines = nodes.map((n) => buildShareUri(n)).filter((u): u is string => u !== null);
+    return Buffer.from(lines.join('\n')).toString('base64');
+  }
+
+  /** Clash YAML via shareToken (VIEWER) */
+  async generateClashContentByShareToken(shareToken: string): Promise<{ content: string; name: string }> {
+    const share = await this.prisma.subscriptionShare.findUnique({
+      where: { shareToken },
+      include: { subscription: { select: { name: true } } },
+    });
+    if (!share) throw new NotFoundException('Share not found');
+    const nodes = await this.fetchActiveNodes({ shareToken });
+    const panelUrl = this.config.get<string>('PANEL_URL') ?? 'http://localhost:3001';
+    return { content: buildClashSubscription(nodes, panelUrl), name: share.subscription.name };
+  }
+
+  /** Sing-box JSON via shareToken (VIEWER) */
+  async generateSingboxContentByShareToken(shareToken: string): Promise<string> {
+    const nodes = await this.fetchActiveNodes({ shareToken });
+
+    const outbounds = nodes
+      .map((n) => buildSingboxOutbound(n))
+      .filter((o): o is Record<string, unknown> => o !== null);
+
+    const tags = outbounds.map((o) => o.tag as string);
+
+    const config = {
+      log: { level: 'info' },
+      outbounds: [
+        ...outbounds,
+        {
+          type: 'selector',
+          tag: '🚀 节点选择',
+          outbounds: tags.length > 0 ? tags : ['direct'],
+          default: tags[0] ?? 'direct',
+        },
+        { type: 'direct', tag: 'direct' },
+        { type: 'block', tag: 'block' },
+      ],
+      route: { final: '🚀 节点选择' },
+    };
+
+    return JSON.stringify(config, null, 2);
+  }
+
   // ─── Private helpers ──────────────────────────────────────────────────────
 
-  private async fetchActiveNodes(token: string): Promise<NodeExportInfo[]> {
-    const sub = await this.prisma.subscription.findUnique({
-      where: { token },
-      include: {
-        nodes: {
-          include: {
-            node: {
-              include: { server: { select: { ip: true } } },
-            },
-          },
-        },
-        externalNodes: {
-          include: { externalNode: true },
+  private async fetchActiveNodes(by: { token?: string; shareToken?: string }): Promise<NodeExportInfo[]> {
+    const include = {
+      nodes: {
+        include: {
+          node: { include: { server: { select: { ip: true } } } },
         },
       },
-    });
+      externalNodes: { include: { externalNode: true } },
+    };
+
+    let sub: { ownerId: string; nodes: SubscriptionNode[]; externalNodes: { externalNode: { name: string; protocol: string; address: string; port: number; transport: string | null; tls: string; sni: string | null; path: string | null; uuid: string | null; password: string | null; method: string | null } }[] } | null = null;
+
+    if (by.shareToken) {
+      const share = await this.prisma.subscriptionShare.findUnique({
+        where: { shareToken: by.shareToken },
+        include: { subscription: { include } },
+      });
+      if (!share) throw new NotFoundException('Share not found');
+      sub = share.subscription;
+    } else if (by.token) {
+      sub = await this.prisma.subscription.findUnique({ where: { token: by.token }, include });
+    }
 
     if (!sub) throw new NotFoundException('Subscription not found');
 

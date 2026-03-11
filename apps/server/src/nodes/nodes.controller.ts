@@ -44,7 +44,7 @@ export class NodesController {
   ) {}
 
   @Post()
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @Audit('CREATE', 'node')
   @ApiOperation({ summary: 'Create a new node (manual — all fields required)' })
   create(
@@ -64,7 +64,7 @@ export class NodesController {
   }
 
   @Post('preset')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @Audit('CREATE', 'node')
   @ApiOperation({ summary: 'Create a node from a protocol preset — auto-generates all config and credentials' })
   createFromPreset(
@@ -85,7 +85,7 @@ export class NodesController {
   }
 
   @Sse('test-all')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @ApiQuery({ name: 'ids', required: false, description: 'Comma-separated node IDs. Omit to test all nodes.' })
   @ApiOperation({ summary: 'Batch-test nodes via Xray and stream results as SSE' })
   testAllStream(
@@ -149,7 +149,7 @@ export class NodesController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @Audit('UPDATE', 'node')
   update(
     @Param('id') id: string,
@@ -160,7 +160,7 @@ export class NodesController {
   }
 
   @Patch(':id/rename')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @Audit('UPDATE', 'node')
   @ApiOperation({ summary: 'Rename a node (no redeploy)' })
   rename(
@@ -172,7 +172,7 @@ export class NodesController {
   }
 
   @Patch(':id/toggle')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @Audit('UPDATE', 'node')
   @ApiOperation({ summary: 'Toggle node enabled state (start/stop service)' })
   toggle(
@@ -183,7 +183,7 @@ export class NodesController {
   }
 
   @Get(':id/deploy-log')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @ApiOperation({ summary: 'Get the latest deployment log for a node' })
   async getDeployLog(
     @Param('id') id: string,
@@ -199,7 +199,7 @@ export class NodesController {
   }
 
   @Get(':id/credentials')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @ApiOperation({ summary: 'Get decrypted credentials for a node (edit use only)' })
   getCredentials(
     @Param('id') id: string,
@@ -209,7 +209,7 @@ export class NodesController {
   }
 
   @Get(':id/share')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @ApiOperation({ summary: 'Get single-node share URI (vmess://, vless://, etc.)' })
   async getShareLink(
     @Param('id') id: string,
@@ -220,7 +220,7 @@ export class NodesController {
   }
 
   @Post(':id/test')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @ApiOperation({ summary: 'Test node proxy connectivity via Xray (end-to-end)' })
   async testNode(
     @Param('id') id: string,
@@ -231,7 +231,7 @@ export class NodesController {
   }
 
   @Post(':id/deploy')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @Audit('DEPLOY', 'node')
   @ApiOperation({ summary: 'Deploy node config to server via SSH' })
   async deploy(
@@ -244,7 +244,7 @@ export class NodesController {
   }
 
   @Sse(':id/deploy-stream')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @ApiOperation({ summary: 'Stream deploy logs via SSE' })
   deployStream(
     @Param('id') id: string,
@@ -263,7 +263,7 @@ export class NodesController {
   }
 
   @Sse(':id/delete-stream')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @ApiOperation({ summary: 'Stream undeploy logs and delete node via SSE' })
   deleteStream(
     @Param('id') id: string,
@@ -282,7 +282,7 @@ export class NodesController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @Audit('DELETE', 'node')
   remove(
     @Param('id') id: string,

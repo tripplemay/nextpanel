@@ -13,14 +13,14 @@ export class OperationLogController {
   constructor(private operationLogService: OperationLogService) {}
 
   @Get('by-correlation/:correlationId')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @ApiOperation({ summary: 'Get operation log linked to an audit log via correlationId' })
   getByCorrelationId(@Param('correlationId') correlationId: string) {
     return this.operationLogService.getByCorrelationId(correlationId);
   }
 
   @Get('by-resource/:type/:id')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @ApiOperation({ summary: 'List recent operation logs for a resource' })
   listByResource(
     @Param('type') type: string,
@@ -30,7 +30,7 @@ export class OperationLogController {
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @ApiOperation({ summary: 'Get full log text for a specific operation log entry' })
   getLog(@Param('id') id: string) {
     return this.operationLogService.getLog(id);

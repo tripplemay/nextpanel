@@ -35,7 +35,7 @@ export class ServersController {
   ) {}
 
   @Post()
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @Audit('CREATE', 'server')
   @ApiOperation({ summary: 'Add a new server asset' })
   create(
@@ -70,7 +70,7 @@ export class ServersController {
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @Audit('UPDATE', 'server')
   @ApiOperation({ summary: 'Update server info' })
   update(
@@ -82,7 +82,7 @@ export class ServersController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @Audit('DELETE', 'server')
   @ApiOperation({ summary: 'Delete a server. Adds ?force=true to skip SSH cleanup.' })
   remove(
@@ -97,7 +97,7 @@ export class ServersController {
   }
 
   @Post(':id/test-ssh')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @Audit('SSH_TEST', 'server')
   @ApiOperation({ summary: 'Test SSH connectivity to a server' })
   testSsh(
@@ -108,7 +108,7 @@ export class ServersController {
   }
 
   @Post(':id/agent-update')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @HttpCode(200)
   @ApiOperation({ summary: 'Queue agent self-update for a server' })
   agentUpdate(
@@ -119,7 +119,7 @@ export class ServersController {
   }
 
   @Post('agent-update-batch')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @HttpCode(200)
   @ApiOperation({ summary: 'Queue agent self-update for multiple servers' })
   agentUpdateBatch(
@@ -130,14 +130,14 @@ export class ServersController {
   }
 
   @Sse(':id/install-agent')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @ApiOperation({ summary: 'Install agent on server via SSH (SSE stream)' })
   installAgent(@Param('id') id: string): Observable<MessageEvent> {
     return this.serversService.installAgentStream(id);
   }
 
   @Sse(':id/auto-setup')
-  @Roles('ADMIN', 'OPERATOR')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @ApiOperation({ summary: 'Auto-setup proxy nodes from templates (SSE stream)' })
   runAutoSetup(
     @Param('id') id: string,

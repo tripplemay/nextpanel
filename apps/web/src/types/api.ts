@@ -234,7 +234,20 @@ export interface Subscription {
   token: string;
   nodes: Array<{ node: Pick<Node, 'id' | 'name' | 'protocol' | 'status' | 'enabled' | 'listenPort'> }>;
   externalNodes: Array<{ externalNode: Pick<ExternalNode, 'id' | 'name' | 'protocol' | 'address' | 'port'> }>;
+  /** Present for owner view — list of user IDs this subscription is shared with */
+  shares?: Array<{ id: string; userId: string }>;
+  /** Present for VIEWER view — the VIEWER's personal shareToken */
+  shareToken?: string;
   createdAt: string;
+}
+
+export interface SubscriptionShare {
+  id: string;
+  subscriptionId: string;
+  userId: string;
+  shareToken: string;
+  createdAt: string;
+  user: { id: string; username: string; role: string };
 }
 
 export interface AuditLog {

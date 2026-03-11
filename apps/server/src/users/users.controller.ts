@@ -21,6 +21,13 @@ export class UsersController {
     return this.usersService.findAll();
   }
 
+  @Get('viewers')
+  @Roles('ADMIN', 'OPERATOR', 'VIEWER')
+  @ApiOperation({ summary: 'List all VIEWER users (for share selection)' })
+  findViewers() {
+    return this.usersService.findByRole('VIEWER');
+  }
+
   @Patch(':id/role')
   @ApiOperation({ summary: 'Update user role' })
   updateRole(

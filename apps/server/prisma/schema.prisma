@@ -19,13 +19,14 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  auditLogs         AuditLog[]
-  subscriptions     Subscription[]
-  servers           Server[]
-  nodes             Node[]
-  externalNodes     ExternalNode[]
-  cloudflareSetting CloudflareSetting?
-  inviteCodes       InviteCode[]
+  auditLogs              AuditLog[]
+  subscriptions          Subscription[]
+  subscriptionShares     SubscriptionShare[]
+  servers                Server[]
+  nodes                  Node[]
+  externalNodes          ExternalNode[]
+  cloudflareSetting      CloudflareSetting?
+  inviteCodes            InviteCode[]
 }
 
 model RevokedToken {
@@ -238,6 +239,19 @@ model Subscription {
 
   nodes         SubscriptionNode[]
   externalNodes ExternalSubscriptionNode[]
+  shares        SubscriptionShare[]
+}
+
+model SubscriptionShare {
+  id             String       @id @default(cuid())
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  subscriptionId String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         String
+  shareToken     String       @unique @default(cuid())
+  createdAt      DateTime     @default(now())
+
+  @@unique([subscriptionId, userId])
 }
 
 model SubscriptionNode {
