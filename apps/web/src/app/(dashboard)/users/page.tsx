@@ -16,8 +16,8 @@ const ROLE_COLORS: Record<string, string> = {
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: '管理员',
-  OPERATOR: '运营',
-  VIEWER: '只读',
+  OPERATOR: '普通',
+  VIEWER: '订阅',
 };
 
 export default function UsersPage() {
@@ -79,8 +79,8 @@ export default function UsersPage() {
             style={{ width: 90 }}
             onChange={(newRole) => updateRoleMutation.mutate({ id: record.id, role: newRole })}
             options={[
-              { value: 'OPERATOR', label: '运营' },
-              { value: 'VIEWER', label: '只读' },
+              { value: 'OPERATOR', label: '普通' },
+              { value: 'VIEWER', label: '订阅' },
             ]}
           />
         );

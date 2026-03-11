@@ -10,7 +10,7 @@ import SubscriptionFormModal from '@/components/subscriptions/SubscriptionFormMo
 import SubscriptionShareManager from '@/components/subscriptions/SubscriptionShareManager';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
-import type { Subscription } from '@/types/api';
+import type { Subscription, ViewerSubscriptionList } from '@/types/api';
 
 interface SubFormat {
   key: string;
@@ -36,6 +36,57 @@ function getShareFormats(shareToken: string): SubFormat[] {
   ];
 }
 
+function buildNodeRows(sub: Subscription) {
+  type UnifiedRow =
+    | { kind: 'managed'; id: string; name: string; protocol: string; listenPort: number; status: string; enabled: boolean }
+    | { kind: 'external'; id: string; name: string; protocol: string; listenPort: number };
+  return [
+    ...sub.nodes.map((sn) => ({ kind: 'managed' as const, id: sn.node.id, name: sn.node.name, protocol: sn.node.protocol, listenPort: sn.node.listenPort, status: sn.node.status, enabled: sn.node.enabled })),
+    ...(sub.externalNodes ?? []).map((en) => ({ kind: 'external' as const, id: en.externalNode.id, name: en.externalNode.name, protocol: en.externalNode.protocol, listenPort: en.externalNode.port })),
+  ];
+}
+
+function NodeTable({ sub }: { sub: Subscription }) {
+  const rows = buildNodeRows(sub);
+  if (rows.length === 0) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无节点" style={{ padding: '16px 0' }} />;
+  }
+  return (
+    <Table
+      rowKey="id"
+      size="middle"
+      dataSource={rows}
+      pagination={rows.length > 10 ? { showTotal: (total) => `共 ${total} 条` } : false}
+      columns={[
+        {
+          title: '节点名称',
+          render: (_: unknown, row: typeof rows[number]) => (
+            <Space size={4}>
+              {row.name}
+              {row.kind === 'managed'
+                ? <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>托管</Tag>
+                : <Tag color="orange" style={{ margin: 0, fontSize: 11 }}>外部</Tag>
+              }
+            </Space>
+          ),
+        },
+        {
+          title: '协议',
+          render: (_: unknown, row: typeof rows[number]) => <Tag color="blue">{row.protocol}</Tag>,
+        },
+        { title: '端口', render: (_: unknown, row: typeof rows[number]) => row.listenPort },
+        {
+          title: '状态',
+          render: (_: unknown, row: typeof rows[number]) =>
+            row.kind === 'managed'
+              ? <StatusTag status={row.status} enabled={row.enabled} />
+              : <Tag>外部</Tag>,
+        },
+      ]}
+    />
+  );
+}
+
 export default function SubscriptionsPage() {
   const { message, modal } = App.useApp();
   const qc = useQueryClient();
@@ -47,11 +98,15 @@ export default function SubscriptionsPage() {
   const [linkTarget, setLinkTarget] = useState<SubFormat[] | null>(null);
   const [shareManagerId, setShareManagerId] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data: rawData, isLoading } = useQuery({
     queryKey: ['subscriptions'],
     queryFn: () => subscriptionsApi.list().then((r) => r.data),
     staleTime: 5 * 60 * 1000,
   });
+
+  // Split data based on role
+  const viewerData = isViewer ? (rawData as ViewerSubscriptionList | undefined) : undefined;
+  const ownerData = !isViewer ? (rawData as Subscription[] | undefined) : undefined;
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => subscriptionsApi.delete(id),
@@ -93,160 +148,125 @@ export default function SubscriptionsPage() {
     });
   }
 
-  const collapseItems = (data ?? []).map((sub) => {
-    const totalCount = sub.nodes.length + (sub.externalNodes?.length ?? 0);
-    type UnifiedRow =
-      | { kind: 'managed'; id: string; name: string; protocol: string; listenPort: number; status: string; enabled: boolean }
-      | { kind: 'external'; id: string; name: string; protocol: string; listenPort: number };
-    const rows: UnifiedRow[] = [
-      ...sub.nodes.map((sn) => ({ kind: 'managed' as const, id: sn.node.id, name: sn.node.name, protocol: sn.node.protocol, listenPort: sn.node.listenPort, status: sn.node.status, enabled: sn.node.enabled })),
-      ...(sub.externalNodes ?? []).map((en) => ({ kind: 'external' as const, id: en.externalNode.id, name: en.externalNode.name, protocol: en.externalNode.protocol, listenPort: en.externalNode.port })),
-    ];
+  // Build collapse items for a list of subscriptions
+  function buildCollapseItems(subs: Subscription[], opts: { readonly?: boolean; useShareToken?: boolean }) {
+    return subs.map((sub) => {
+      const totalCount = sub.nodes.length + (sub.externalNodes?.length ?? 0);
+      const shareCount = sub.shares?.length ?? 0;
 
-    const shareCount = sub.shares?.length ?? 0;
-
-    return ({
-      key: sub.id,
-      label: (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
-          <span style={{ fontWeight: 500, flexShrink: 0 }}>{sub.name}</span>
-          <Typography.Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
-            {totalCount} 个节点
-          </Typography.Text>
-          {!isViewer && (
-            <Tag
-              icon={<TeamOutlined />}
-              color={shareCount > 0 ? 'blue' : 'default'}
-              style={{ margin: 0, fontSize: 11, flexShrink: 0 }}
-            >
-              已分享 {shareCount} 人
-            </Tag>
-          )}
-          <div style={{ marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
-            <Space size={4}>
-              <Button
-                size="small"
-                type="primary"
-                icon={<ExportOutlined />}
-                onClick={() => {
-                  if (isViewer && sub.shareToken) {
-                    setLinkTarget(getShareFormats(sub.shareToken));
-                  } else {
-                    setLinkTarget(getFormats(sub.token));
-                  }
-                }}
+      return {
+        key: sub.id,
+        label: (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+            <span style={{ fontWeight: 500, flexShrink: 0 }}>{sub.name}</span>
+            <Typography.Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
+              {totalCount} 个节点
+            </Typography.Text>
+            {!opts.readonly && !isViewer && (
+              <Tag
+                icon={<TeamOutlined />}
+                color={shareCount > 0 ? 'blue' : 'default'}
+                style={{ margin: 0, fontSize: 11, flexShrink: 0 }}
               >
-                导出链接
-              </Button>
-              {!isViewer && (
-                <>
-                  <Button
-                    size="small"
-                    icon={<TeamOutlined />}
-                    onClick={() => setShareManagerId(sub.id)}
-                  >
-                    分享
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<EditOutlined />}
-                    onClick={() => setEditTarget(sub)}
-                  >
-                    编辑
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<ReloadOutlined />}
-                    loading={refreshTokenMutation.isPending}
-                    onClick={() => confirmRefreshToken(sub)}
-                  >
-                    刷新链接
-                  </Button>
-                  <Button
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => confirmDelete(sub)}
-                  >
-                    删除
-                  </Button>
-                </>
-              )}
-            </Space>
+                已分享 {shareCount} 人
+              </Tag>
+            )}
+            <div style={{ marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
+              <Space size={4}>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<ExportOutlined />}
+                  onClick={() => {
+                    if (opts.useShareToken && sub.shareToken) {
+                      setLinkTarget(getShareFormats(sub.shareToken));
+                    } else {
+                      setLinkTarget(getFormats(sub.token));
+                    }
+                  }}
+                >
+                  导出链接
+                </Button>
+                {!opts.readonly && (
+                  <>
+                    {!isViewer && (
+                      <Button
+                        size="small"
+                        icon={<TeamOutlined />}
+                        onClick={() => setShareManagerId(sub.id)}
+                      >
+                        分享
+                      </Button>
+                    )}
+                    <Button
+                      size="small"
+                      icon={<EditOutlined />}
+                      onClick={() => setEditTarget(sub)}
+                    >
+                      编辑
+                    </Button>
+                    <Button
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      loading={refreshTokenMutation.isPending}
+                      onClick={() => confirmRefreshToken(sub)}
+                    >
+                      刷新链接
+                    </Button>
+                    <Button
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={() => confirmDelete(sub)}
+                    >
+                      删除
+                    </Button>
+                  </>
+                )}
+              </Space>
+            </div>
           </div>
-        </div>
-      ),
-      children: rows.length > 0 ? (
-        <Table
-          rowKey="id"
-          size="middle"
-          dataSource={rows}
-          pagination={rows.length > 10 ? { showTotal: (total) => `共 ${total} 条` } : false}
-          columns={[
-            {
-              title: '节点名称',
-              render: (_: unknown, row: typeof rows[number]) => (
-                <Space size={4}>
-                  {row.name}
-                  {row.kind === 'managed'
-                    ? <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>托管</Tag>
-                    : <Tag color="orange" style={{ margin: 0, fontSize: 11 }}>外部</Tag>
-                  }
-                </Space>
-              ),
-            },
-            {
-              title: '协议',
-              render: (_: unknown, row: typeof rows[number]) => <Tag color="blue">{row.protocol}</Tag>,
-            },
-            { title: '端口', render: (_: unknown, row: typeof rows[number]) => row.listenPort },
-            {
-              title: '状态',
-              render: (_: unknown, row: typeof rows[number]) =>
-                row.kind === 'managed'
-                  ? <StatusTag status={row.status} enabled={row.enabled} />
-                  : <Tag>外部</Tag>,
-            },
-          ]}
-        />
-      ) : (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="暂无节点"
-          style={{ padding: '16px 0' }}
-        />
-      ),
+        ),
+        children: <NodeTable sub={sub} />,
+      };
     });
-  });
+  }
 
-  return (
-    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
-      {isViewer ? (
-        <PageHeader title="我的订阅" />
-      ) : (
+  // ── VIEWER view ─────────────────────────────────────────────────────────────
+  if (isViewer) {
+    const mine = viewerData?.mine ?? [];
+    const shared = viewerData?.shared ?? [];
+
+    return (
+      <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
         <PageHeader
-          title="订阅管理"
+          title="我的订阅"
           addLabel="新增订阅"
           onAdd={() => setCreateOpen(true)}
         />
-      )}
 
-      {isLoading ? null : (data ?? []).length === 0 ? (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={isViewer ? '暂无分享给你的订阅' : '暂无订阅'}
-          style={{ padding: '32px 0' }}
-        />
-      ) : (
-        <Collapse
-          defaultActiveKey={(data ?? []).map((s) => s.id)}
-          items={collapseItems}
-          style={{ background: 'transparent' }}
-        />
-      )}
+        {!isLoading && mine.length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无订阅" style={{ padding: '24px 0' }} />
+        ) : (
+          <Collapse
+            defaultActiveKey={mine.map((s) => s.id)}
+            items={buildCollapseItems(mine, { readonly: false })}
+            style={{ background: 'transparent' }}
+          />
+        )}
 
-      {/* Create modal — owner only */}
-      {!isViewer && (
+        <Divider orientation="left" style={{ marginTop: 32 }}>共享订阅</Divider>
+
+        {!isLoading && shared.length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无分享给你的订阅" style={{ padding: '24px 0' }} />
+        ) : (
+          <Collapse
+            defaultActiveKey={shared.map((s) => s.id)}
+            items={buildCollapseItems(shared, { readonly: true, useShareToken: true })}
+            style={{ background: 'transparent' }}
+          />
+        )}
+
         <SubscriptionFormModal
           open={createOpen}
           onClose={() => setCreateOpen(false)}
@@ -255,10 +275,6 @@ export default function SubscriptionsPage() {
             qc.invalidateQueries({ queryKey: ['subscriptions'] });
           }}
         />
-      )}
-
-      {/* Edit modal — owner only */}
-      {!isViewer && (
         <SubscriptionFormModal
           open={!!editTarget}
           subscription={editTarget}
@@ -268,9 +284,55 @@ export default function SubscriptionsPage() {
             qc.invalidateQueries({ queryKey: ['subscriptions'] });
           }}
         />
+
+        {/* Export links modal */}
+        <Modal open={!!linkTarget} footer={null} onCancel={() => setLinkTarget(null)} title="订阅链接" width={560}>
+          {linkTarget && <LinkTabs formats={linkTarget} onCopy={(url) => { navigator.clipboard.writeText(url); message.success('已复制'); }} />}
+        </Modal>
+      </Card>
+    );
+  }
+
+  // ── ADMIN / OPERATOR view ────────────────────────────────────────────────────
+  const subs = ownerData ?? [];
+
+  return (
+    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+      <PageHeader
+        title="订阅管理"
+        addLabel="新增订阅"
+        onAdd={() => setCreateOpen(true)}
+      />
+
+      {isLoading ? null : subs.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无订阅" style={{ padding: '32px 0' }} />
+      ) : (
+        <Collapse
+          defaultActiveKey={subs.map((s) => s.id)}
+          items={buildCollapseItems(subs, { readonly: false })}
+          style={{ background: 'transparent' }}
+        />
       )}
 
-      {/* Share manager modal — owner only */}
+      <SubscriptionFormModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onSuccess={() => {
+          setCreateOpen(false);
+          qc.invalidateQueries({ queryKey: ['subscriptions'] });
+        }}
+      />
+      <SubscriptionFormModal
+        open={!!editTarget}
+        subscription={editTarget}
+        onClose={() => setEditTarget(null)}
+        onSuccess={() => {
+          setEditTarget(null);
+          qc.invalidateQueries({ queryKey: ['subscriptions'] });
+        }}
+      />
+
+      {/* Share manager modal */}
       <Modal
         open={!!shareManagerId}
         footer={null}
@@ -281,7 +343,7 @@ export default function SubscriptionsPage() {
         {shareManagerId && (
           <>
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              被分享的 VIEWER 用户将获得专属链接，可导入到客户端使用。取消分享后专属链接立即失效。
+              被分享的用户将获得专属链接，可导入到客户端使用。取消分享后专属链接立即失效。
             </Typography.Text>
             <Divider style={{ margin: '12px 0' }} />
             <SubscriptionShareManager subscriptionId={shareManagerId} />
@@ -290,40 +352,31 @@ export default function SubscriptionsPage() {
       </Modal>
 
       {/* Export links modal */}
-      <Modal
-        open={!!linkTarget}
-        footer={null}
-        onCancel={() => setLinkTarget(null)}
-        title="订阅链接"
-        width={560}
-      >
-        {linkTarget && (
-          <Tabs
-            items={linkTarget.map((f) => ({
-              key: f.key,
-              label: f.label,
-              children: (
-                <Space direction="vertical" style={{ width: '100%' }} size={16}>
-                  <Space.Compact style={{ width: '100%' }}>
-                    <Input value={f.url} readOnly />
-                    <Button
-                      onClick={() => {
-                        navigator.clipboard.writeText(f.url);
-                        message.success('已复制');
-                      }}
-                    >
-                      复制
-                    </Button>
-                  </Space.Compact>
-                  <div style={{ display: 'flex', justifyContent: 'center' }}>
-                    <QRCode value={f.url} size={200} />
-                  </div>
-                </Space>
-              ),
-            }))}
-          />
-        )}
+      <Modal open={!!linkTarget} footer={null} onCancel={() => setLinkTarget(null)} title="订阅链接" width={560}>
+        {linkTarget && <LinkTabs formats={linkTarget} onCopy={(url) => { navigator.clipboard.writeText(url); message.success('已复制'); }} />}
       </Modal>
     </Card>
+  );
+}
+
+function LinkTabs({ formats, onCopy }: { formats: SubFormat[]; onCopy: (url: string) => void }) {
+  return (
+    <Tabs
+      items={formats.map((f) => ({
+        key: f.key,
+        label: f.label,
+        children: (
+          <Space direction="vertical" style={{ width: '100%' }} size={16}>
+            <Space.Compact style={{ width: '100%' }}>
+              <Input value={f.url} readOnly />
+              <Button onClick={() => onCopy(f.url)}>复制</Button>
+            </Space.Compact>
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <QRCode value={f.url} size={200} />
+            </div>
+          </Space>
+        ),
+      }))}
+    />
   );
 }

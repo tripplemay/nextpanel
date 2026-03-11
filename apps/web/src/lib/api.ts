@@ -6,6 +6,7 @@ import type {
   ExternalNode,
   Subscription,
   SubscriptionShare,
+  ViewerSubscriptionList,
   Metric,
   ConnectivityResult,
   PaginatedResponse,
@@ -101,7 +102,7 @@ export const nodesApi = {
 
 // ── Subscriptions ─────────────────────────────────────
 export const subscriptionsApi = {
-  list: () => api.get<Subscription[]>('/subscriptions'),
+  list: () => api.get<Subscription[] | ViewerSubscriptionList>('/subscriptions'),
   create: (data: CreateSubscriptionDto) => api.post<Subscription>('/subscriptions', data),
   update: (id: string, data: UpdateSubscriptionDto) => api.patch<Subscription>(`/subscriptions/${id}`, data),
   refreshToken: (id: string) => api.post<{ id: string; token: string }>(`/subscriptions/${id}/refresh-token`),

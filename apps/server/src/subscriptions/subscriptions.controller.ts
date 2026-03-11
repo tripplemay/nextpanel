@@ -39,10 +39,14 @@ export class SubscriptionsController {
   @Get()
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'List subscriptions — owners see all; VIEWERs see shared only' })
-  findAll(@CurrentUser() user: { id: string; role: string }) {
+  @ApiOperation({ summary: 'List subscriptions — non-VIEWERs get flat array; VIEWERs get { mine, shared }' })
+  async findAll(@CurrentUser() user: { id: string; role: string }) {
     if (user.role === 'VIEWER') {
-      return this.subscriptionsService.findSharedWith(user.id);
+      const [mine, shared] = await Promise.all([
+        this.subscriptionsService.findAll(user.id),
+        this.subscriptionsService.findSharedWith(user.id),
+      ]);
+      return { mine, shared };
     }
     return this.subscriptionsService.findAll(user.id);
   }

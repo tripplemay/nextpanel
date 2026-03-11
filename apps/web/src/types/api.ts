@@ -241,6 +241,11 @@ export interface Subscription {
   createdAt: string;
 }
 
+export interface ViewerSubscriptionList {
+  mine: Subscription[];
+  shared: Subscription[];
+}
+
 export interface SubscriptionShare {
   id: string;
   subscriptionId: string;
