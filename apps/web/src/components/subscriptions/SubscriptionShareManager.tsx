@@ -23,6 +23,7 @@ export default function SubscriptionShareManager({ subscriptionId }: Props) {
   const { data: viewers = [], isLoading: viewersLoading } = useQuery({
     queryKey: ['users-viewers'],
     queryFn: () => usersApi.listViewers().then((r) => r.data),
+    staleTime: 0,
   });
 
   const addMutation = useMutation({
