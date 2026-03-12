@@ -123,8 +123,8 @@ func runIpCheck(cfg *Config, serverId string) {
 
 	result.Hulu = checkSimpleURL("https://www.hulu.com/", 10)
 	result.Bilibili = checkBilibili()
-	result.Openai = checkSimpleURL("https://ios.chat.openai.com/", 10)
-	result.Claude = checkSimpleURL("https://claude.ai/", 10)
+	result.Openai = checkOpenai()
+	result.Claude = checkClaude()
 	result.Gemini = checkSimpleURL("https://gemini.google.com/", 10)
 
 	// Route check (回程): node → 9 Chinese ISP IPs, runs concurrently with total 90s timeout
@@ -219,6 +219,36 @@ func checkBilibili() string {
 		return "BLOCKED"
 	}
 	return "AVAILABLE"
+}
+
+// checkOpenai checks if this IP can reach the OpenAI API.
+// Uses api.openai.com (bypasses Cloudflare bot detection on chat.openai.com).
+// 401 = IP is reachable and accepted by OpenAI → AVAILABLE
+// 403 = IP is geo-blocked by OpenAI → BLOCKED
+func checkOpenai() string {
+	res, err := runCurl(10, "https://api.openai.com/v1/models")
+	if err != nil {
+		return "BLOCKED"
+	}
+	if res.StatusCode == 401 || (res.StatusCode >= 200 && res.StatusCode < 400) {
+		return "AVAILABLE"
+	}
+	return "BLOCKED"
+}
+
+// checkClaude checks if this IP can reach the Anthropic API.
+// Uses api.anthropic.com (no Cloudflare bot protection) so TLS fingerprinting is not an issue.
+// 401 = IP is reachable and accepted by Anthropic → AVAILABLE
+// 403 = IP is geo-blocked by Anthropic → BLOCKED
+func checkClaude() string {
+	res, err := runCurl(10, "https://api.anthropic.com/v1/models")
+	if err != nil {
+		return "BLOCKED"
+	}
+	if res.StatusCode == 401 || (res.StatusCode >= 200 && res.StatusCode < 400) {
+		return "AVAILABLE"
+	}
+	return "BLOCKED"
 }
 
 func checkSimpleURL(url string, timeoutSec int) string {
