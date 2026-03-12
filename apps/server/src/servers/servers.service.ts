@@ -481,6 +481,7 @@ export class ServersService {
       sshUser: true,
       sshAuthType: true,
       tags: true,
+      autoTags: true,
       notes: true,
       status: true,
       cpuUsage: true,

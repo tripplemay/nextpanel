@@ -4,6 +4,7 @@ import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 import { Card, Space, Tag, Typography, Progress, Dropdown, Button, Tooltip } from 'antd';
+import ServerTagList from './ServerTagList';
 
 function GfwDot({ gfwBlocked }: { gfwBlocked: boolean | null | undefined }) {
   const color = gfwBlocked === false ? '#52c41a' : gfwBlocked === true ? '#ff4d4f' : '#d9d9d9';
@@ -188,9 +189,9 @@ export default function ServerCard({
       </Space>
 
       {/* 标签 */}
-      {server.tags.length > 0 && (
+      {(server.tags.length > 0 || (server.autoTags ?? []).length > 0) && (
         <div style={{ marginTop: 10 }}>
-          {server.tags.map((t) => <Tag key={t} style={{ fontSize: 11 }}>{t}</Tag>)}
+          <ServerTagList tags={server.tags} autoTags={server.autoTags ?? []} readonly />
         </div>
       )}
 

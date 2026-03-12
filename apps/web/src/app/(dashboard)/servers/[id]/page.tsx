@@ -35,8 +35,10 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { serversApi, metricsApi, nodesApi, operationLogsApi } from '@/lib/api';
+import { useQueryClient, useMutation } from '@tanstack/react-query';
 import StatusTag from '@/components/common/StatusTag';
 import IpCheckCard from '@/components/servers/IpCheckCard';
+import ServerTagList from '@/components/servers/ServerTagList';
 import type { Node, Metric, OperationLogEntry } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
@@ -86,6 +88,12 @@ export default function ServerDetailPage({
   const router = useRouter();
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
+  const qc = useQueryClient();
+
+  const updateTagsMutation = useMutation({
+    mutationFn: (tags: string[]) => serversApi.update(id, { tags }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['server', id] }),
+  });
 
   const { data: server, isLoading: serverLoading } = useQuery({
     queryKey: ['server', id],
@@ -256,9 +264,19 @@ export default function ServerDetailPage({
               <Descriptions.Item label="区域">{server.region || '—'}</Descriptions.Item>
               <Descriptions.Item label="提供商">{server.provider || '—'}</Descriptions.Item>
               <Descriptions.Item label="标签">
-                {server.tags.length > 0
-                  ? server.tags.map((t) => <Tag key={t}>{t}</Tag>)
-                  : '—'}
+                {server.tags.length > 0 || (server.autoTags ?? []).length > 0 ? (
+                  <ServerTagList
+                    tags={server.tags}
+                    autoTags={server.autoTags ?? []}
+                    onRename={(oldName, newName) => {
+                      const newTags = server.tags.map((t) => (t === oldName ? newName : t));
+                      updateTagsMutation.mutate(newTags);
+                    }}
+                    onDelete={(name) => {
+                      updateTagsMutation.mutate(server.tags.filter((t) => t !== name));
+                    }}
+                  />
+                ) : '—'}
               </Descriptions.Item>
               {server.notes && (
                 <Descriptions.Item label="备注">{server.notes}</Descriptions.Item>

@@ -161,6 +161,7 @@ export interface Server {
   sshUser: string;
   sshAuthType: 'PASSWORD' | 'KEY';
   tags: string[];
+  autoTags: string[];
   status: string;
   region: string;
   countryCode: string | null;

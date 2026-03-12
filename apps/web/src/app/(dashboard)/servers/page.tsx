@@ -41,6 +41,7 @@ import ServerFormModal from '@/components/servers/ServerFormModal';
 import AgentInstallDrawer from '@/components/servers/AgentInstallDrawer';
 import AutoSetupDrawer from '@/components/servers/AutoSetupDrawer';
 import ServerCard from '@/components/servers/ServerCard';
+import ServerTagList from '@/components/servers/ServerTagList';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
 import type { Server } from '@/types/api';
@@ -128,6 +129,12 @@ export default function ServersPage() {
     queryKey: ['agent-latest-version'],
     queryFn: () => agentApi.latestVersion().then((r) => r.data),
     staleTime: 60 * 60 * 1000,
+  });
+
+  const updateTagsMutation = useMutation({
+    mutationFn: ({ id, tags }: { id: string; tags: string[] }) => serversApi.update(id, { tags }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['servers'] }),
+    onError: () => message.error('标签更新失败'),
   });
 
   const agentUpdateMutation = useMutation({
@@ -265,7 +272,10 @@ export default function ServersPage() {
   // 动态聚合可选标签和区域
   const allTags = useMemo(() => {
     const set = new Set<string>();
-    data?.forEach((s) => s.tags.forEach((t) => set.add(t)));
+    data?.forEach((s) => {
+      s.tags.forEach((t) => set.add(t));
+      s.autoTags?.forEach((t) => set.add(t));
+    });
     return [...set].sort();
   }, [data]);
 
@@ -282,7 +292,8 @@ export default function ServersPage() {
       const q = searchText.toLowerCase();
       const matchSearch = !q || s.name.toLowerCase().includes(q) || s.ip.includes(q);
       const matchStatus = !statusFilter || s.status === statusFilter;
-      const matchTags = tagsFilter.length === 0 || tagsFilter.every((t) => s.tags.includes(t));
+      const allServerTags = [...s.tags, ...(s.autoTags ?? [])];
+      const matchTags = tagsFilter.length === 0 || tagsFilter.every((t) => allServerTags.includes(t));
       const matchRegion = !regionFilter || s.region === regionFilter;
       return matchSearch && matchStatus && matchTags && matchRegion;
     });
@@ -392,8 +403,20 @@ export default function ServersPage() {
     },
     {
       title: '标签',
-      dataIndex: 'tags',
-      render: (tags: string[]) => tags.map((t) => <Tag key={t}>{t}</Tag>),
+      render: (_: unknown, record: Server) => (
+        <ServerTagList
+          tags={record.tags}
+          autoTags={record.autoTags ?? []}
+          onRename={(oldName, newName) => {
+            const newTags = record.tags.map((t) => (t === oldName ? newName : t));
+            updateTagsMutation.mutate({ id: record.id, tags: newTags });
+          }}
+          onDelete={(name) => {
+            const newTags = record.tags.filter((t) => t !== name);
+            updateTagsMutation.mutate({ id: record.id, tags: newTags });
+          }}
+        />
+      ),
     },
     {
       title: 'Agent',

@@ -106,6 +106,12 @@ export class IpCheckService {
         ...(finalRouteData ? { routeData: finalRouteData } : {}),
       },
     });
+
+    // Auto-tag: regenerate based on check results
+    const autoTags: string[] = [];
+    if (dto.netflix === 'UNLOCKED') autoTags.push('Netflix');
+    if (dto.claude === 'AVAILABLE') autoTags.push('AI');
+    await this.prisma.server.update({ where: { id: serverId }, data: { autoTags } });
   }
 
   /** Returns pending streaming check task for a server (by agentToken) */

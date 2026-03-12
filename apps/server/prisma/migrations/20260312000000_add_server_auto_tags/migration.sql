@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Server" ADD COLUMN "autoTags" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
