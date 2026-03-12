@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	version           = "1.5.3"
+	version           = "1.5.4"
 	heartbeatInterval = 10 * time.Second
 )
 
