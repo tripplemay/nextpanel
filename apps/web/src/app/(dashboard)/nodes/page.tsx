@@ -2,7 +2,8 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useAuthStore } from '@/store/auth';
-import { App, Button, Table, Tag, Space, Card, Spin, Modal, Input, Switch, Dropdown, Typography, Collapse, Empty, Tooltip, Grid } from 'antd';
+import { App, Button, Table, Tag, Space, Card, Spin, Modal, Input, Switch, Dropdown, Typography, Collapse, Empty, Tooltip } from 'antd';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { ApiOutlined, ShareAltOutlined, FileTextOutlined, EditOutlined, CloudUploadOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import ServerTagList from '@/components/servers/ServerTagList';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -70,8 +71,7 @@ export default function NodesPage() {
   // Collapse state: track collapsed server IDs
   const [collapsedIds, setCollapsedIds] = useState<string[]>([]);
 
-  const screens = Grid.useBreakpoint();
-  const isMobile = !screens.md;
+  const { isMobile, isTablet } = useIsMobile();
 
   const { logLines, deployStatus, startStream, abort, reset } = useDeployStream();
   const {
@@ -273,6 +273,7 @@ export default function NodesPage() {
     {
       title: '名称',
       dataIndex: 'name',
+      ellipsis: true,
     },
     {
       title: '协议',
@@ -439,10 +440,10 @@ export default function NodesPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [isMobile, testResults, testingId, batchTesting, togglingId, toggleMutation, testMutation, modal, openDeploy, openDelete, openRename]);
 
-  // On mobile, keep only essential columns (string-titled ones in the keep set; JSX-titled ones like upload/download are hidden)
-  const MOBILE_KEEP_COLUMNS = new Set(['名称', '状态', '连通性', '操作']);
-  const visibleColumns = isMobile
-    ? columns.filter((c) => typeof c.title === 'string' && MOBILE_KEEP_COLUMNS.has(c.title))
+  // Tablet: hide low-priority columns; mobile uses card layout (table not rendered)
+  const TABLET_KEEP_COLUMNS = new Set(['名称', '协议', '状态', '启用', '连通性', '操作']);
+  const visibleColumns = isTablet
+    ? columns.filter((c) => typeof c.title === 'string' && TABLET_KEEP_COLUMNS.has(c.title))
     : columns;
 
   const batchTestButton = (
@@ -451,9 +452,9 @@ export default function NodesPage() {
       loading={batchTesting}
       onClick={() => void startBatchTest()}
     >
-      {batchTesting && batchProgress
+      {!isMobile && (batchTesting && batchProgress
         ? `测试中 ${batchProgress.done}/${batchProgress.total}`
-        : '批量测试'}
+        : '批量测试')}
     </Button>
   );
 
@@ -492,16 +493,7 @@ export default function NodesPage() {
         </div>
       </div>
     ),
-    children: serverNodes.length > 0 ? (
-      <Table
-        rowKey="id"
-        size="middle"
-        dataSource={serverNodes}
-        columns={visibleColumns}
-        scroll={{ x: 'max-content' }}
-        pagination={serverNodes.length > 10 ? { showTotal: (total) => `共 ${total} 条` } : false}
-      />
-    ) : (
+    children: serverNodes.length === 0 ? (
       <Empty
         image={Empty.PRESENTED_IMAGE_SIMPLE}
         description={
@@ -511,6 +503,94 @@ export default function NodesPage() {
           </span>
         }
         style={{ padding: '16px 0' }}
+      />
+    ) : isMobile ? (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {serverNodes.map((node) => {
+          const sessionResult = testResults[node.id];
+          const isTestingThis = testingId === node.id || (batchTesting && !sessionResult);
+          const connectivityEl = isTestingThis ? (
+            <Spin size="small" />
+          ) : sessionResult ? (
+            sessionResult.reachable
+              ? <Tag color="green" style={{ margin: 0 }}>{sessionResult.latency}ms</Tag>
+              : <Tag color="red" style={{ margin: 0 }}>失败</Tag>
+          ) : node.lastTestedAt ? (
+            node.lastReachable
+              ? <Tag color="green" style={{ margin: 0 }}>{node.lastLatency}ms</Tag>
+              : <Tag color="red" style={{ margin: 0 }}>失败</Tag>
+          ) : (
+            <Tag style={{ margin: 0 }}>未测试</Tag>
+          );
+
+          const moreItems = [
+            { key: 'deploy', icon: <CloudUploadOutlined />, label: '部署', onClick: () => openDeploy(node) },
+            { key: 'log', icon: <FileTextOutlined />, label: '日志', onClick: () => setLogNode(node) },
+            { key: 'rename', icon: <EditOutlined />, label: '重命名', onClick: () => openRename(node) },
+            { type: 'divider' as const },
+            {
+              key: 'delete',
+              icon: <DeleteOutlined />,
+              label: '删除',
+              danger: true,
+              onClick: () => modal.confirm({
+                title: '确认删除该节点？',
+                content: '将同步停止并移除代理服务器上的对应服务',
+                okText: '删除',
+                okType: 'danger',
+                cancelText: '取消',
+                onOk: () => openDelete(node),
+              }),
+            },
+          ];
+
+          return (
+            <Card key={node.id} size="small" style={{ borderRadius: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6, overflow: 'hidden' }}>
+                <Typography.Text strong style={{ fontSize: 14, minWidth: 0, flex: 1, marginRight: 8 }} ellipsis>{node.name}</Typography.Text>
+                <StatusTag status={node.status} enabled={node.enabled} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+                <Tag color="blue" style={{ margin: 0 }}>{node.protocol}</Tag>
+                {node.transport && <Tag style={{ margin: 0 }}>{node.transport}</Tag>}
+                {node.tls !== 'NONE' && <Tag color="green" style={{ margin: 0 }}>{node.tls}</Tag>}
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>:{node.listenPort}</Typography.Text>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Space size={8}>
+                  <Switch
+                    size="small"
+                    checked={node.enabled}
+                    loading={togglingId === node.id}
+                    onChange={() => toggleMutation.mutate(node.id)}
+                  />
+                  {connectivityEl}
+                </Space>
+                <Space size={4}>
+                  <Button size="small" icon={<ShareAltOutlined />} onClick={() => setShareNode(node)} />
+                  <Button
+                    size="small"
+                    icon={<ApiOutlined />}
+                    loading={testingId === node.id}
+                    onClick={() => testMutation.mutate(node.id)}
+                  />
+                  <Dropdown menu={{ items: moreItems }} trigger={['click']}>
+                    <Button size="small" icon={<EllipsisOutlined />} />
+                  </Dropdown>
+                </Space>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    ) : (
+      <Table
+        rowKey="id"
+        size="middle"
+        dataSource={serverNodes}
+        columns={visibleColumns}
+        scroll={isTablet ? undefined : { x: 'max-content' }}
+        pagination={serverNodes.length > 10 ? { showTotal: (total) => `共 ${total} 条` } : false}
       />
     ),
   }));

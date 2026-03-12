@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { App, Button, Table, Space, Card, Tag, Typography, Collapse, Empty, QRCode, Tabs, Input, Modal, Divider, Dropdown } from 'antd';
+import type { ColumnType } from 'antd/es/table';
 import { EditOutlined, ReloadOutlined, DeleteOutlined, ExportOutlined, TeamOutlined, MoreOutlined } from '@ant-design/icons';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import ServerTagList from '@/components/servers/ServerTagList';
@@ -49,16 +50,45 @@ function buildNodeRows(sub: Subscription) {
 }
 
 function NodeTable({ sub }: { sub: Subscription }) {
-  const { isMobile } = useIsMobile();
+  const { isMobile, isTablet } = useIsMobile();
   const rows = buildNodeRows(sub);
   if (rows.length === 0) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无节点" style={{ padding: '16px 0' }} />;
   }
 
   type Row = typeof rows[number];
-  const allColumns = [
+
+  if (isMobile) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {rows.map((row) => (
+          <Card key={row.id} size="small" style={{ borderRadius: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, flex: 1, marginRight: 8 }}>
+                <Typography.Text strong style={{ fontSize: 14, minWidth: 0 }} ellipsis>{row.name}</Typography.Text>
+                {row.kind === 'managed'
+                  ? <Tag color="blue" style={{ margin: 0, fontSize: 11, flexShrink: 0 }}>托管</Tag>
+                  : <Tag color="orange" style={{ margin: 0, fontSize: 11, flexShrink: 0 }}>外部</Tag>
+                }
+              </div>
+              <div style={{ flexShrink: 0 }}>
+                {row.kind === 'managed'
+                  ? <StatusTag status={row.status} enabled={row.enabled} />
+                  : <Tag>外部</Tag>
+                }
+              </div>
+            </div>
+            <Tag color="blue" style={{ margin: 0 }}>{row.protocol}</Tag>
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
+  const allColumns: ColumnType<Row>[] = [
     {
       title: '节点名称',
+      ellipsis: true,
       render: (_: unknown, row: Row) => (
         <Space size={4}>
           {row.name}
@@ -90,9 +120,9 @@ function NodeTable({ sub }: { sub: Subscription }) {
     },
   ];
 
-  const MOBILE_KEEP = new Set(['节点名称', '状态']);
-  const columns = isMobile
-    ? allColumns.filter((c) => MOBILE_KEEP.has(c.title as string))
+  const TABLET_KEEP = new Set(['节点名称', '协议', '状态']);
+  const columns = isTablet
+    ? allColumns.filter((c) => TABLET_KEEP.has(c.title as string))
     : allColumns;
 
   return (
@@ -100,7 +130,7 @@ function NodeTable({ sub }: { sub: Subscription }) {
       rowKey="id"
       size="middle"
       dataSource={rows}
-      scroll={{ x: 'max-content' }}
+      scroll={isTablet ? undefined : { x: 'max-content' }}
       pagination={rows.length > 10 ? { showTotal: (total) => `共 ${total} 条` } : false}
       columns={columns}
     />
@@ -416,6 +446,7 @@ export default function SubscriptionsPage() {
 }
 
 function LinkTabs({ formats, onCopy }: { formats: SubFormat[]; onCopy: (url: string) => void }) {
+  const { isMobile } = useIsMobile();
   return (
     <Tabs
       items={formats.map((f) => ({
@@ -428,7 +459,7 @@ function LinkTabs({ formats, onCopy }: { formats: SubFormat[]; onCopy: (url: str
               <Button onClick={() => onCopy(f.url)}>复制</Button>
             </Space.Compact>
             <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <QRCode value={f.url} size={200} />
+              <QRCode value={f.url} size={isMobile ? 160 : 200} />
             </div>
           </Space>
         ),
