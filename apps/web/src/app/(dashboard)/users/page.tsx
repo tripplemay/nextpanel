@@ -1,6 +1,7 @@
 'use client';
 
-import { App, Card, Table, Tag, Select, Popconfirm, Button } from 'antd';
+import { useState } from 'react';
+import { App, Card, Table, Tag, Select, Popconfirm, Button, Space } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usersApi } from '@/lib/api';
@@ -24,6 +25,8 @@ export default function UsersPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const currentUser = useAuthStore((s) => s.user);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [batchRole, setBatchRole] = useState<string | undefined>();
 
   const { data: users = [], isLoading } = useQuery({
     queryKey: ['users'],
@@ -43,6 +46,15 @@ export default function UsersPage() {
       message.error(msg ?? '更新失败');
     },
   });
+
+  async function handleBatchUpdate() {
+    if (!batchRole || selectedIds.length === 0) return;
+    await Promise.all(selectedIds.map((id) => usersApi.updateRole(id, batchRole)));
+    queryClient.invalidateQueries({ queryKey: ['users'] });
+    message.success(`已将 ${selectedIds.length} 个用户角色更新为「${ROLE_LABELS[batchRole]}」`);
+    setSelectedIds([]);
+    setBatchRole(undefined);
+  }
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => usersApi.remove(id),
@@ -116,10 +128,34 @@ export default function UsersPage() {
     },
   ];
 
+  // Users eligible for selection: non-self, non-admin
+  const selectableIds = new Set(
+    users.filter((u) => u.id !== currentUser?.id && u.role !== 'ADMIN').map((u) => u.id),
+  );
+
   return (
     <>
       <PageHeader title="用户管理" />
       <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+        {selectedIds.length > 0 && (
+          <Space style={{ marginBottom: 12 }}>
+            <span style={{ fontSize: 13, color: '#595959' }}>已选 {selectedIds.length} 人，批量设置角色：</span>
+            <Select
+              value={batchRole}
+              placeholder="选择角色"
+              style={{ width: 100 }}
+              onChange={setBatchRole}
+              options={[
+                { value: 'OPERATOR', label: '普通' },
+                { value: 'VIEWER', label: '订阅' },
+              ]}
+            />
+            <Button type="primary" disabled={!batchRole} onClick={handleBatchUpdate}>
+              确认修改
+            </Button>
+            <Button onClick={() => { setSelectedIds([]); setBatchRole(undefined); }}>取消</Button>
+          </Space>
+        )}
         <Table
           size="middle"
           rowKey="id"
@@ -128,6 +164,13 @@ export default function UsersPage() {
           columns={columns}
           scroll={{ x: 'max-content' }}
           pagination={{ showTotal: (total) => `共 ${total} 条` }}
+          rowSelection={{
+            selectedRowKeys: selectedIds,
+            onChange: (keys) => setSelectedIds(keys as string[]),
+            getCheckboxProps: (record: UserRecord) => ({
+              disabled: !selectableIds.has(record.id),
+            }),
+          }}
         />
       </Card>
     </>
