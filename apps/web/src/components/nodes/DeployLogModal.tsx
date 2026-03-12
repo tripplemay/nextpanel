@@ -110,6 +110,7 @@ export default function DeployLogModal({ node, onClose }: Props) {
       onCancel={onClose}
       footer={<Button onClick={onClose}>关闭</Button>}
       width={760}
+      style={{ maxWidth: '95vw' }}
     >
       {isLoading && <Spin style={{ display: 'block', margin: '32px auto' }} />}
 

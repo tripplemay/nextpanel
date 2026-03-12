@@ -118,6 +118,7 @@ export default function SubscriptionFormModal({
       okText={isEdit ? '保存' : '创建'}
       confirmLoading={isPending}
       destroyOnHidden
+      style={{ maxWidth: '95vw' }}
     >
       <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
         <Form.Item name="name" label="订阅名称" rules={[{ required: true, message: '请输入订阅名称' }]}>

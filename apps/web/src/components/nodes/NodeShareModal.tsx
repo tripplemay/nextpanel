@@ -28,6 +28,7 @@ export default function NodeShareModal({ node, onClose }: Props) {
       onCancel={onClose}
       footer={null}
       width={560}
+      style={{ maxWidth: '95vw' }}
     >
       {isLoading && (
         <div style={{ textAlign: 'center', padding: 32 }}>

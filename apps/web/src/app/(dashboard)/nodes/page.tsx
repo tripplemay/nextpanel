@@ -355,73 +355,89 @@ export default function NodesPage() {
     },
     {
       title: '操作',
-      width: 160,
-      render: (_: unknown, record) => (
-        <Space size={4}>
-          <Button
-            size="small"
-            icon={<ShareAltOutlined />}
-            onClick={() => setShareNode(record)}
-          >
-            分享
-          </Button>
-          <Button
-            size="small"
-            icon={<ApiOutlined />}
-            loading={testingId === record.id}
-            onClick={() => testMutation.mutate(record.id)}
-          >
-            测试
-          </Button>
-          <Dropdown
-            menu={{
-              items: [
-                {
-                  key: 'deploy',
-                  icon: <CloudUploadOutlined />,
-                  label: '部署',
-                  onClick: () => openDeploy(record),
-                },
-                {
-                  key: 'log',
-                  icon: <FileTextOutlined />,
-                  label: '日志',
-                  onClick: () => setLogNode(record),
-                },
-                {
-                  key: 'rename',
-                  icon: <EditOutlined />,
-                  label: '重命名',
-                  onClick: () => openRename(record),
-                },
-                { type: 'divider' },
-                {
-                  key: 'delete',
-                  icon: <DeleteOutlined />,
-                  label: '删除',
-                  danger: true,
-                  onClick: () => {
-                    modal.confirm({
-                      title: '确认删除该节点？',
-                      content: '将同步停止并移除代理服务器上的对应服务',
-                      okText: '删除',
-                      okType: 'danger',
-                      cancelText: '取消',
-                      onOk: () => openDelete(record),
-                    });
-                  },
-                },
-              ],
-            }}
-            trigger={['click']}
-          >
-            <Button size="small" icon={<EllipsisOutlined />} />
-          </Dropdown>
-        </Space>
-      ),
+      width: isMobile ? 48 : 160,
+      render: (_: unknown, record) => {
+        const moreItems = [
+          {
+            key: 'deploy',
+            icon: <CloudUploadOutlined />,
+            label: '部署',
+            onClick: () => openDeploy(record),
+          },
+          {
+            key: 'log',
+            icon: <FileTextOutlined />,
+            label: '日志',
+            onClick: () => setLogNode(record),
+          },
+          {
+            key: 'rename',
+            icon: <EditOutlined />,
+            label: '重命名',
+            onClick: () => openRename(record),
+          },
+          { type: 'divider' as const },
+          {
+            key: 'delete',
+            icon: <DeleteOutlined />,
+            label: '删除',
+            danger: true,
+            onClick: () => {
+              modal.confirm({
+                title: '确认删除该节点？',
+                content: '将同步停止并移除代理服务器上的对应服务',
+                okText: '删除',
+                okType: 'danger',
+                cancelText: '取消',
+                onOk: () => openDelete(record),
+              });
+            },
+          },
+        ];
+
+        if (isMobile) {
+          return (
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'share', icon: <ShareAltOutlined />, label: '分享', onClick: () => setShareNode(record) },
+                  { key: 'test', icon: <ApiOutlined />, label: '测试', onClick: () => testMutation.mutate(record.id) },
+                  ...moreItems,
+                ],
+              }}
+              trigger={['click']}
+            >
+              <Button size="small" icon={<EllipsisOutlined />} />
+            </Dropdown>
+          );
+        }
+
+        return (
+          <Space size={4}>
+            <Button
+              size="small"
+              icon={<ShareAltOutlined />}
+              onClick={() => setShareNode(record)}
+            >
+              分享
+            </Button>
+            <Button
+              size="small"
+              icon={<ApiOutlined />}
+              loading={testingId === record.id}
+              onClick={() => testMutation.mutate(record.id)}
+            >
+              测试
+            </Button>
+            <Dropdown menu={{ items: moreItems }} trigger={['click']}>
+              <Button size="small" icon={<EllipsisOutlined />} />
+            </Dropdown>
+          </Space>
+        );
+      },
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [testResults, testingId, batchTesting, togglingId, toggleMutation, testMutation, modal, openDeploy, openDelete, openRename]);
+  ], [isMobile, testResults, testingId, batchTesting, togglingId, toggleMutation, testMutation, modal, openDeploy, openDelete, openRename]);
 
   // On mobile, keep only essential columns (string-titled ones in the keep set; JSX-titled ones like upload/download are hidden)
   const MOBILE_KEEP_COLUMNS = new Set(['名称', '状态', '连通性', '操作']);
