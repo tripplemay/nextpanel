@@ -8,6 +8,7 @@ import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 import { ipCheckApi } from '@/lib/api';
 import type { ServerIpCheck, RouteData, OutboundNode, InboundNode, RouteHop } from '@/types/api';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 dayjs.extend(relativeTime);
 dayjs.locale('zh-cn');
@@ -180,6 +181,7 @@ const SECTION_LABEL: React.CSSProperties = { fontSize: 12, color: '#8c8c8c', dis
 
 export default function IpCheckCard({ serverId }: Props) {
   const queryClient = useQueryClient();
+  const { isMobile } = useIsMobile();
 
   const { data: check, isLoading } = useQuery({
     queryKey: ['ip-check', serverId],
@@ -252,10 +254,10 @@ export default function IpCheckCard({ serverId }: Props) {
       style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
       extra={cardExtra}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'flex-start', gap: isMobile ? 16 : 0 }}>
 
-        {/* 左列：流媒体 / AI — flex 2 */}
-        <div style={{ flex: 2, minWidth: 0 }}>
+        {/* 左列：流媒体 / AI */}
+        <div style={{ flex: 2, minWidth: 0, width: isMobile ? '100%' : undefined }}>
           <Descriptions column={1} size="small" styles={{ label: { width: 130 } }}>
             <Descriptions.Item label="IP 类型">
               {hasIpInfo ? <IpTypeTag ipType={check.ipType} /> : <Skeleton.Input size="small" style={{ width: 80, height: 20 }} active={isChecking} />}
@@ -331,13 +333,13 @@ export default function IpCheckCard({ serverId }: Props) {
           )}
         </div>
 
-        {DIVIDER}
+        {!isMobile && DIVIDER}
 
-        {/* 右列：路由测试 — flex 3，内部再拆两列 */}
-        <div style={{ flex: 3, minWidth: 0, display: 'flex', alignItems: 'flex-start' }}>
+        {/* 右列：路由测试，内部再拆两列（移动端垂直排列） */}
+        <div style={{ flex: 3, minWidth: 0, width: isMobile ? '100%' : undefined, display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'flex-start', gap: isMobile ? 16 : 0 }}>
 
           {/* 去程 */}
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ flex: 1, minWidth: 0, width: isMobile ? '100%' : undefined }}>
             <Text style={SECTION_LABEL}>去程（中国 → 节点）</Text>
             {isChecking ? (
               <Skeleton active paragraph={{ rows: 4 }} />
@@ -348,10 +350,10 @@ export default function IpCheckCard({ serverId }: Props) {
             )}
           </div>
 
-          {DIVIDER}
+          {!isMobile && DIVIDER}
 
           {/* 回程 */}
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ flex: 1, minWidth: 0, width: isMobile ? '100%' : undefined }}>
             <Text style={SECTION_LABEL}>回程（节点 → 中国）</Text>
             {isChecking ? (
               <Skeleton active paragraph={{ rows: 5 }} />

@@ -152,7 +152,7 @@ export default function ServerDetailPage({
       ? `${chartData[0].time} – ${chartData[chartData.length - 1].time}`
       : null;
 
-  const nodeColumns: ColumnType<Node>[] = [
+  const allNodeColumns: ColumnType<Node>[] = [
     { title: '名称', dataIndex: 'name' },
     { title: '协议', dataIndex: 'protocol' },
     { title: '实现', dataIndex: 'implementation', render: (v) => v ?? '—' },
@@ -185,8 +185,12 @@ export default function ServerDetailPage({
       render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm'),
     },
   ];
+  const NODE_MOBILE_KEEP = new Set(['名称', '端口', '状态']);
+  const nodeColumns = isMobile
+    ? allNodeColumns.filter((c) => NODE_MOBILE_KEEP.has(c.title as string))
+    : allNodeColumns;
 
-  const logColumns: ColumnType<OperationLogEntry>[] = [
+  const allLogColumns: ColumnType<OperationLogEntry>[] = [
     { title: '操作', dataIndex: 'operation', width: 120 },
     {
       title: '结果',
@@ -208,6 +212,10 @@ export default function ServerDetailPage({
       render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm:ss'),
     },
   ];
+  const LOG_MOBILE_KEEP = new Set(['操作', '结果', '时间']);
+  const logColumns = isMobile
+    ? allLogColumns.filter((c) => LOG_MOBILE_KEEP.has(c.title as string))
+    : allLogColumns;
 
   if (serverLoading) {
     return (
