@@ -97,7 +97,10 @@ export default function ServersPage() {
   // 视图模式
   const [viewMode, setViewMode] = useState<'table' | 'card'>(() => {
     if (typeof window !== 'undefined') {
-      return (localStorage.getItem('servers_view_mode') as 'table' | 'card') ?? 'table';
+      const saved = localStorage.getItem('servers_view_mode') as 'table' | 'card' | null;
+      if (saved) return saved;
+      // Default to card view on mobile
+      return window.innerWidth < 768 ? 'card' : 'table';
     }
     return 'table';
   });
