@@ -8,6 +8,7 @@ import { ImportOutlined, DeleteOutlined, ApiOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { externalNodesApi } from '@/lib/api';
 import PageHeader from '@/components/common/PageHeader';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import type { ExternalNode, ConnectivityResult } from '@/types/api';
 
 const { TextArea } = Input;
@@ -26,6 +27,7 @@ function formatTimeAgo(isoString: string | null): string {
 export default function ExternalNodesPage() {
   const { message } = App.useApp();
   const qc = useQueryClient();
+  const { isMobile } = useIsMobile();
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -76,7 +78,7 @@ export default function ExternalNodesPage() {
     onError: () => message.error('删除失败'),
   });
 
-  const columns = [
+  const allExternalColumns = [
     {
       title: '名称',
       dataIndex: 'name',
@@ -147,6 +149,10 @@ export default function ExternalNodesPage() {
     },
   ];
 
+  const columns = isMobile
+    ? allExternalColumns.filter((c) => (c as { title?: string }).title !== '地址')
+    : allExternalColumns;
+
   return (
     <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
       <PageHeader
@@ -178,6 +184,7 @@ export default function ExternalNodesPage() {
         okText="导入"
         confirmLoading={importMutation.isPending}
         width={560}
+        style={{ maxWidth: '95vw' }}
       >
         <div style={{ marginBottom: 8, color: '#8c8c8c', fontSize: 13 }}>
           支持以下格式：订阅链接（https://...）、Base64 编码的订阅内容、单个或多个 URI（vmess:// vless:// ss:// trojan:// hysteria2://）

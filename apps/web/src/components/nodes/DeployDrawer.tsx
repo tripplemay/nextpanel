@@ -4,6 +4,7 @@ import { useRef, useEffect } from 'react';
 import { Drawer, Button, Space, Badge, Typography } from 'antd';
 import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-design/icons';
 import type { DeployStatus } from '@/hooks/useDeployStream';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 const { Text } = Typography;
 
@@ -25,6 +26,7 @@ export default function DeployDrawer({
   actionLabel = '部署',
 }: DeployDrawerProps) {
   const logEndRef = useRef<HTMLDivElement>(null);
+  const { isMobile } = useIsMobile();
 
   useEffect(() => {
     if (logLines.length > 0) {
@@ -53,7 +55,7 @@ export default function DeployDrawer({
     <Drawer
       open={open}
       title={drawerTitle}
-      width={640}
+      width={isMobile ? '100%' : 640}
       onClose={onClose}
       footer={
         deployStatus !== 'running' && (

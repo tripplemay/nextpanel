@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { App, Button, Table, Space, Card, Tag, Typography, Collapse, Empty, QRCode, Tabs, Input, Modal, Divider } from 'antd';
-import { EditOutlined, ReloadOutlined, DeleteOutlined, ExportOutlined, TeamOutlined } from '@ant-design/icons';
+import { App, Button, Table, Space, Card, Tag, Typography, Collapse, Empty, QRCode, Tabs, Input, Modal, Divider, Dropdown } from 'antd';
+import { EditOutlined, ReloadOutlined, DeleteOutlined, ExportOutlined, TeamOutlined, MoreOutlined } from '@ant-design/icons';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import ServerTagList from '@/components/servers/ServerTagList';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { subscriptionsApi } from '@/lib/api';
@@ -48,49 +49,60 @@ function buildNodeRows(sub: Subscription) {
 }
 
 function NodeTable({ sub }: { sub: Subscription }) {
+  const { isMobile } = useIsMobile();
   const rows = buildNodeRows(sub);
   if (rows.length === 0) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无节点" style={{ padding: '16px 0' }} />;
   }
+
+  type Row = typeof rows[number];
+  const allColumns = [
+    {
+      title: '节点名称',
+      render: (_: unknown, row: Row) => (
+        <Space size={4}>
+          {row.name}
+          {row.kind === 'managed'
+            ? <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>托管</Tag>
+            : <Tag color="orange" style={{ margin: 0, fontSize: 11 }}>外部</Tag>
+          }
+        </Space>
+      ),
+    },
+    {
+      title: '协议',
+      render: (_: unknown, row: Row) => <Tag color="blue">{row.protocol}</Tag>,
+    },
+    { title: '端口', render: (_: unknown, row: Row) => row.listenPort },
+    {
+      title: '标签',
+      render: (_: unknown, row: Row) =>
+        row.kind === 'managed' && (row.serverTags.length > 0 || row.serverAutoTags.length > 0)
+          ? <ServerTagList tags={row.serverTags} autoTags={row.serverAutoTags} readonly />
+          : null,
+    },
+    {
+      title: '状态',
+      render: (_: unknown, row: Row) =>
+        row.kind === 'managed'
+          ? <StatusTag status={row.status} enabled={row.enabled} />
+          : <Tag>外部</Tag>,
+    },
+  ];
+
+  const MOBILE_KEEP = new Set(['节点名称', '状态']);
+  const columns = isMobile
+    ? allColumns.filter((c) => MOBILE_KEEP.has(c.title as string))
+    : allColumns;
+
   return (
     <Table
       rowKey="id"
       size="middle"
       dataSource={rows}
+      scroll={{ x: 'max-content' }}
       pagination={rows.length > 10 ? { showTotal: (total) => `共 ${total} 条` } : false}
-      columns={[
-        {
-          title: '节点名称',
-          render: (_: unknown, row: typeof rows[number]) => (
-            <Space size={4}>
-              {row.name}
-              {row.kind === 'managed'
-                ? <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>托管</Tag>
-                : <Tag color="orange" style={{ margin: 0, fontSize: 11 }}>外部</Tag>
-              }
-            </Space>
-          ),
-        },
-        {
-          title: '协议',
-          render: (_: unknown, row: typeof rows[number]) => <Tag color="blue">{row.protocol}</Tag>,
-        },
-        { title: '端口', render: (_: unknown, row: typeof rows[number]) => row.listenPort },
-        {
-          title: '标签',
-          render: (_: unknown, row: typeof rows[number]) =>
-            row.kind === 'managed' && (row.serverTags.length > 0 || row.serverAutoTags.length > 0)
-              ? <ServerTagList tags={row.serverTags} autoTags={row.serverAutoTags} readonly />
-              : null,
-        },
-        {
-          title: '状态',
-          render: (_: unknown, row: typeof rows[number]) =>
-            row.kind === 'managed'
-              ? <StatusTag status={row.status} enabled={row.enabled} />
-              : <Tag>外部</Tag>,
-        },
-      ]}
+      columns={columns}
     />
   );
 }
@@ -105,6 +117,8 @@ export default function SubscriptionsPage() {
   const [editTarget, setEditTarget] = useState<Subscription | null>(null);
   const [linkTarget, setLinkTarget] = useState<SubFormat[] | null>(null);
   const [shareManagerId, setShareManagerId] = useState<string | null>(null);
+
+  const { isMobile } = useIsMobile();
 
   const { data: rawData, isLoading } = useQuery({
     queryKey: ['subscriptions'],
@@ -180,58 +194,91 @@ export default function SubscriptionsPage() {
               </Tag>
             )}
             <div style={{ marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
-              <Space size={4}>
-                <Button
-                  size="small"
-                  type="primary"
-                  icon={<ExportOutlined />}
-                  onClick={() => {
-                    if (opts.useShareToken && sub.shareToken) {
-                      setLinkTarget(getShareFormats(sub.shareToken));
-                    } else {
-                      setLinkTarget(getFormats(sub.token));
-                    }
-                  }}
-                >
-                  导出链接
-                </Button>
-                {!opts.readonly && (
-                  <>
-                    {!isViewer && (
+              {isMobile ? (
+                <Space size={4}>
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<ExportOutlined />}
+                    onClick={() => {
+                      if (opts.useShareToken && sub.shareToken) {
+                        setLinkTarget(getShareFormats(sub.shareToken));
+                      } else {
+                        setLinkTarget(getFormats(sub.token));
+                      }
+                    }}
+                  />
+                  {!opts.readonly && (
+                    <Dropdown
+                      trigger={['click']}
+                      menu={{
+                        items: [
+                          ...(!isViewer ? [{ key: 'share', icon: <TeamOutlined />, label: '分享', onClick: () => setShareManagerId(sub.id) }] : []),
+                          { key: 'edit', icon: <EditOutlined />, label: '编辑', onClick: () => setEditTarget(sub) },
+                          { key: 'refresh', icon: <ReloadOutlined />, label: '刷新链接', onClick: () => confirmRefreshToken(sub) },
+                          { type: 'divider' as const },
+                          { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true, onClick: () => confirmDelete(sub) },
+                        ],
+                      }}
+                    >
+                      <Button size="small" icon={<MoreOutlined />} />
+                    </Dropdown>
+                  )}
+                </Space>
+              ) : (
+                <Space size={4}>
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<ExportOutlined />}
+                    onClick={() => {
+                      if (opts.useShareToken && sub.shareToken) {
+                        setLinkTarget(getShareFormats(sub.shareToken));
+                      } else {
+                        setLinkTarget(getFormats(sub.token));
+                      }
+                    }}
+                  >
+                    导出链接
+                  </Button>
+                  {!opts.readonly && (
+                    <>
+                      {!isViewer && (
+                        <Button
+                          size="small"
+                          icon={<TeamOutlined />}
+                          onClick={() => setShareManagerId(sub.id)}
+                        >
+                          分享
+                        </Button>
+                      )}
                       <Button
                         size="small"
-                        icon={<TeamOutlined />}
-                        onClick={() => setShareManagerId(sub.id)}
+                        icon={<EditOutlined />}
+                        onClick={() => setEditTarget(sub)}
                       >
-                        分享
+                        编辑
                       </Button>
-                    )}
-                    <Button
-                      size="small"
-                      icon={<EditOutlined />}
-                      onClick={() => setEditTarget(sub)}
-                    >
-                      编辑
-                    </Button>
-                    <Button
-                      size="small"
-                      icon={<ReloadOutlined />}
-                      loading={refreshTokenMutation.isPending}
-                      onClick={() => confirmRefreshToken(sub)}
-                    >
-                      刷新链接
-                    </Button>
-                    <Button
-                      size="small"
-                      danger
-                      icon={<DeleteOutlined />}
-                      onClick={() => confirmDelete(sub)}
-                    >
-                      删除
-                    </Button>
-                  </>
-                )}
-              </Space>
+                      <Button
+                        size="small"
+                        icon={<ReloadOutlined />}
+                        loading={refreshTokenMutation.isPending}
+                        onClick={() => confirmRefreshToken(sub)}
+                      >
+                        刷新链接
+                      </Button>
+                      <Button
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => confirmDelete(sub)}
+                      >
+                        删除
+                      </Button>
+                    </>
+                  )}
+                </Space>
+              )}
             </div>
           </div>
         ),
@@ -294,7 +341,7 @@ export default function SubscriptionsPage() {
         />
 
         {/* Export links modal */}
-        <Modal open={!!linkTarget} footer={null} onCancel={() => setLinkTarget(null)} title="订阅链接" width={560}>
+        <Modal open={!!linkTarget} footer={null} onCancel={() => setLinkTarget(null)} title="订阅链接" width={560} style={{ maxWidth: '95vw' }}>
           {linkTarget && <LinkTabs formats={linkTarget} onCopy={(url) => { navigator.clipboard.writeText(url); message.success('已复制'); }} />}
         </Modal>
       </Card>
@@ -347,6 +394,7 @@ export default function SubscriptionsPage() {
         onCancel={() => setShareManagerId(null)}
         title="分享订阅给用户"
         width={480}
+        style={{ maxWidth: '95vw' }}
       >
         {shareManagerId && (
           <>
@@ -360,7 +408,7 @@ export default function SubscriptionsPage() {
       </Modal>
 
       {/* Export links modal */}
-      <Modal open={!!linkTarget} footer={null} onCancel={() => setLinkTarget(null)} title="订阅链接" width={560}>
+      <Modal open={!!linkTarget} footer={null} onCancel={() => setLinkTarget(null)} title="订阅链接" width={560} style={{ maxWidth: '95vw' }}>
         {linkTarget && <LinkTabs formats={linkTarget} onCopy={(url) => { navigator.clipboard.writeText(url); message.success('已复制'); }} />}
       </Modal>
     </Card>

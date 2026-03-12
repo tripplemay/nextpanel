@@ -3,6 +3,7 @@
 import { Button, Divider, Typography } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import type { ReactNode } from 'react';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 const { Title } = Typography;
 
@@ -14,11 +15,13 @@ interface PageHeaderProps {
 }
 
 export default function PageHeader({ title, addLabel, onAdd, extra }: PageHeaderProps) {
+  const { isMobile } = useIsMobile();
+
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Title level={4} style={{ margin: 0 }}>{title}</Title>
-        <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <Title level={isMobile ? 5 : 4} style={{ margin: 0 }}>{title}</Title>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {extra}
           {onAdd && (
             <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>

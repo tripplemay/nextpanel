@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 import { useDeployStream } from '@/hooks/useDeployStream';
 import CopyButton from '@/components/common/CopyButton';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 const { Text } = Typography;
 
@@ -27,6 +28,7 @@ export default function AgentInstallDrawer({
   onClose,
 }: Props) {
   const { logLines, deployStatus, startStream, reset } = useDeployStream();
+  const { isMobile } = useIsMobile();
   const [manualCmd, setManualCmd] = useState('');
 
   const start = () => {
@@ -65,7 +67,7 @@ export default function AgentInstallDrawer({
     <Drawer
       open={open}
       title={drawerTitle}
-      width={640}
+      width={isMobile ? '100%' : 640}
       onClose={onClose}
       footer={
         deployStatus !== 'running' && (

@@ -10,6 +10,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { inviteCodesApi } from '@/lib/api';
 import type { InviteCode } from '@/types/api';
 import PageHeader from '@/components/common/PageHeader';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 const { Text } = Typography;
 
@@ -34,6 +35,7 @@ function UsageProgress({ usedCount, maxUses }: { usedCount: number; maxUses: num
 export default function InviteCodesPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
+  const { isMobile } = useIsMobile();
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [customModalOpen, setCustomModalOpen] = useState(false);
   const [resultModalOpen, setResultModalOpen] = useState(false);
@@ -103,7 +105,7 @@ export default function InviteCodesPage() {
     activeTab === 'exhausted' ? exhaustedCodes :
     codes;
 
-  const columns = [
+  const allInviteColumns = [
     {
       title: '邀请码',
       dataIndex: 'code',
@@ -148,6 +150,11 @@ export default function InviteCodesPage() {
       ),
     },
   ];
+
+  const MOBILE_HIDE_INVITE = new Set(['creator', 'createdAt']);
+  const columns = isMobile
+    ? allInviteColumns.filter((c) => !MOBILE_HIDE_INVITE.has(c.key as string))
+    : allInviteColumns;
 
   const tabItems = [
     { key: 'all', label: `全部 (${codes.length})` },
@@ -292,6 +299,7 @@ export default function InviteCodesPage() {
           </Space>
         }
         width={480}
+        style={{ maxWidth: '95vw' }}
       >
         <Input.TextArea
           value={generatedCodes.map((c) => c.code).join('\n')}

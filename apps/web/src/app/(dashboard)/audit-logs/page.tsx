@@ -7,6 +7,7 @@ import { auditApi, operationLogsApi } from '@/lib/api';
 import type { AuditLog, OperationLogDetail } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 import PageHeader from '@/components/common/PageHeader';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 const { Text } = Typography;
 
@@ -145,6 +146,7 @@ function ExpandedRowContent({ record }: { record: AuditLog }) {
 
 export default function AuditLogsPage() {
   const { message } = App.useApp();
+  const { isMobile } = useIsMobile();
   const [page, setPage] = useState(1);
   const [actionFilter, setActionFilter] = useState('');
   const pageSize = 20;
@@ -160,7 +162,14 @@ export default function AuditLogsPage() {
 
   if (isError) message.error('加载审计日志失败');
 
-  const columns: ColumnType<AuditLog>[] = [
+  const columns: ColumnType<AuditLog>[] = (isMobile
+    ? [
+        { title: '操作人', width: 90, render: (_: unknown, r: AuditLog) => r.actor?.username ?? '—' },
+        { title: '动作', dataIndex: 'action', width: 90, render: (a: string) => <Tag color={ACTION_COLOR[a] ?? 'default'} style={{ fontFamily: 'monospace' }}>{a}</Tag> },
+        { title: '资源', dataIndex: 'resource', width: 90 },
+        { title: '时间', dataIndex: 'timestamp', render: (v: string) => new Date(v).toLocaleString('zh-CN') },
+      ]
+    : [
     {
       title: '操作人',
       width: 120,
@@ -195,7 +204,7 @@ export default function AuditLogsPage() {
       dataIndex: 'timestamp',
       render: (v: string) => new Date(v).toLocaleString('zh-CN'),
     },
-  ];
+  ]) as ColumnType<AuditLog>[];
 
   const rowExpandable = (record: AuditLog) => hasDiff(record) || hasSshLog(record);
 

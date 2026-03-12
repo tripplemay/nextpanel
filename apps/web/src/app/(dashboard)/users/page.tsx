@@ -8,6 +8,7 @@ import { usersApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
 import type { UserRecord } from '@/types/api';
 import PageHeader from '@/components/common/PageHeader';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 const ROLE_COLORS: Record<string, string> = {
   ADMIN: 'red',
@@ -25,6 +26,7 @@ export default function UsersPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const currentUser = useAuthStore((s) => s.user);
+  const { isMobile } = useIsMobile();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [batchRole, setBatchRole] = useState<string | undefined>();
 
@@ -68,7 +70,7 @@ export default function UsersPage() {
     },
   });
 
-  const columns = [
+  const allUserColumns = [
     {
       title: '用户名',
       dataIndex: 'username',
@@ -127,6 +129,9 @@ export default function UsersPage() {
       },
     },
   ];
+  const columns = isMobile
+    ? allUserColumns.filter((c) => c.key !== 'createdAt')
+    : allUserColumns;
 
   // Users eligible for selection: non-self, non-admin
   const selectableIds = new Set(

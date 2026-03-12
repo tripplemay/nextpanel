@@ -44,6 +44,7 @@ import ServerCard from '@/components/servers/ServerCard';
 import ServerTagList from '@/components/servers/ServerTagList';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import type { Server } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
@@ -89,6 +90,7 @@ export default function ServersPage() {
   const { message, modal } = App.useApp();
   const qc = useQueryClient();
   const router = useRouter();
+  const { isMobile } = useIsMobile();
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Server | null>(null);
   const [installTarget, setInstallTarget] = useState<Server | null>(null);
@@ -545,11 +547,11 @@ export default function ServersPage() {
       />
 
       {/* 搜索与筛选栏 */}
-      <Space style={{ marginBottom: 16 }} wrap>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
         <Input.Search
           placeholder="搜索名称或 IP"
           allowClear
-          style={{ width: 200 }}
+          style={{ width: isMobile ? '100%' : 200 }}
           onChange={(e) => {
             const value = e.target.value;
             if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -559,7 +561,7 @@ export default function ServersPage() {
         <Select
           placeholder="状态"
           allowClear
-          style={{ width: 120 }}
+          style={{ width: isMobile ? 'calc(50% - 4px)' : 120 }}
           onChange={(v) => setStatusFilter(v)}
           options={[
             { value: 'ONLINE', label: '在线' },
@@ -572,18 +574,18 @@ export default function ServersPage() {
           mode="multiple"
           placeholder="标签筛选"
           allowClear
-          style={{ minWidth: 150 }}
+          style={{ width: isMobile ? '100%' : 150, minWidth: isMobile ? undefined : 150 }}
           onChange={(v) => setTagsFilter(v)}
           options={allTags.map((t) => ({ value: t, label: t }))}
         />
         <Select
           placeholder="区域"
           allowClear
-          style={{ width: 120 }}
+          style={{ width: isMobile ? 'calc(50% - 4px)' : 120 }}
           onChange={(v) => setRegionFilter(v)}
           options={allRegions.map((r) => ({ value: r, label: r }))}
         />
-      </Space>
+      </div>
 
       {/* 批量操作栏 */}
       {selectedRowKeys.length > 0 && (

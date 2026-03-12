@@ -423,6 +423,12 @@ export default function NodesPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [testResults, testingId, batchTesting, togglingId, toggleMutation, testMutation, modal, openDeploy, openDelete, openRename]);
 
+  // On mobile, keep only essential columns (string-titled ones in the keep set; JSX-titled ones like upload/download are hidden)
+  const MOBILE_KEEP_COLUMNS = new Set(['名称', '状态', '连通性', '操作']);
+  const visibleColumns = isMobile
+    ? columns.filter((c) => typeof c.title === 'string' && MOBILE_KEEP_COLUMNS.has(c.title))
+    : columns;
+
   const batchTestButton = (
     <Button
       icon={<ApiOutlined />}
@@ -475,7 +481,7 @@ export default function NodesPage() {
         rowKey="id"
         size="middle"
         dataSource={serverNodes}
-        columns={columns}
+        columns={visibleColumns}
         scroll={{ x: 'max-content' }}
         pagination={serverNodes.length > 10 ? { showTotal: (total) => `共 ${total} 条` } : false}
       />
