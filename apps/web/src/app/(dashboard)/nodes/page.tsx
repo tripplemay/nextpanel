@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useAuthStore } from '@/store/auth';
 import { App, Button, Table, Tag, Space, Card, Spin, Modal, Input, Switch, Dropdown, Typography, Collapse, Empty, Tooltip, Grid } from 'antd';
 import { ApiOutlined, ShareAltOutlined, FileTextOutlined, EditOutlined, CloudUploadOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import ServerTagList from '@/components/servers/ServerTagList';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { nodesApi, serversApi } from '@/lib/api';
 import NodePresetModal from '@/components/nodes/NodePresetModal';
@@ -452,6 +453,11 @@ export default function NodesPage() {
         )}
         {!isMobile && (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>{serverNodes.length} 个节点</Typography.Text>
+        )}
+        {!isMobile && (server.tags.length > 0 || (server.autoTags ?? []).length > 0) && (
+          <span onClick={(e) => e.stopPropagation()}>
+            <ServerTagList tags={server.tags} autoTags={server.autoTags ?? []} readonly />
+          </span>
         )}
         <div style={{ marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
           <Button

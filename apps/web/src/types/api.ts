@@ -186,7 +186,7 @@ export interface Server {
 export interface Node {
   id: string;
   serverId: string;
-  server?: Pick<Server, 'id' | 'name' | 'ip'>;
+  server?: Pick<Server, 'id' | 'name' | 'ip' | 'tags' | 'autoTags'>;
   name: string;
   protocol: string;
   implementation: string | null;
@@ -233,7 +233,7 @@ export interface Subscription {
   id: string;
   name: string;
   token: string;
-  nodes: Array<{ node: Pick<Node, 'id' | 'name' | 'protocol' | 'status' | 'enabled' | 'listenPort'> }>;
+  nodes: Array<{ node: Pick<Node, 'id' | 'name' | 'protocol' | 'status' | 'enabled' | 'listenPort' | 'serverId' | 'server'> }>;
   externalNodes: Array<{ externalNode: Pick<ExternalNode, 'id' | 'name' | 'protocol' | 'address' | 'port'> }>;
   /** Present for owner view — list of user IDs this subscription is shared with */
   shares?: Array<{ id: string; userId: string }>;

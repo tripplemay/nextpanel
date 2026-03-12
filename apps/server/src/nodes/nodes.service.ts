@@ -360,6 +360,7 @@ export class NodesService {
       lastTestedAt: true,
       createdAt: true,
       updatedAt: true,
+      server: { select: { id: true, name: true, ip: true, tags: true, autoTags: true } },
     } as const;
   }
 }

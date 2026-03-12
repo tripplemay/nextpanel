@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect } from 'react';
-import { Modal, Form, Input, Select, App, Tag } from 'antd';
+import { Modal, Form, Input, Select, App, Tag, Space } from 'antd';
+import ServerTagList from '@/components/servers/ServerTagList';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { subscriptionsApi, nodesApi, externalNodesApi } from '@/lib/api';
 import type { CreateSubscriptionDto, Subscription, Node, ExternalNode } from '@/types/api';
@@ -81,14 +82,17 @@ export default function SubscriptionFormModal({
   const nodeOptions = (nodes ?? []).map((n: Node) => ({
     value: n.id,
     label: (
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <Space size={4} wrap={false}>
         {n.name}
         <span style={{ color: '#8c8c8c', fontSize: 12 }}>({n.protocol}:{n.listenPort})</span>
         <Tag color={STATUS_COLOR[n.status] ?? 'default'} style={{ margin: 0, fontSize: 11 }}>
           {n.status}
         </Tag>
         <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>托管</Tag>
-      </span>
+        {(n.server?.tags?.length ?? 0) > 0 || (n.server?.autoTags?.length ?? 0) > 0
+          ? <ServerTagList tags={n.server?.tags ?? []} autoTags={n.server?.autoTags ?? []} readonly />
+          : null}
+      </Space>
     ),
   }));
 

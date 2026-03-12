@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { App, Button, Table, Space, Card, Tag, Typography, Collapse, Empty, QRCode, Tabs, Input, Modal, Divider } from 'antd';
 import { EditOutlined, ReloadOutlined, DeleteOutlined, ExportOutlined, TeamOutlined } from '@ant-design/icons';
+import ServerTagList from '@/components/servers/ServerTagList';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { subscriptionsApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
@@ -38,10 +39,10 @@ function getShareFormats(shareToken: string): SubFormat[] {
 
 function buildNodeRows(sub: Subscription) {
   type UnifiedRow =
-    | { kind: 'managed'; id: string; name: string; protocol: string; listenPort: number; status: string; enabled: boolean }
+    | { kind: 'managed'; id: string; name: string; protocol: string; listenPort: number; status: string; enabled: boolean; serverTags: string[]; serverAutoTags: string[] }
     | { kind: 'external'; id: string; name: string; protocol: string; listenPort: number };
   return [
-    ...sub.nodes.map((sn) => ({ kind: 'managed' as const, id: sn.node.id, name: sn.node.name, protocol: sn.node.protocol, listenPort: sn.node.listenPort, status: sn.node.status, enabled: sn.node.enabled })),
+    ...sub.nodes.map((sn) => ({ kind: 'managed' as const, id: sn.node.id, name: sn.node.name, protocol: sn.node.protocol, listenPort: sn.node.listenPort, status: sn.node.status, enabled: sn.node.enabled, serverTags: sn.node.server?.tags ?? [], serverAutoTags: sn.node.server?.autoTags ?? [] })),
     ...(sub.externalNodes ?? []).map((en) => ({ kind: 'external' as const, id: en.externalNode.id, name: en.externalNode.name, protocol: en.externalNode.protocol, listenPort: en.externalNode.port })),
   ];
 }
@@ -75,6 +76,13 @@ function NodeTable({ sub }: { sub: Subscription }) {
           render: (_: unknown, row: typeof rows[number]) => <Tag color="blue">{row.protocol}</Tag>,
         },
         { title: '端口', render: (_: unknown, row: typeof rows[number]) => row.listenPort },
+        {
+          title: '标签',
+          render: (_: unknown, row: typeof rows[number]) =>
+            row.kind === 'managed' && (row.serverTags.length > 0 || row.serverAutoTags.length > 0)
+              ? <ServerTagList tags={row.serverTags} autoTags={row.serverAutoTags} readonly />
+              : null,
+        },
         {
           title: '状态',
           render: (_: unknown, row: typeof rows[number]) =>

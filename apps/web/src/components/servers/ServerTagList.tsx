@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Tag, Popover, Input, Button, Space, Tooltip } from 'antd';
-import { EditOutlined, DeleteOutlined, LockOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, UnlockOutlined } from '@ant-design/icons';
 import { tagColor } from '@/lib/tag-color';
 
 interface Props {
@@ -81,7 +81,7 @@ function AutoTag({ name }: { name: string }) {
     <Tooltip title="自动标签，由 IP 检测结果生成">
       <Tag
         color={tagColor(name)}
-        icon={<LockOutlined style={{ fontSize: 10 }} />}
+        icon={<UnlockOutlined style={{ fontSize: 10 }} />}
         style={{ fontStyle: 'italic', cursor: 'default', userSelect: 'none' }}
       >
         {name}

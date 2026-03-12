@@ -56,7 +56,7 @@ export class SubscriptionsService {
       include: {
         nodes: {
           include: {
-            node: { select: { id: true, name: true, protocol: true, status: true, enabled: true, listenPort: true } },
+            node: { select: { id: true, name: true, protocol: true, status: true, enabled: true, listenPort: true, serverId: true, server: { select: { id: true, name: true, ip: true, tags: true, autoTags: true } } } },
           },
         },
         externalNodes: {
@@ -79,7 +79,7 @@ export class SubscriptionsService {
           include: {
             nodes: {
               include: {
-                node: { select: { id: true, name: true, protocol: true, status: true, enabled: true, listenPort: true } },
+                node: { select: { id: true, name: true, protocol: true, status: true, enabled: true, listenPort: true, serverId: true, server: { select: { id: true, name: true, ip: true, tags: true, autoTags: true } } } },
               },
             },
             externalNodes: {
