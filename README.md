@@ -198,12 +198,60 @@ Auth, Servers, Nodes, ExternalNodes, Subscriptions, IpCheck, Metrics, Agent, Aud
 | `PANEL_URL` | 面板公网地址 |
 | `ALLOWED_ORIGIN` | CORS 允许来源 |
 | `GITHUB_REPO` | Agent 发布的 GitHub 仓库路径 |
+| `GFW_CHECK_FUNCTION_URL` | GFW 封锁检测函数地址（可选，见下方说明） |
+| `GFW_CHECK_FUNCTION_TOKEN` | GFW 检测函数认证 Token（可选） |
 
 **前端** (`apps/web/.env.local`)：
 
 | 变量 | 说明 |
 |------|------|
 | `API_URL` | 后端 API 地址（默认 `http://localhost:3001`） |
+
+## GFW 封锁检测（可选）
+
+IP 检测中的大部分功能（地理位置、流媒体解锁、AI 服务可用性、回程路由测试）安装后即可使用，无需额外配置。
+
+**GFW 封锁检测**是唯一需要额外配置的可选功能。该功能通过部署在中国大陆的 Serverless 函数，从国内测试目标服务器 IP 是否被封锁。不配置此功能不影响其他检测。
+
+### 工作原理
+
+1. 面板向你部署的 Serverless 函数发送 HTTP POST 请求，包含 `{ "ip": "1.2.3.4", "port": 443 }`
+2. 函数从中国大陆网络尝试连接目标 IP 和端口
+3. 返回 `{ "reachable": true/false, "latency": 150 }`
+4. 面板每 6 小时自动对所有服务器执行一次检测
+
+### 配置方式
+
+1. 在中国大陆云平台（腾讯云 SCF、阿里云函数计算、AWS Lambda 中国区等）部署一个 Serverless 函数，实现上述接口
+2. 在面板服务器的 `.env` 中添加：
+
+```bash
+# 编辑 /opt/apps/nextpanel/apps/server/.env
+GFW_CHECK_FUNCTION_URL=https://your-function-url.com/gfw-check
+GFW_CHECK_FUNCTION_TOKEN=your-optional-bearer-token    # 可选，用于函数认证
+```
+
+3. 重启后端服务：
+
+```bash
+pm2 restart nextpanel-server
+```
+
+### 函数接口规范
+
+**请求**：`POST` + `Content-Type: application/json`
+
+```json
+{ "ip": "1.2.3.4", "port": 443 }
+```
+
+**响应**：
+
+```json
+{ "reachable": true, "latency": 150 }
+```
+
+如配置了 `GFW_CHECK_FUNCTION_TOKEN`，请求会附带 `Authorization: Bearer <token>` 头。
 
 ## 本地开发
 
