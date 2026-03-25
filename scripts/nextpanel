@@ -334,6 +334,68 @@ cmd_logs() {
   esac
 }
 
+# ── fix-nginx ──────────────────────────────────────────────────────────────
+
+cmd_fix_nginx() {
+  check_root
+  check_install
+
+  echo ""
+  info "修复 Nginx 配置（移除 default_server，与其他站点共存）"
+  echo ""
+
+  # 读取当前 .env 获取配置信息
+  ENV_FILE="$APP_DIR/apps/server/.env"
+  PANEL_URL=$(grep '^PANEL_URL=' "$ENV_FILE" 2>/dev/null | cut -d'"' -f2)
+
+  if [[ "$PANEL_URL" == https://* ]]; then
+    # 域名模式：从 URL 提取域名
+    DOMAIN=$(echo "$PANEL_URL" | sed 's|https://||')
+    info "检测到域名模式：$DOMAIN"
+
+    # 检测冲突配置
+    CONFLICT=$(grep -rl "server_name.*$DOMAIN" /etc/nginx/sites-enabled/ 2>/dev/null | grep -v nextpanel || true)
+    if [ -n "$CONFLICT" ]; then
+      warn "域名 $DOMAIN 存在于其他配置中：$CONFLICT"
+      warn "正在禁用冲突配置..."
+      for f in $CONFLICT; do
+        rm -f "$f"
+        ok "已禁用：$f"
+      done
+    fi
+
+    # 用新模板覆盖（不含 default_server）
+    sed "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" "$APP_DIR/scripts/nginx/domain.conf" \
+      > /etc/nginx/sites-available/nextpanel
+
+    # 如果有 SSL 证书，让 Certbot 重新注入 SSL 配置
+    if [ -d "/etc/letsencrypt/live/$DOMAIN" ]; then
+      ln -sf /etc/nginx/sites-available/nextpanel /etc/nginx/sites-enabled/
+      nginx -t > /dev/null 2>&1 || fail "Nginx 配置测试失败"
+      systemctl reload nginx
+      certbot --nginx -d "$DOMAIN" --non-interactive --reinstall > /dev/null 2>&1 || warn "Certbot 重新注入失败，HTTPS 可能需要手动修复"
+    fi
+  else
+    # IP 模式：从 URL 提取 IP
+    SERVER_IP=$(echo "$PANEL_URL" | sed 's|http://||')
+    info "检测到 IP 模式：$SERVER_IP"
+
+    sed "s/IP_PLACEHOLDER/$SERVER_IP/g" "$APP_DIR/scripts/nginx/ip.conf" \
+      > /etc/nginx/sites-available/nextpanel
+  fi
+
+  ln -sf /etc/nginx/sites-available/nextpanel /etc/nginx/sites-enabled/
+  nginx -t > /dev/null 2>&1 || fail "Nginx 配置测试失败"
+  systemctl reload nginx
+
+  echo ""
+  ok "Nginx 配置已修复！"
+  echo ""
+  echo "  NextPanel 现在使用独立的 server_name，不再占用 default_server。"
+  echo "  如果您的其他网站配置之前被删除，请手动恢复并放到 /etc/nginx/sites-enabled/ 下。"
+  echo ""
+}
+
 # ── uninstall ──────────────────────────────────────────────────────────────
 
 cmd_uninstall() {
@@ -397,6 +459,7 @@ cmd_help() {
   echo "  backup                    备份数据库"
   echo "  restore <文件>             从备份恢复数据库"
   echo "  domain set <域名>          绑定域名并自动申请 SSL 证书"
+  echo "  fix-nginx                 修复 Nginx 配置（与其他站点共存）"
   echo "  logs [server|web] [行数]   查看服务日志"
   echo "  uninstall                 卸载 NextPanel"
   echo "  help                      显示此帮助信息"
@@ -417,6 +480,7 @@ case "${1:-help}" in
       *)   fail "用法：nextpanel domain set <域名> [--email <邮箱>]" ;;
     esac
     ;;
+  fix-nginx)  cmd_fix_nginx ;;
   logs)       shift; cmd_logs "$@" ;;
   uninstall)  cmd_uninstall ;;
   help|*)     cmd_help ;;
