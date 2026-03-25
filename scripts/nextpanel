@@ -1,0 +1,409 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ============================================================================
+#  NextPanel CLI — Management Tool
+# ============================================================================
+
+APP_DIR="/opt/apps/nextpanel"
+BACKUP_DIR="/opt/backups/nextpanel"
+LOG_DIR="/var/log/nextpanel"
+MAX_BACKUPS=5
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+info()  { echo -e "${CYAN}[INFO]${NC} $*"; }
+ok()    { echo -e "${GREEN}[OK]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
+fail()  { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
+
+check_root() {
+  [ "$EUID" -eq 0 ] || fail "Please run as root: sudo nextpanel $*"
+}
+
+check_install() {
+  [ -d "$APP_DIR/.git" ] || fail "NextPanel not found at $APP_DIR"
+}
+
+# ── status ─────────────────────────────────────────────────────────────────
+
+cmd_status() {
+  check_install
+
+  echo ""
+  echo "=========================================="
+  echo "         NextPanel Status"
+  echo "=========================================="
+  echo ""
+
+  # PM2 processes
+  echo "Services:"
+  pm2 list 2>/dev/null || warn "PM2 not running"
+  echo ""
+
+  # Health check
+  echo "Health Check:"
+  if curl -sf http://127.0.0.1:3001/api/docs > /dev/null 2>&1; then
+    echo -e "  Backend (3001):  ${GREEN}OK${NC}"
+  else
+    echo -e "  Backend (3001):  ${RED}DOWN${NC}"
+  fi
+  if curl -sf http://127.0.0.1:3400/ > /dev/null 2>&1; then
+    echo -e "  Frontend (3400): ${GREEN}OK${NC}"
+  else
+    echo -e "  Frontend (3400): ${RED}DOWN${NC}"
+  fi
+  echo ""
+
+  # Nginx
+  echo -n "  Nginx:           "
+  if systemctl is-active nginx > /dev/null 2>&1; then
+    echo -e "${GREEN}running${NC}"
+  else
+    echo -e "${RED}stopped${NC}"
+  fi
+
+  # PostgreSQL
+  echo -n "  PostgreSQL:      "
+  if systemctl is-active postgresql > /dev/null 2>&1; then
+    echo -e "${GREEN}running${NC}"
+  else
+    echo -e "${RED}stopped${NC}"
+  fi
+  echo ""
+
+  # SSL certificate
+  if [ -f "$APP_DIR/apps/server/.env" ]; then
+    PANEL_URL=$(grep '^PANEL_URL=' "$APP_DIR/apps/server/.env" | cut -d'"' -f2)
+    echo "  Panel URL: $PANEL_URL"
+  fi
+
+  DOMAIN_CONF="/etc/nginx/sites-available/nextpanel"
+  if [ -f "$DOMAIN_CONF" ]; then
+    DOMAIN=$(grep 'server_name' "$DOMAIN_CONF" | head -1 | awk '{print $2}' | tr -d ';')
+    if [ "$DOMAIN" != "_" ] && [ -d "/etc/letsencrypt/live/$DOMAIN" ]; then
+      EXPIRY=$(openssl x509 -enddate -noout -in "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" 2>/dev/null | cut -d= -f2)
+      echo "  SSL Cert:  $DOMAIN (expires $EXPIRY)"
+    fi
+  fi
+  echo ""
+
+  # Resources
+  echo "Resources:"
+  echo "  Memory:  $(free -h | awk '/^Mem/ {printf "%s / %s", $3, $2}')"
+  echo "  Disk:    $(df -h "$APP_DIR" | awk 'NR==2 {printf "%s / %s (%s used)", $3, $2, $5}')"
+  echo ""
+}
+
+# ── update ─────────────────────────────────────────────────────────────────
+
+cmd_update() {
+  check_root
+  check_install
+
+  BRANCH="${1:-main}"
+
+  echo ""
+  info "Updating NextPanel (branch: $BRANCH)..."
+  echo ""
+
+  # Step 1: Backup database
+  info "Backing up database..."
+  cmd_backup_quiet
+
+  # Step 2: Pull latest code
+  info "Pulling latest code..."
+  cd "$APP_DIR"
+  git fetch origin "$BRANCH" --depth 1 > /dev/null 2>&1
+  git reset --hard "origin/$BRANCH" > /dev/null 2>&1
+  ok "Code updated"
+
+  # Step 3: Install dependencies
+  info "Installing dependencies..."
+  pnpm install --no-frozen-lockfile > /dev/null 2>&1
+  cd "$APP_DIR/apps/server"
+  pnpm exec prisma generate > /dev/null 2>&1
+  ok "Dependencies updated"
+
+  # Step 4: Build
+  info "Building application..."
+  export NODE_OPTIONS="--max-old-space-size=1024"
+  export NEXT_TELEMETRY_DISABLED=1
+  cd "$APP_DIR"
+  pnpm -r --workspace-concurrency=1 build > /dev/null 2>&1 || fail "Build failed"
+  unset NODE_OPTIONS NEXT_TELEMETRY_DISABLED
+  ok "Build complete"
+
+  # Step 5: Migrate database
+  info "Running migrations..."
+  cd "$APP_DIR/apps/server"
+  pnpm exec prisma migrate deploy > /dev/null 2>&1
+  ok "Migrations applied"
+
+  # Step 6: Update CLI tool
+  if [ -f "$APP_DIR/scripts/nextpanel" ]; then
+    cp "$APP_DIR/scripts/nextpanel" /usr/local/bin/nextpanel
+    chmod +x /usr/local/bin/nextpanel
+    ok "CLI updated"
+  fi
+
+  # Step 7: Restart services
+  info "Restarting services..."
+  cd "$APP_DIR"
+  pm2 restart ecosystem.config.cjs > /dev/null 2>&1
+  pm2 save > /dev/null 2>&1
+  ok "Services restarted"
+
+  sleep 5
+  echo ""
+  ok "Update complete!"
+  pm2 list
+  echo ""
+}
+
+# ── backup ─────────────────────────────────────────────────────────────────
+
+cmd_backup_quiet() {
+  mkdir -p "$BACKUP_DIR"
+  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+  BACKUP_FILE="$BACKUP_DIR/nextpanel_${TIMESTAMP}.sql.gz"
+
+  sudo -u postgres pg_dump nextpanel 2>/dev/null | gzip > "$BACKUP_FILE"
+
+  # Rotate: keep only latest MAX_BACKUPS
+  ls -t "$BACKUP_DIR"/nextpanel_*.sql.gz 2>/dev/null | tail -n +$((MAX_BACKUPS + 1)) | xargs rm -f 2>/dev/null || true
+
+  ok "Database backed up: $BACKUP_FILE"
+}
+
+cmd_backup() {
+  check_root
+  check_install
+
+  echo ""
+  info "Backing up NextPanel database..."
+  cmd_backup_quiet
+
+  echo ""
+  echo "Backups (latest $MAX_BACKUPS):"
+  ls -lh "$BACKUP_DIR"/nextpanel_*.sql.gz 2>/dev/null | awk '{print "  " $NF " (" $5 ")"}'
+  echo ""
+}
+
+# ── restore ────────────────────────────────────────────────────────────────
+
+cmd_restore() {
+  check_root
+  check_install
+
+  BACKUP_FILE="${1:-}"
+  [ -n "$BACKUP_FILE" ] || fail "Usage: nextpanel restore <backup-file.sql.gz>"
+  [ -f "$BACKUP_FILE" ] || fail "Backup file not found: $BACKUP_FILE"
+
+  echo ""
+  warn "This will replace the current database with the backup."
+  read -rp "Are you sure? [y/N]: " CONFIRM
+  [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ] || fail "Aborted"
+
+  # Safety backup
+  info "Creating safety backup of current database..."
+  cmd_backup_quiet
+
+  info "Stopping services..."
+  pm2 stop all > /dev/null 2>&1
+
+  info "Restoring database..."
+  sudo -u postgres dropdb nextpanel --if-exists 2>/dev/null
+  sudo -u postgres createdb nextpanel -O nextpanel 2>/dev/null
+  gunzip < "$BACKUP_FILE" | sudo -u postgres psql -d nextpanel > /dev/null 2>&1
+  ok "Database restored"
+
+  info "Restarting services..."
+  cd "$APP_DIR"
+  pm2 restart ecosystem.config.cjs > /dev/null 2>&1
+  pm2 save > /dev/null 2>&1
+
+  sleep 5
+  ok "Restore complete!"
+  echo ""
+}
+
+# ── domain set ─────────────────────────────────────────────────────────────
+
+cmd_domain_set() {
+  check_root
+  check_install
+
+  DOMAIN="${1:-}"
+  [ -n "$DOMAIN" ] || fail "Usage: nextpanel domain set <domain> [--email <email>]"
+
+  EMAIL=""
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --email) EMAIL="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  if [ -z "$EMAIL" ]; then
+    read -rp "Email for SSL certificate: " EMAIL
+    [ -n "$EMAIL" ] || fail "Email is required for SSL certificate"
+  fi
+
+  echo ""
+  info "Binding domain: $DOMAIN"
+
+  # Verify DNS
+  info "Verifying DNS..."
+  SERVER_IP=$(hostname -I | awk '{print $1}')
+  RESOLVED_IP=$(dig +short "$DOMAIN" 2>/dev/null | head -1)
+  if [ "$RESOLVED_IP" != "$SERVER_IP" ]; then
+    warn "DNS mismatch: $DOMAIN -> ${RESOLVED_IP:-unresolvable}, server IP: $SERVER_IP"
+    read -rp "Continue anyway? [y/N]: " DNS_CONTINUE
+    [ "$DNS_CONTINUE" = "y" ] || [ "$DNS_CONTINUE" = "Y" ] || fail "Aborted"
+  else
+    ok "DNS verified: $DOMAIN -> $SERVER_IP"
+  fi
+
+  # Update Nginx config
+  info "Updating Nginx configuration..."
+  sed "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" "$APP_DIR/scripts/nginx/domain.conf" \
+    > /etc/nginx/sites-available/nextpanel
+  nginx -t > /dev/null 2>&1 || fail "Nginx config test failed"
+  systemctl reload nginx
+  ok "Nginx updated"
+
+  # Request SSL certificate
+  info "Requesting SSL certificate..."
+  if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" > /dev/null 2>&1; then
+    systemctl enable certbot.timer > /dev/null 2>&1 || true
+    ok "SSL certificate installed"
+  else
+    fail "SSL certificate request failed. Check that port 80 is accessible and DNS is correct."
+  fi
+
+  # Update .env
+  info "Updating configuration..."
+  ENV_FILE="$APP_DIR/apps/server/.env"
+  sed -i "s|^ALLOWED_ORIGIN=.*|ALLOWED_ORIGIN=\"https://$DOMAIN\"|" "$ENV_FILE"
+  sed -i "s|^PANEL_URL=.*|PANEL_URL=\"https://$DOMAIN\"|" "$ENV_FILE"
+  ok "Configuration updated"
+
+  # Restart services
+  info "Restarting services..."
+  cd "$APP_DIR"
+  pm2 restart ecosystem.config.cjs > /dev/null 2>&1
+  pm2 save > /dev/null 2>&1
+
+  sleep 5
+  echo ""
+  ok "Domain bound successfully!"
+  echo ""
+  echo -e "  Panel URL: ${CYAN}https://$DOMAIN${NC}"
+  echo ""
+}
+
+# ── logs ───────────────────────────────────────────────────────────────────
+
+cmd_logs() {
+  SERVICE="${1:-all}"
+  LINES="${2:-50}"
+
+  case "$SERVICE" in
+    server) pm2 logs nextpanel-server --lines "$LINES" --nostream ;;
+    web)    pm2 logs nextpanel-web --lines "$LINES" --nostream ;;
+    all|*)  pm2 logs --lines "$LINES" --nostream ;;
+  esac
+}
+
+# ── uninstall ──────────────────────────────────────────────────────────────
+
+cmd_uninstall() {
+  check_root
+  check_install
+
+  echo ""
+  warn "This will completely remove NextPanel from this server."
+  read -rp "Create a final backup before uninstalling? [Y/n]: " DO_BACKUP
+  if [ "$DO_BACKUP" != "n" ] && [ "$DO_BACKUP" != "N" ]; then
+    cmd_backup_quiet
+  fi
+
+  read -rp "Type 'UNINSTALL' to confirm: " CONFIRM
+  [ "$CONFIRM" = "UNINSTALL" ] || fail "Aborted"
+
+  echo ""
+  info "Stopping services..."
+  pm2 stop all > /dev/null 2>&1 || true
+  pm2 delete all > /dev/null 2>&1 || true
+  pm2 unstartup systemd > /dev/null 2>&1 || true
+
+  info "Removing Nginx configuration..."
+  rm -f /etc/nginx/sites-enabled/nextpanel
+  rm -f /etc/nginx/sites-available/nextpanel
+  systemctl reload nginx > /dev/null 2>&1 || true
+
+  info "Removing database..."
+  sudo -u postgres dropdb nextpanel --if-exists 2>/dev/null || true
+  sudo -u postgres psql -c "DROP USER IF EXISTS nextpanel;" > /dev/null 2>&1 || true
+
+  info "Removing application files..."
+  rm -rf "$APP_DIR"
+  rm -rf "$LOG_DIR"
+
+  info "Removing CLI..."
+  rm -f /usr/local/bin/nextpanel
+
+  echo ""
+  ok "NextPanel has been uninstalled."
+  if [ -d "$BACKUP_DIR" ]; then
+    echo ""
+    echo "  Backups preserved at: $BACKUP_DIR"
+    echo "  Remove manually if not needed: rm -rf $BACKUP_DIR"
+  fi
+  echo ""
+}
+
+# ── help ───────────────────────────────────────────────────────────────────
+
+cmd_help() {
+  echo ""
+  echo "NextPanel CLI"
+  echo ""
+  echo "Usage: nextpanel <command> [options]"
+  echo ""
+  echo "Commands:"
+  echo "  status                    Show service status and health"
+  echo "  update [branch]           Update to latest version (default: main)"
+  echo "  backup                    Backup database"
+  echo "  restore <file>            Restore database from backup"
+  echo "  domain set <domain>       Bind domain with auto SSL"
+  echo "  logs [server|web] [lines] View service logs"
+  echo "  uninstall                 Remove NextPanel"
+  echo "  help                      Show this help"
+  echo ""
+}
+
+# ── Main router ────────────────────────────────────────────────────────────
+
+case "${1:-help}" in
+  status)     cmd_status ;;
+  update)     shift; cmd_update "$@" ;;
+  backup)     cmd_backup ;;
+  restore)    shift; cmd_restore "$@" ;;
+  domain)
+    shift
+    case "${1:-}" in
+      set) shift; cmd_domain_set "$@" ;;
+      *)   fail "Usage: nextpanel domain set <domain> [--email <email>]" ;;
+    esac
+    ;;
+  logs)       shift; cmd_logs "$@" ;;
+  uninstall)  cmd_uninstall ;;
+  help|*)     cmd_help ;;
+esac

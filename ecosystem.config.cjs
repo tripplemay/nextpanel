@@ -1,0 +1,42 @@
+module.exports = {
+  apps: [
+    {
+      name: 'nextpanel-server',
+      script: 'pnpm',
+      args: 'run start',
+      cwd: '/opt/apps/nextpanel/apps/server',
+      env: {
+        NODE_ENV: 'production',
+        PORT: 3001,
+      },
+      watch: false,
+      restart_delay: 5000,
+      max_memory_restart: '500M',
+      instances: 1,
+      exec_mode: 'fork',
+      merge_logs: true,
+      output: '/var/log/nextpanel/server-out.log',
+      error: '/var/log/nextpanel/server-err.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+    },
+    {
+      name: 'nextpanel-web',
+      script: 'pnpm',
+      args: 'run start',
+      cwd: '/opt/apps/nextpanel/apps/web',
+      env: {
+        NODE_ENV: 'production',
+        API_URL: 'http://127.0.0.1:3001',
+      },
+      watch: false,
+      restart_delay: 5000,
+      max_memory_restart: '500M',
+      instances: 1,
+      exec_mode: 'fork',
+      merge_logs: true,
+      output: '/var/log/nextpanel/web-out.log',
+      error: '/var/log/nextpanel/web-err.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+    },
+  ],
+};
