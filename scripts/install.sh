@@ -227,7 +227,7 @@ ENCRYPTION_KEY="${ENCRYPTION_KEY}"
 PORT=3001
 ALLOWED_ORIGIN="${ALLOWED_ORIGIN}"
 PANEL_URL="${PANEL_URL}"
-GITHUB_REPO="tripplemay/nextpanel"
+GITHUB_REPO="tripplemay/nextpanel-releases"
 EOF
 
 chmod 600 "$APP_DIR/apps/server/.env"
