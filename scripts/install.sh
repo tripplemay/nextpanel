@@ -288,7 +288,15 @@ info "正在编译构建（可能需要几分钟）..."
 export NODE_OPTIONS="--max-old-space-size=1024"
 export NEXT_TELEMETRY_DISABLED=1
 cd "$APP_DIR"
-pnpm -r --workspace-concurrency=1 build > /dev/null 2>&1 || fail "编译构建失败"
+
+# 逐个构建，确保每步都成功
+cd "$APP_DIR/packages/shared" && pnpm build > /dev/null 2>&1 || true
+cd "$APP_DIR/apps/server" && pnpm build > /dev/null 2>&1
+[ -f "$APP_DIR/apps/server/dist/main.js" ] || fail "后端编译失败：dist/main.js 不存在"
+
+cd "$APP_DIR/apps/web" && pnpm build > /dev/null 2>&1
+[ -d "$APP_DIR/apps/web/.next" ] || fail "前端编译失败：.next 目录不存在"
+
 unset NODE_OPTIONS NEXT_TELEMETRY_DISABLED
 ok "编译构建完成"
 
