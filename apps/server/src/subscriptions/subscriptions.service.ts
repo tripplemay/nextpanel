@@ -30,16 +30,35 @@ export class SubscriptionsService {
   ) {}
 
   async create(name: string, nodeIds: string[], ownerId: string, externalNodeIds?: string[]) {
+    // Filter out non-existent IDs to prevent FK constraint violations
+    let validNodeIds = nodeIds;
+    if (nodeIds.length > 0) {
+      const existing = await this.prisma.node.findMany({
+        where: { id: { in: nodeIds }, userId: ownerId },
+        select: { id: true },
+      });
+      validNodeIds = existing.map((n) => n.id);
+    }
+
+    let validExternalNodeIds = externalNodeIds;
+    if (externalNodeIds?.length) {
+      const existing = await this.prisma.externalNode.findMany({
+        where: { id: { in: externalNodeIds }, userId: ownerId },
+        select: { id: true },
+      });
+      validExternalNodeIds = existing.map((n) => n.id);
+    }
+
     return this.prisma.subscription.create({
       data: {
         name,
         ownerId,
         nodes: {
-          create: nodeIds.map((nodeId) => ({ nodeId })),
+          create: validNodeIds.map((nodeId) => ({ nodeId })),
         },
-        ...(externalNodeIds?.length && {
+        ...(validExternalNodeIds?.length && {
           externalNodes: {
-            create: externalNodeIds.map((externalNodeId) => ({ externalNodeId })),
+            create: validExternalNodeIds.map((externalNodeId) => ({ externalNodeId })),
           },
         }),
       },
@@ -139,20 +158,39 @@ export class SubscriptionsService {
     const sub = await this.prisma.subscription.findFirst({ where: { id, ownerId } });
     if (!sub) throw new NotFoundException(`Subscription ${id} not found`);
 
+    // Filter out non-existent node IDs to prevent FK constraint violations
+    let validNodeIds = nodeIds;
+    if (nodeIds !== undefined && nodeIds.length > 0) {
+      const existing = await this.prisma.node.findMany({
+        where: { id: { in: nodeIds }, userId: ownerId },
+        select: { id: true },
+      });
+      validNodeIds = existing.map((n) => n.id);
+    }
+
+    let validExternalNodeIds = externalNodeIds;
+    if (externalNodeIds !== undefined && externalNodeIds.length > 0) {
+      const existing = await this.prisma.externalNode.findMany({
+        where: { id: { in: externalNodeIds }, userId: ownerId },
+        select: { id: true },
+      });
+      validExternalNodeIds = existing.map((n) => n.id);
+    }
+
     return this.prisma.subscription.update({
       where: { id },
       data: {
         ...(name !== undefined && { name }),
-        ...(nodeIds !== undefined && {
+        ...(validNodeIds !== undefined && {
           nodes: {
             deleteMany: {},
-            create: nodeIds.map((nodeId) => ({ nodeId })),
+            create: validNodeIds.map((nodeId) => ({ nodeId })),
           },
         }),
-        ...(externalNodeIds !== undefined && {
+        ...(validExternalNodeIds !== undefined && {
           externalNodes: {
             deleteMany: {},
-            create: externalNodeIds.map((externalNodeId) => ({ externalNodeId })),
+            create: validExternalNodeIds.map((externalNodeId) => ({ externalNodeId })),
           },
         }),
       },
