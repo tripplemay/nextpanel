@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # ============================================================================
-#  NextPanel — One-Click Install Script
-#  Supported: Ubuntu 22.04 / 24.04, Debian 12
+#  NextPanel — 一键安装脚本
+#  支持系统：Ubuntu 22.04 / 24.04、Debian 12
 # ============================================================================
 
 APP_DIR="/opt/apps/nextpanel"
@@ -18,42 +18,42 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-info()  { echo -e "${CYAN}[INFO]${NC} $*"; }
-ok()    { echo -e "${GREEN}[OK]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
-fail()  { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
+info()  { echo -e "${CYAN}[信息]${NC} $*"; }
+ok()    { echo -e "${GREEN}[完成]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[警告]${NC} $*"; }
+fail()  { echo -e "${RED}[错误]${NC} $*"; exit 1; }
 
-# ── Step 1: Pre-flight checks ──────────────────────────────────────────────
+# ── 步骤 1：环境预检 ────────────────────────────────────────────────────
 
 echo ""
 echo "=========================================="
-echo "       NextPanel One-Click Install        "
+echo "        NextPanel 一键安装脚本            "
 echo "=========================================="
 echo ""
 
-[ "$EUID" -eq 0 ] || fail "Please run as root: sudo bash install.sh"
+[ "$EUID" -eq 0 ] || fail "请以 root 用户运行：sudo bash install.sh"
 
 if ! command -v apt-get &>/dev/null; then
-  fail "This script requires a Debian/Ubuntu-based system (apt-get not found)"
+  fail "本脚本仅支持 Debian/Ubuntu 系统（未检测到 apt-get）"
 fi
 
-# Check OS compatibility
+# 检查操作系统兼容性
 if [ -f /etc/os-release ]; then
   . /etc/os-release
   case "$ID-$VERSION_ID" in
-    ubuntu-22.04|ubuntu-24.04|debian-12) ok "Detected $PRETTY_NAME" ;;
-    *) warn "Untested OS: $PRETTY_NAME. Proceeding anyway..." ;;
+    ubuntu-22.04|ubuntu-24.04|debian-12) ok "检测到 $PRETTY_NAME" ;;
+    *) warn "未经测试的系统：$PRETTY_NAME，继续安装..." ;;
   esac
 fi
 
-# ── Step 2: Collect user input ──────────────────────────────────────────────
+# ── 步骤 2：收集用户输入 ────────────────────────────────────────────────
 
 echo ""
-echo "Please select access mode:"
-echo "  1) Domain (recommended, auto HTTPS)"
-echo "  2) IP only (HTTP)"
+echo "请选择访问方式："
+echo "  1) 使用域名（推荐，自动配置 HTTPS）"
+echo "  2) 使用 IP 直接访问（HTTP）"
 echo ""
-read -rp "Enter [1/2]: " MODE_CHOICE
+read -rp "请输入 [1/2]：" MODE_CHOICE
 
 MODE="IP"
 DOMAIN=""
@@ -62,99 +62,99 @@ CERTBOT_EMAIL=""
 if [ "$MODE_CHOICE" = "1" ]; then
   MODE="DOMAIN"
   echo ""
-  read -rp "Enter domain (A record must point to this server): " DOMAIN
-  [ -n "$DOMAIN" ] || fail "Domain cannot be empty"
+  read -rp "请输入域名（需提前将 A 记录指向本机 IP）：" DOMAIN
+  [ -n "$DOMAIN" ] || fail "域名不能为空"
 
-  read -rp "Enter email (for SSL certificate): " CERTBOT_EMAIL
-  [ -n "$CERTBOT_EMAIL" ] || fail "Email is required for SSL"
+  read -rp "请输入邮箱（用于 SSL 证书申请）：" CERTBOT_EMAIL
+  [ -n "$CERTBOT_EMAIL" ] || fail "邮箱不能为空"
 
-  # Verify DNS
-  info "Verifying DNS resolution..."
+  # 验证 DNS 解析
+  info "正在验证 DNS 解析..."
   SERVER_IP=$(hostname -I | awk '{print $1}')
   RESOLVED_IP=$(dig +short "$DOMAIN" 2>/dev/null | head -1)
   if [ "$RESOLVED_IP" = "$SERVER_IP" ]; then
-    ok "DNS verified: $DOMAIN -> $SERVER_IP"
+    ok "DNS 验证通过：$DOMAIN -> $SERVER_IP"
   else
-    warn "DNS mismatch: $DOMAIN resolves to ${RESOLVED_IP:-nothing}, server IP is $SERVER_IP"
-    read -rp "Continue anyway? [y/N]: " DNS_CONTINUE
-    [ "$DNS_CONTINUE" = "y" ] || [ "$DNS_CONTINUE" = "Y" ] || fail "Aborted"
+    warn "DNS 不匹配：$DOMAIN 解析到 ${RESOLVED_IP:-无结果}，本机 IP 为 $SERVER_IP"
+    read -rp "是否继续？[y/N]：" DNS_CONTINUE
+    [ "$DNS_CONTINUE" = "y" ] || [ "$DNS_CONTINUE" = "Y" ] || fail "已取消安装"
   fi
 fi
 
 echo ""
-echo "Setup admin account:"
-read -rp "Admin username [admin]: " ADMIN_USER
+echo "设置管理员账号："
+read -rp "管理员用户名 [admin]：" ADMIN_USER
 ADMIN_USER="${ADMIN_USER:-admin}"
 
 while true; do
-  read -rsp "Admin password (min 8 chars): " ADMIN_PASS
+  read -rsp "管理员密码（至少 8 位）：" ADMIN_PASS
   echo ""
   if [ "${#ADMIN_PASS}" -lt 8 ]; then
-    warn "Password must be at least 8 characters"
+    warn "密码长度不足 8 位"
     continue
   fi
-  read -rsp "Confirm password: " ADMIN_PASS_CONFIRM
+  read -rsp "确认密码：" ADMIN_PASS_CONFIRM
   echo ""
   if [ "$ADMIN_PASS" != "$ADMIN_PASS_CONFIRM" ]; then
-    warn "Passwords do not match"
+    warn "两次密码不一致"
     continue
   fi
   break
 done
 
 echo ""
-info "Starting installation..."
+info "开始安装..."
 echo ""
 
-# ── Step 3: System update ──────────────────────────────────────────────────
+# ── 步骤 3：系统更新 ────────────────────────────────────────────────────
 
-info "Updating system packages..."
+info "正在更新系统软件包..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get upgrade -y -qq
-ok "System updated"
+ok "系统更新完成"
 
-# ── Step 4: Base utilities ─────────────────────────────────────────────────
+# ── 步骤 4：安装基础工具 ────────────────────────────────────────────────
 
-info "Installing base utilities..."
+info "正在安装基础工具..."
 apt-get install -y -qq curl git openssl build-essential python3 wget unzip dnsutils > /dev/null
-ok "Base utilities installed"
+ok "基础工具安装完成"
 
-# ── Step 5: Node.js 20 ────────────────────────────────────────────────────
+# ── 步骤 5：安装 Node.js 20 ─────────────────────────────────────────────
 
 if ! command -v node &>/dev/null; then
-  info "Installing Node.js 20..."
+  info "正在安装 Node.js 20..."
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
   apt-get install -y -qq nodejs > /dev/null
 fi
 ok "Node.js $(node --version)"
 
-# ── Step 6: pnpm + PM2 ────────────────────────────────────────────────────
+# ── 步骤 6：安装 pnpm 和 PM2 ────────────────────────────────────────────
 
 if ! command -v pnpm &>/dev/null; then
-  info "Installing pnpm..."
+  info "正在安装 pnpm..."
   npm install -g pnpm@latest > /dev/null 2>&1
 fi
 
 if ! command -v pm2 &>/dev/null; then
-  info "Installing PM2..."
+  info "正在安装 PM2..."
   npm install -g pm2@latest > /dev/null 2>&1
 fi
-ok "pnpm $(pnpm --version), PM2 $(pm2 --version | head -1)"
+ok "pnpm $(pnpm --version)，PM2 $(pm2 --version | head -1)"
 
-# ── Step 7: PostgreSQL ─────────────────────────────────────────────────────
+# ── 步骤 7：安装 PostgreSQL ──────────────────────────────────────────────
 
 if ! command -v psql &>/dev/null; then
-  info "Installing PostgreSQL..."
+  info "正在安装 PostgreSQL..."
   apt-get install -y -qq postgresql postgresql-contrib > /dev/null
   systemctl enable postgresql > /dev/null 2>&1
   systemctl start postgresql
 fi
 ok "PostgreSQL $(psql --version | awk '{print $3}')"
 
-# ── Step 8: Database setup ─────────────────────────────────────────────────
+# ── 步骤 8：初始化数据库 ────────────────────────────────────────────────
 
-info "Setting up database..."
+info "正在初始化数据库..."
 DB_PASS=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 32)
 
 sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='nextpanel'" | grep -q 1 || \
@@ -165,48 +165,48 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='nextpanel'" 
 
 sudo -u postgres psql -c "ALTER USER nextpanel WITH PASSWORD '$DB_PASS';" > /dev/null 2>&1
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE nextpanel TO nextpanel;" > /dev/null 2>&1
-ok "Database ready"
+ok "数据库就绪"
 
-# ── Step 9: Nginx ──────────────────────────────────────────────────────────
+# ── 步骤 9：安装 Nginx ───────────────────────────────────────────────────
 
 if ! command -v nginx &>/dev/null; then
-  info "Installing Nginx..."
+  info "正在安装 Nginx..."
   apt-get install -y -qq nginx > /dev/null
   systemctl enable nginx > /dev/null 2>&1
   systemctl start nginx
 fi
 ok "Nginx $(nginx -v 2>&1 | awk -F/ '{print $2}')"
 
-# ── Step 10: Certbot ──────────────────────────────────────────────────────
+# ── 步骤 10：安装 Certbot ────────────────────────────────────────────────
 
 if ! command -v certbot &>/dev/null; then
-  info "Installing Certbot..."
+  info "正在安装 Certbot..."
   apt-get install -y -qq certbot python3-certbot-nginx > /dev/null
 fi
-ok "Certbot installed"
+ok "Certbot 已安装"
 
-# ── Step 11: Directory structure ───────────────────────────────────────────
+# ── 步骤 11：创建目录结构 ────────────────────────────────────────────────
 
 mkdir -p "$LOG_DIR" "$BACKUP_DIR"
 chmod 755 "$LOG_DIR"
 
-# ── Step 12: Clone repository ──────────────────────────────────────────────
+# ── 步骤 12：克隆代码仓库 ────────────────────────────────────────────────
 
 if [ ! -d "$APP_DIR/.git" ]; then
-  info "Cloning NextPanel repository..."
-  git clone --depth 1 "$REPO_URL" "$APP_DIR" > /dev/null 2>&1 || fail "Failed to clone repository"
-  ok "Repository cloned"
+  info "正在克隆 NextPanel 代码仓库..."
+  git clone --depth 1 "$REPO_URL" "$APP_DIR" > /dev/null 2>&1 || fail "代码仓库克隆失败"
+  ok "代码仓库克隆完成"
 else
-  info "Repository already exists, pulling latest..."
+  info "代码仓库已存在，正在拉取最新代码..."
   cd "$APP_DIR"
   git fetch origin main --depth 1 > /dev/null 2>&1
   git reset --hard origin/main > /dev/null 2>&1
-  ok "Repository updated"
+  ok "代码已更新"
 fi
 
-# ── Step 13: Generate secrets & write .env ─────────────────────────────────
+# ── 步骤 13：生成密钥并写入配置 ──────────────────────────────────────────
 
-info "Generating secrets..."
+info "正在生成密钥..."
 JWT_SECRET=$(openssl rand -hex 32)
 ENCRYPTION_KEY=$(openssl rand -hex 32)
 SERVER_IP=$(hostname -I | awk '{print $1}')
@@ -231,22 +231,21 @@ GITHUB_REPO="tripplemay/nextpanel"
 EOF
 
 chmod 600 "$APP_DIR/apps/server/.env"
-ok "Configuration written"
+ok "配置文件已写入"
 
-# ── Step 14: Configure Nginx ──────────────────────────────────────────────
+# ── 步骤 14：配置 Nginx ──────────────────────────────────────────────────
 
-info "Configuring Nginx..."
+info "正在配置 Nginx..."
 
-# Check for existing Nginx configs that might conflict
+# 检测已有 Nginx 配置是否冲突
 if [ "$MODE" = "DOMAIN" ]; then
-  # Detect if another config already uses this domain
   CONFLICT=$(grep -rl "server_name.*$DOMAIN" /etc/nginx/sites-enabled/ 2>/dev/null | grep -v nextpanel || true)
   if [ -n "$CONFLICT" ]; then
-    warn "Domain $DOMAIN is already configured in: $CONFLICT"
-    warn "Disabling conflicting config to avoid routing issues..."
+    warn "域名 $DOMAIN 已存在于其他配置中：$CONFLICT"
+    warn "正在禁用冲突配置以避免路由问题..."
     for f in $CONFLICT; do
       rm -f "$f"
-      ok "Disabled: $f"
+      ok "已禁用：$f"
     done
   fi
   sed "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" "$APP_DIR/scripts/nginx/domain.conf" \
@@ -257,145 +256,145 @@ else
 fi
 
 ln -sf /etc/nginx/sites-available/nextpanel /etc/nginx/sites-enabled/
-nginx -t > /dev/null 2>&1 || fail "Nginx config test failed"
+nginx -t > /dev/null 2>&1 || fail "Nginx 配置测试失败"
 systemctl reload nginx
-ok "Nginx configured"
+ok "Nginx 配置完成"
 
-# ── Step 15: Swap (low memory protection) ─────────────────────────────────
+# ── 步骤 15：创建 Swap（低内存保护）──────────────────────────────────────
 
 TOTAL_MEM_MB=$(free -m | awk '/^Mem/ {print $2}')
 if [ "$TOTAL_MEM_MB" -lt 4096 ] && [ ! -f /swapfile ]; then
-  info "Low memory detected (${TOTAL_MEM_MB}MB). Creating 2GB swap..."
+  info "检测到低内存（${TOTAL_MEM_MB}MB），正在创建 2GB Swap..."
   fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
   chmod 600 /swapfile
   mkswap /swapfile > /dev/null
   swapon /swapfile
   grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
-  ok "Swap created"
+  ok "Swap 创建完成"
 fi
 
-# ── Step 16: Install dependencies ─────────────────────────────────────────
+# ── 步骤 16：安装项目依赖 ────────────────────────────────────────────────
 
-info "Installing dependencies (this may take a few minutes)..."
+info "正在安装项目依赖（可能需要几分钟）..."
 cd "$APP_DIR"
 pnpm install --no-frozen-lockfile > /dev/null 2>&1
 cd "$APP_DIR/apps/server"
 pnpm exec prisma generate > /dev/null 2>&1
-ok "Dependencies installed"
+ok "项目依赖安装完成"
 
-# ── Step 17: Build ─────────────────────────────────────────────────────────
+# ── 步骤 17：编译构建 ────────────────────────────────────────────────────
 
-info "Building application (this may take a few minutes)..."
+info "正在编译构建（可能需要几分钟）..."
 export NODE_OPTIONS="--max-old-space-size=1024"
 export NEXT_TELEMETRY_DISABLED=1
 cd "$APP_DIR"
-pnpm -r --workspace-concurrency=1 build > /dev/null 2>&1 || fail "Build failed"
+pnpm -r --workspace-concurrency=1 build > /dev/null 2>&1 || fail "编译构建失败"
 unset NODE_OPTIONS NEXT_TELEMETRY_DISABLED
-ok "Build complete"
+ok "编译构建完成"
 
-# ── Step 18: Database migration ────────────────────────────────────────────
+# ── 步骤 18：执行数据库迁移 ──────────────────────────────────────────────
 
-info "Running database migrations..."
+info "正在执行数据库迁移..."
 cd "$APP_DIR/apps/server"
 pnpm exec prisma migrate deploy > /dev/null 2>&1
-ok "Migrations applied"
+ok "数据库迁移完成"
 
-# ── Step 19: Create admin user ─────────────────────────────────────────────
+# ── 步骤 19：创建管理员账号 ──────────────────────────────────────────────
 
-info "Creating admin account..."
+info "正在创建管理员账号..."
 cd "$APP_DIR/apps/server"
 pnpm exec ts-node -r tsconfig-paths/register prisma/seed.ts "$ADMIN_USER" "$ADMIN_PASS" > /dev/null 2>&1
-ok "Admin account created"
+ok "管理员账号创建成功"
 
-# ── Step 20: Start services with PM2 ──────────────────────────────────────
+# ── 步骤 20：启动服务 ────────────────────────────────────────────────────
 
-info "Starting services..."
+info "正在启动服务..."
 cd "$APP_DIR"
-pm2 delete all > /dev/null 2>&1 || true
+pm2 delete nextpanel-server nextpanel-web > /dev/null 2>&1 || true
 pm2 start ecosystem.config.cjs > /dev/null 2>&1
 
-# Register PM2 startup
+# 注册 PM2 开机自启
 pm2 startup systemd -u root --hp /root 2>/dev/null | tail -n 1 | bash > /dev/null 2>&1 || true
 pm2 save > /dev/null 2>&1
-ok "Services started"
+ok "服务启动完成"
 
-# ── Step 21: SSL certificate (domain mode) ─────────────────────────────────
+# ── 步骤 21：申请 SSL 证书（域名模式）────────────────────────────────────
 
 if [ "$MODE" = "DOMAIN" ]; then
-  info "Requesting SSL certificate..."
+  info "正在申请 SSL 证书..."
   if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$CERTBOT_EMAIL" > /dev/null 2>&1; then
     systemctl enable certbot.timer > /dev/null 2>&1 || true
-    ok "SSL certificate installed (auto-renewal enabled)"
+    ok "SSL 证书已安装（已启用自动续期）"
   else
-    warn "SSL setup failed. Panel accessible via HTTP. Run 'nextpanel domain set $DOMAIN' to retry."
+    warn "SSL 证书申请失败，面板暂时通过 HTTP 访问。稍后可执行 'nextpanel domain set $DOMAIN' 重试。"
   fi
 fi
 
-# ── Step 22: Install Xray & Sing-box (optional) ───────────────────────────
+# ── 步骤 22：安装 Xray 和 sing-box（可选）─────────────────────────────────
 
 ARCH=$(uname -m | sed 's/x86_64/64/;s/aarch64/arm64-v8a/')
 if ! command -v xray &>/dev/null; then
-  info "Installing Xray test client..."
+  info "正在安装 Xray 测试客户端..."
   if curl -fsSL "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${ARCH}.zip" -o /tmp/xray.zip 2>/dev/null; then
     unzip -oq /tmp/xray.zip xray -d /usr/local/bin/ 2>/dev/null && chmod +x /usr/local/bin/xray
     rm -f /tmp/xray.zip
-    ok "Xray installed"
+    ok "Xray 已安装"
   else
-    warn "Xray installation failed (optional, skipped)"
+    warn "Xray 安装失败（可选组件，已跳过）"
   fi
 fi
 
 SB_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 if ! command -v sing-box &>/dev/null; then
-  info "Installing sing-box test client..."
+  info "正在安装 sing-box 测试客户端..."
   SB_TAG=$(curl -sf "https://api.github.com/repos/SagerNet/sing-box/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed 's/.*"\(v[^"]*\)".*/\1/')
   if [ -n "$SB_TAG" ]; then
     if curl -fsSL "https://github.com/SagerNet/sing-box/releases/download/${SB_TAG}/sing-box-${SB_TAG#v}-linux-${SB_ARCH}.tar.gz" -o /tmp/sb.tar.gz 2>/dev/null; then
       tar xzf /tmp/sb.tar.gz -C /tmp/ 2>/dev/null
       mv /tmp/sing-box-*/sing-box /usr/local/bin/sing-box 2>/dev/null && chmod +x /usr/local/bin/sing-box
       rm -rf /tmp/sb.tar.gz /tmp/sing-box-*/
-      ok "sing-box installed"
+      ok "sing-box 已安装"
     else
-      warn "sing-box installation failed (optional, skipped)"
+      warn "sing-box 安装失败（可选组件，已跳过）"
     fi
   fi
 fi
 
-# ── Step 23: Install CLI tool ──────────────────────────────────────────────
+# ── 步骤 23：安装 CLI 管理工具 ───────────────────────────────────────────
 
-info "Installing nextpanel CLI..."
+info "正在安装 nextpanel 命令行工具..."
 cp "$APP_DIR/scripts/nextpanel" /usr/local/bin/nextpanel
 chmod +x /usr/local/bin/nextpanel
-ok "CLI installed: nextpanel"
+ok "命令行工具已安装"
 
-# ── Step 24: Wait and verify ───────────────────────────────────────────────
+# ── 步骤 24：等待服务就绪 ────────────────────────────────────────────────
 
-info "Waiting for services to start..."
+info "等待服务启动..."
 sleep 8
 
-# ── Done ───────────────────────────────────────────────────────────────────
+# ── 安装完成 ─────────────────────────────────────────────────────────────
 
 echo ""
 echo "=========================================="
-echo -e "  ${GREEN}NextPanel Installation Complete!${NC}"
+echo -e "  ${GREEN}NextPanel 安装完成！${NC}"
 echo "=========================================="
 echo ""
 if [ "$MODE" = "DOMAIN" ]; then
-  echo -e "  Panel URL:  ${CYAN}https://$DOMAIN${NC}"
+  echo -e "  面板地址：${CYAN}https://$DOMAIN${NC}"
 else
-  echo -e "  Panel URL:  ${CYAN}http://$SERVER_IP${NC}"
+  echo -e "  面板地址：${CYAN}http://$SERVER_IP${NC}"
 fi
 echo ""
-echo "  Admin Username:  $ADMIN_USER"
-echo "  Admin Password:  [as provided]"
+echo "  管理员用户名：$ADMIN_USER"
+echo "  管理员密码：[安装时设置的密码]"
 echo ""
-echo "  Management Commands:"
-echo "    nextpanel status     - View service status"
-echo "    nextpanel update     - Update to latest version"
-echo "    nextpanel backup     - Backup database"
-echo "    nextpanel logs       - View logs"
-echo "    nextpanel domain set - Bind domain with SSL"
+echo "  常用管理命令："
+echo "    nextpanel status      查看服务状态"
+echo "    nextpanel update      更新到最新版本"
+echo "    nextpanel backup      备份数据库"
+echo "    nextpanel logs        查看日志"
+echo "    nextpanel domain set  绑定域名并申请 SSL 证书"
 echo ""
-echo "  Service Status:"
+echo "  服务状态："
 pm2 list
 echo ""

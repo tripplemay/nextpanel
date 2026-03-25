@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ============================================================================
-#  NextPanel CLI — Management Tool
+#  NextPanel CLI — 面板管理工具
 # ============================================================================
 
 APP_DIR="/opt/apps/nextpanel"
@@ -16,17 +16,17 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-info()  { echo -e "${CYAN}[INFO]${NC} $*"; }
-ok()    { echo -e "${GREEN}[OK]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
-fail()  { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
+info()  { echo -e "${CYAN}[信息]${NC} $*"; }
+ok()    { echo -e "${GREEN}[完成]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[警告]${NC} $*"; }
+fail()  { echo -e "${RED}[错误]${NC} $*"; exit 1; }
 
 check_root() {
-  [ "$EUID" -eq 0 ] || fail "Please run as root: sudo nextpanel $*"
+  [ "$EUID" -eq 0 ] || fail "请以 root 用户运行：sudo nextpanel $*"
 }
 
 check_install() {
-  [ -d "$APP_DIR/.git" ] || fail "NextPanel not found at $APP_DIR"
+  [ -d "$APP_DIR/.git" ] || fail "未检测到 NextPanel 安装目录：$APP_DIR"
 }
 
 # ── status ─────────────────────────────────────────────────────────────────
@@ -36,50 +36,50 @@ cmd_status() {
 
   echo ""
   echo "=========================================="
-  echo "         NextPanel Status"
+  echo "          NextPanel 服务状态"
   echo "=========================================="
   echo ""
 
-  # PM2 processes
-  echo "Services:"
-  pm2 list 2>/dev/null || warn "PM2 not running"
+  # PM2 进程
+  echo "服务列表："
+  pm2 list 2>/dev/null || warn "PM2 未运行"
   echo ""
 
-  # Health check
-  echo "Health Check:"
+  # 健康检查
+  echo "健康检查："
   if curl -sf http://127.0.0.1:3001/api/docs > /dev/null 2>&1; then
-    echo -e "  Backend (3001):  ${GREEN}OK${NC}"
+    echo -e "  后端 (3001)：${GREEN}正常${NC}"
   else
-    echo -e "  Backend (3001):  ${RED}DOWN${NC}"
+    echo -e "  后端 (3001)：${RED}异常${NC}"
   fi
   if curl -sf http://127.0.0.1:3400/ > /dev/null 2>&1; then
-    echo -e "  Frontend (3400): ${GREEN}OK${NC}"
+    echo -e "  前端 (3400)：${GREEN}正常${NC}"
   else
-    echo -e "  Frontend (3400): ${RED}DOWN${NC}"
+    echo -e "  前端 (3400)：${RED}异常${NC}"
   fi
   echo ""
 
   # Nginx
-  echo -n "  Nginx:           "
+  echo -n "  Nginx：       "
   if systemctl is-active nginx > /dev/null 2>&1; then
-    echo -e "${GREEN}running${NC}"
+    echo -e "${GREEN}运行中${NC}"
   else
-    echo -e "${RED}stopped${NC}"
+    echo -e "${RED}已停止${NC}"
   fi
 
   # PostgreSQL
-  echo -n "  PostgreSQL:      "
+  echo -n "  PostgreSQL：  "
   if systemctl is-active postgresql > /dev/null 2>&1; then
-    echo -e "${GREEN}running${NC}"
+    echo -e "${GREEN}运行中${NC}"
   else
-    echo -e "${RED}stopped${NC}"
+    echo -e "${RED}已停止${NC}"
   fi
   echo ""
 
-  # SSL certificate
+  # SSL 证书
   if [ -f "$APP_DIR/apps/server/.env" ]; then
     PANEL_URL=$(grep '^PANEL_URL=' "$APP_DIR/apps/server/.env" | cut -d'"' -f2)
-    echo "  Panel URL: $PANEL_URL"
+    echo "  面板地址：$PANEL_URL"
   fi
 
   DOMAIN_CONF="/etc/nginx/sites-available/nextpanel"
@@ -87,15 +87,15 @@ cmd_status() {
     DOMAIN=$(grep 'server_name' "$DOMAIN_CONF" | head -1 | awk '{print $2}' | tr -d ';')
     if [ "$DOMAIN" != "_" ] && [ -d "/etc/letsencrypt/live/$DOMAIN" ]; then
       EXPIRY=$(openssl x509 -enddate -noout -in "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" 2>/dev/null | cut -d= -f2)
-      echo "  SSL Cert:  $DOMAIN (expires $EXPIRY)"
+      echo "  SSL 证书：$DOMAIN（到期时间 $EXPIRY）"
     fi
   fi
   echo ""
 
-  # Resources
-  echo "Resources:"
-  echo "  Memory:  $(free -h | awk '/^Mem/ {printf "%s / %s", $3, $2}')"
-  echo "  Disk:    $(df -h "$APP_DIR" | awk 'NR==2 {printf "%s / %s (%s used)", $3, $2, $5}')"
+  # 资源
+  echo "资源使用："
+  echo "  内存：$(free -h | awk '/^Mem/ {printf "%s / %s", $3, $2}')"
+  echo "  磁盘：$(df -h "$APP_DIR" | awk 'NR==2 {printf "%s / %s（已用 %s）", $3, $2, $5}')"
   echo ""
 }
 
@@ -108,59 +108,59 @@ cmd_update() {
   BRANCH="${1:-main}"
 
   echo ""
-  info "Updating NextPanel (branch: $BRANCH)..."
+  info "正在更新 NextPanel（分支：$BRANCH）..."
   echo ""
 
-  # Step 1: Backup database
-  info "Backing up database..."
+  # 步骤 1：备份数据库
+  info "正在备份数据库..."
   cmd_backup_quiet
 
-  # Step 2: Pull latest code
-  info "Pulling latest code..."
+  # 步骤 2：拉取最新代码
+  info "正在拉取最新代码..."
   cd "$APP_DIR"
   git fetch origin "$BRANCH" --depth 1 > /dev/null 2>&1
   git reset --hard "origin/$BRANCH" > /dev/null 2>&1
-  ok "Code updated"
+  ok "代码已更新"
 
-  # Step 3: Install dependencies
-  info "Installing dependencies..."
+  # 步骤 3：安装依赖
+  info "正在安装依赖..."
   pnpm install --no-frozen-lockfile > /dev/null 2>&1
   cd "$APP_DIR/apps/server"
   pnpm exec prisma generate > /dev/null 2>&1
-  ok "Dependencies updated"
+  ok "依赖安装完成"
 
-  # Step 4: Build
-  info "Building application..."
+  # 步骤 4：编译构建
+  info "正在编译构建..."
   export NODE_OPTIONS="--max-old-space-size=1024"
   export NEXT_TELEMETRY_DISABLED=1
   cd "$APP_DIR"
-  pnpm -r --workspace-concurrency=1 build > /dev/null 2>&1 || fail "Build failed"
+  pnpm -r --workspace-concurrency=1 build > /dev/null 2>&1 || fail "编译构建失败"
   unset NODE_OPTIONS NEXT_TELEMETRY_DISABLED
-  ok "Build complete"
+  ok "编译构建完成"
 
-  # Step 5: Migrate database
-  info "Running migrations..."
+  # 步骤 5：数据库迁移
+  info "正在执行数据库迁移..."
   cd "$APP_DIR/apps/server"
   pnpm exec prisma migrate deploy > /dev/null 2>&1
-  ok "Migrations applied"
+  ok "数据库迁移完成"
 
-  # Step 6: Update CLI tool
+  # 步骤 6：更新 CLI 工具
   if [ -f "$APP_DIR/scripts/nextpanel" ]; then
     cp "$APP_DIR/scripts/nextpanel" /usr/local/bin/nextpanel
     chmod +x /usr/local/bin/nextpanel
-    ok "CLI updated"
+    ok "CLI 工具已更新"
   fi
 
-  # Step 7: Restart services
-  info "Restarting services..."
+  # 步骤 7：重启服务
+  info "正在重启服务..."
   cd "$APP_DIR"
   pm2 restart ecosystem.config.cjs > /dev/null 2>&1
   pm2 save > /dev/null 2>&1
-  ok "Services restarted"
+  ok "服务已重启"
 
   sleep 5
   echo ""
-  ok "Update complete!"
+  ok "更新完成！"
   pm2 list
   echo ""
 }
@@ -174,10 +174,10 @@ cmd_backup_quiet() {
 
   sudo -u postgres pg_dump nextpanel 2>/dev/null | gzip > "$BACKUP_FILE"
 
-  # Rotate: keep only latest MAX_BACKUPS
+  # 轮转：只保留最近 MAX_BACKUPS 份
   ls -t "$BACKUP_DIR"/nextpanel_*.sql.gz 2>/dev/null | tail -n +$((MAX_BACKUPS + 1)) | xargs rm -f 2>/dev/null || true
 
-  ok "Database backed up: $BACKUP_FILE"
+  ok "数据库已备份：$BACKUP_FILE"
 }
 
 cmd_backup() {
@@ -185,11 +185,11 @@ cmd_backup() {
   check_install
 
   echo ""
-  info "Backing up NextPanel database..."
+  info "正在备份 NextPanel 数据库..."
   cmd_backup_quiet
 
   echo ""
-  echo "Backups (latest $MAX_BACKUPS):"
+  echo "备份列表（最近 $MAX_BACKUPS 份）："
   ls -lh "$BACKUP_DIR"/nextpanel_*.sql.gz 2>/dev/null | awk '{print "  " $NF " (" $5 ")"}'
   echo ""
 }
@@ -201,35 +201,35 @@ cmd_restore() {
   check_install
 
   BACKUP_FILE="${1:-}"
-  [ -n "$BACKUP_FILE" ] || fail "Usage: nextpanel restore <backup-file.sql.gz>"
-  [ -f "$BACKUP_FILE" ] || fail "Backup file not found: $BACKUP_FILE"
+  [ -n "$BACKUP_FILE" ] || fail "用法：nextpanel restore <备份文件.sql.gz>"
+  [ -f "$BACKUP_FILE" ] || fail "备份文件不存在：$BACKUP_FILE"
 
   echo ""
-  warn "This will replace the current database with the backup."
-  read -rp "Are you sure? [y/N]: " CONFIRM
-  [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ] || fail "Aborted"
+  warn "此操作将用备份文件替换当前数据库。"
+  read -rp "确认继续？[y/N]：" CONFIRM
+  [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ] || fail "已取消"
 
-  # Safety backup
-  info "Creating safety backup of current database..."
+  # 安全备份
+  info "正在备份当前数据库（安全措施）..."
   cmd_backup_quiet
 
-  info "Stopping services..."
+  info "正在停止服务..."
   pm2 stop nextpanel-server > /dev/null 2>&1 || true
   pm2 stop nextpanel-web > /dev/null 2>&1 || true
 
-  info "Restoring database..."
+  info "正在恢复数据库..."
   sudo -u postgres dropdb nextpanel --if-exists 2>/dev/null
   sudo -u postgres createdb nextpanel -O nextpanel 2>/dev/null
   gunzip < "$BACKUP_FILE" | sudo -u postgres psql -d nextpanel > /dev/null 2>&1
-  ok "Database restored"
+  ok "数据库已恢复"
 
-  info "Restarting services..."
+  info "正在重启服务..."
   cd "$APP_DIR"
   pm2 restart ecosystem.config.cjs > /dev/null 2>&1
   pm2 save > /dev/null 2>&1
 
   sleep 5
-  ok "Restore complete!"
+  ok "恢复完成！"
   echo ""
 }
 
@@ -240,7 +240,7 @@ cmd_domain_set() {
   check_install
 
   DOMAIN="${1:-}"
-  [ -n "$DOMAIN" ] || fail "Usage: nextpanel domain set <domain> [--email <email>]"
+  [ -n "$DOMAIN" ] || fail "用法：nextpanel domain set <域名> [--email <邮箱>]"
 
   EMAIL=""
   shift
@@ -252,72 +252,72 @@ cmd_domain_set() {
   done
 
   if [ -z "$EMAIL" ]; then
-    read -rp "Email for SSL certificate: " EMAIL
-    [ -n "$EMAIL" ] || fail "Email is required for SSL certificate"
+    read -rp "请输入邮箱（用于 SSL 证书申请）：" EMAIL
+    [ -n "$EMAIL" ] || fail "邮箱不能为空"
   fi
 
   echo ""
-  info "Binding domain: $DOMAIN"
+  info "正在绑定域名：$DOMAIN"
 
-  # Verify DNS
-  info "Verifying DNS..."
+  # 验证 DNS
+  info "正在验证 DNS 解析..."
   SERVER_IP=$(hostname -I | awk '{print $1}')
   RESOLVED_IP=$(dig +short "$DOMAIN" 2>/dev/null | head -1)
   if [ "$RESOLVED_IP" != "$SERVER_IP" ]; then
-    warn "DNS mismatch: $DOMAIN -> ${RESOLVED_IP:-unresolvable}, server IP: $SERVER_IP"
-    read -rp "Continue anyway? [y/N]: " DNS_CONTINUE
-    [ "$DNS_CONTINUE" = "y" ] || [ "$DNS_CONTINUE" = "Y" ] || fail "Aborted"
+    warn "DNS 不匹配：$DOMAIN 解析到 ${RESOLVED_IP:-无结果}，本机 IP 为 $SERVER_IP"
+    read -rp "是否继续？[y/N]：" DNS_CONTINUE
+    [ "$DNS_CONTINUE" = "y" ] || [ "$DNS_CONTINUE" = "Y" ] || fail "已取消"
   else
-    ok "DNS verified: $DOMAIN -> $SERVER_IP"
+    ok "DNS 验证通过：$DOMAIN -> $SERVER_IP"
   fi
 
-  # Detect and disable conflicting Nginx configs for this domain
+  # 检测并禁用冲突的 Nginx 配置
   CONFLICT=$(grep -rl "server_name.*$DOMAIN" /etc/nginx/sites-enabled/ 2>/dev/null | grep -v nextpanel || true)
   if [ -n "$CONFLICT" ]; then
-    warn "Domain $DOMAIN found in existing config: $CONFLICT"
-    warn "Disabling conflicting config..."
+    warn "域名 $DOMAIN 已存在于其他配置中：$CONFLICT"
+    warn "正在禁用冲突配置..."
     for f in $CONFLICT; do
       rm -f "$f"
-      ok "Disabled: $f"
+      ok "已禁用：$f"
     done
   fi
 
-  # Update Nginx config
-  info "Updating Nginx configuration..."
+  # 更新 Nginx 配置
+  info "正在更新 Nginx 配置..."
   sed "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" "$APP_DIR/scripts/nginx/domain.conf" \
     > /etc/nginx/sites-available/nextpanel
   ln -sf /etc/nginx/sites-available/nextpanel /etc/nginx/sites-enabled/
-  nginx -t > /dev/null 2>&1 || fail "Nginx config test failed"
+  nginx -t > /dev/null 2>&1 || fail "Nginx 配置测试失败"
   systemctl reload nginx
-  ok "Nginx updated"
+  ok "Nginx 配置已更新"
 
-  # Request SSL certificate
-  info "Requesting SSL certificate..."
+  # 申请 SSL 证书
+  info "正在申请 SSL 证书..."
   if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" > /dev/null 2>&1; then
     systemctl enable certbot.timer > /dev/null 2>&1 || true
-    ok "SSL certificate installed"
+    ok "SSL 证书已安装"
   else
-    fail "SSL certificate request failed. Check that port 80 is accessible and DNS is correct."
+    fail "SSL 证书申请失败，请检查 80 端口是否可访问且 DNS 解析正确。"
   fi
 
-  # Update .env
-  info "Updating configuration..."
+  # 更新 .env
+  info "正在更新配置文件..."
   ENV_FILE="$APP_DIR/apps/server/.env"
   sed -i "s|^ALLOWED_ORIGIN=.*|ALLOWED_ORIGIN=\"https://$DOMAIN\"|" "$ENV_FILE"
   sed -i "s|^PANEL_URL=.*|PANEL_URL=\"https://$DOMAIN\"|" "$ENV_FILE"
-  ok "Configuration updated"
+  ok "配置文件已更新"
 
-  # Restart services
-  info "Restarting services..."
+  # 重启服务
+  info "正在重启服务..."
   cd "$APP_DIR"
   pm2 restart ecosystem.config.cjs > /dev/null 2>&1
   pm2 save > /dev/null 2>&1
 
   sleep 5
   echo ""
-  ok "Domain bound successfully!"
+  ok "域名绑定成功！"
   echo ""
-  echo -e "  Panel URL: ${CYAN}https://$DOMAIN${NC}"
+  echo -e "  面板地址：${CYAN}https://$DOMAIN${NC}"
   echo ""
 }
 
@@ -341,43 +341,44 @@ cmd_uninstall() {
   check_install
 
   echo ""
-  warn "This will completely remove NextPanel from this server."
-  read -rp "Create a final backup before uninstalling? [Y/n]: " DO_BACKUP
+  warn "此操作将从服务器上完全移除 NextPanel。"
+  read -rp "卸载前是否创建最终备份？[Y/n]：" DO_BACKUP
   if [ "$DO_BACKUP" != "n" ] && [ "$DO_BACKUP" != "N" ]; then
     cmd_backup_quiet
   fi
 
-  read -rp "Type 'UNINSTALL' to confirm: " CONFIRM
-  [ "$CONFIRM" = "UNINSTALL" ] || fail "Aborted"
+  read -rp "请输入 'UNINSTALL' 确认卸载：" CONFIRM
+  [ "$CONFIRM" = "UNINSTALL" ] || fail "已取消"
 
   echo ""
-  info "Stopping services..."
-  pm2 stop all > /dev/null 2>&1 || true
-  pm2 delete all > /dev/null 2>&1 || true
-  pm2 unstartup systemd > /dev/null 2>&1 || true
+  info "正在停止服务..."
+  pm2 stop nextpanel-server > /dev/null 2>&1 || true
+  pm2 stop nextpanel-web > /dev/null 2>&1 || true
+  pm2 delete nextpanel-server > /dev/null 2>&1 || true
+  pm2 delete nextpanel-web > /dev/null 2>&1 || true
 
-  info "Removing Nginx configuration..."
+  info "正在移除 Nginx 配置..."
   rm -f /etc/nginx/sites-enabled/nextpanel
   rm -f /etc/nginx/sites-available/nextpanel
   systemctl reload nginx > /dev/null 2>&1 || true
 
-  info "Removing database..."
+  info "正在删除数据库..."
   sudo -u postgres dropdb nextpanel --if-exists 2>/dev/null || true
   sudo -u postgres psql -c "DROP USER IF EXISTS nextpanel;" > /dev/null 2>&1 || true
 
-  info "Removing application files..."
+  info "正在删除应用文件..."
   rm -rf "$APP_DIR"
   rm -rf "$LOG_DIR"
 
-  info "Removing CLI..."
+  info "正在移除 CLI 工具..."
   rm -f /usr/local/bin/nextpanel
 
   echo ""
-  ok "NextPanel has been uninstalled."
+  ok "NextPanel 已卸载。"
   if [ -d "$BACKUP_DIR" ]; then
     echo ""
-    echo "  Backups preserved at: $BACKUP_DIR"
-    echo "  Remove manually if not needed: rm -rf $BACKUP_DIR"
+    echo "  数据库备份已保留在：$BACKUP_DIR"
+    echo "  如不需要请手动删除：rm -rf $BACKUP_DIR"
   fi
   echo ""
 }
@@ -386,23 +387,23 @@ cmd_uninstall() {
 
 cmd_help() {
   echo ""
-  echo "NextPanel CLI"
+  echo "NextPanel 面板管理工具"
   echo ""
-  echo "Usage: nextpanel <command> [options]"
+  echo "用法：nextpanel <命令> [选项]"
   echo ""
-  echo "Commands:"
-  echo "  status                    Show service status and health"
-  echo "  update [branch]           Update to latest version (default: main)"
-  echo "  backup                    Backup database"
-  echo "  restore <file>            Restore database from backup"
-  echo "  domain set <domain>       Bind domain with auto SSL"
-  echo "  logs [server|web] [lines] View service logs"
-  echo "  uninstall                 Remove NextPanel"
-  echo "  help                      Show this help"
+  echo "命令："
+  echo "  status                    查看服务状态和健康检查"
+  echo "  update [分支]              更新到最新版本（默认：main）"
+  echo "  backup                    备份数据库"
+  echo "  restore <文件>             从备份恢复数据库"
+  echo "  domain set <域名>          绑定域名并自动申请 SSL 证书"
+  echo "  logs [server|web] [行数]   查看服务日志"
+  echo "  uninstall                 卸载 NextPanel"
+  echo "  help                      显示此帮助信息"
   echo ""
 }
 
-# ── Main router ────────────────────────────────────────────────────────────
+# ── 主路由 ─────────────────────────────────────────────────────────────────
 
 case "${1:-help}" in
   status)     cmd_status ;;
@@ -413,7 +414,7 @@ case "${1:-help}" in
     shift
     case "${1:-}" in
       set) shift; cmd_domain_set "$@" ;;
-      *)   fail "Usage: nextpanel domain set <domain> [--email <email>]" ;;
+      *)   fail "用法：nextpanel domain set <域名> [--email <邮箱>]" ;;
     esac
     ;;
   logs)       shift; cmd_logs "$@" ;;
