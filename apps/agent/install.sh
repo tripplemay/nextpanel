@@ -6,7 +6,7 @@ set -e
 
 PANEL_URL="${1:-}"
 AGENT_TOKEN="${2:-}"
-GITHUB_REPO="tripplemay/nextpanel"
+GITHUB_REPO="tripplemay/nextpanel-releases"
 
 if [ -z "$PANEL_URL" ] || [ -z "$AGENT_TOKEN" ]; then
   echo "用法: bash install.sh <PANEL_URL> <AGENT_TOKEN>"

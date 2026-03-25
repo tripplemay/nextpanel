@@ -133,15 +133,32 @@ cmd_update() {
   info "正在编译构建..."
   export NODE_OPTIONS="--max-old-space-size=1024"
   export NEXT_TELEMETRY_DISABLED=1
-  cd "$APP_DIR"
-  pnpm -r --workspace-concurrency=1 build > /dev/null 2>&1 || fail "编译构建失败"
+  BUILD_LOG="/tmp/nextpanel-build.log"
+
+  cd "$APP_DIR/packages/shared" && pnpm build >> "$BUILD_LOG" 2>&1 || true
+  cd "$APP_DIR/apps/server" && pnpm build >> "$BUILD_LOG" 2>&1
+  if [ ! -f "$APP_DIR/apps/server/dist/main.js" ] || [ ! -s "$APP_DIR/apps/server/dist/main.js" ]; then
+    tail -20 "$BUILD_LOG"
+    fail "后端编译失败：dist/main.js 不存在或为空"
+  fi
+
+  cd "$APP_DIR/apps/web" && pnpm build >> "$BUILD_LOG" 2>&1
+  if [ ! -d "$APP_DIR/apps/web/.next" ]; then
+    tail -20 "$BUILD_LOG"
+    fail "前端编译失败：.next 目录不存在"
+  fi
+
+  rm -f "$BUILD_LOG"
   unset NODE_OPTIONS NEXT_TELEMETRY_DISABLED
   ok "编译构建完成"
 
   # 步骤 5：数据库迁移
   info "正在执行数据库迁移..."
   cd "$APP_DIR/apps/server"
-  pnpm exec prisma migrate deploy > /dev/null 2>&1
+  MIGRATE_OUTPUT=$(pnpm exec prisma migrate deploy 2>&1) || {
+    echo "$MIGRATE_OUTPUT"
+    fail "数据库迁移失败"
+  }
   ok "数据库迁移完成"
 
   # 步骤 6：更新 CLI 工具
@@ -203,6 +220,13 @@ cmd_restore() {
   BACKUP_FILE="${1:-}"
   [ -n "$BACKUP_FILE" ] || fail "用法：nextpanel restore <备份文件.sql.gz>"
   [ -f "$BACKUP_FILE" ] || fail "备份文件不存在：$BACKUP_FILE"
+
+  # 验证备份文件完整性
+  info "正在验证备份文件..."
+  if ! gunzip -t "$BACKUP_FILE" 2>/dev/null; then
+    fail "备份文件损坏（gzip 校验失败）"
+  fi
+  ok "备份文件验证通过"
 
   echo ""
   warn "此操作将用备份文件替换当前数据库。"

@@ -10,7 +10,6 @@ APP_DIR="/opt/apps/nextpanel"
 LOG_DIR="/var/log/nextpanel"
 BACKUP_DIR="/opt/backups/nextpanel"
 REPO_URL="https://github.com/tripplemay/nextpanel.git"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -65,8 +64,13 @@ if [ "$MODE_CHOICE" = "1" ]; then
   read -rp "请输入域名（需提前将 A 记录指向本机 IP）：" DOMAIN
   [ -n "$DOMAIN" ] || fail "域名不能为空"
 
-  read -rp "请输入邮箱（用于 SSL 证书申请）：" CERTBOT_EMAIL
-  [ -n "$CERTBOT_EMAIL" ] || fail "邮箱不能为空"
+  while true; do
+    read -rp "请输入邮箱（用于 SSL 证书申请）：" CERTBOT_EMAIL
+    if [[ "$CERTBOT_EMAIL" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+      break
+    fi
+    warn "邮箱格式无效，请重新输入"
+  done
 
   # 验证 DNS 解析
   info "正在验证 DNS 解析..."
@@ -127,6 +131,10 @@ if ! command -v node &>/dev/null; then
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
   apt-get install -y -qq nodejs > /dev/null
 fi
+
+# 校验 Node.js 版本
+NODE_MAJOR=$(node --version | cut -dv -f2 | cut -d. -f1)
+[ "$NODE_MAJOR" -ge 18 ] || fail "需要 Node.js 18+，当前版本：$(node --version)"
 ok "Node.js $(node --version)"
 
 # ── 步骤 6：安装 pnpm 和 PM2 ────────────────────────────────────────────
@@ -150,12 +158,16 @@ if ! command -v psql &>/dev/null; then
   systemctl enable postgresql > /dev/null 2>&1
   systemctl start postgresql
 fi
+
+# 校验 PostgreSQL 版本
+PG_MAJOR=$(psql --version | awk '{print $3}' | cut -d. -f1)
+[ "$PG_MAJOR" -ge 12 ] || fail "需要 PostgreSQL 12+，当前版本：$PG_MAJOR"
 ok "PostgreSQL $(psql --version | awk '{print $3}')"
 
 # ── 步骤 8：初始化数据库 ────────────────────────────────────────────────
 
 info "正在初始化数据库..."
-DB_PASS=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 32)
+DB_PASS=$(openssl rand -hex 16)
 
 sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='nextpanel'" | grep -q 1 || \
   sudo -u postgres psql -c "CREATE USER nextpanel WITH PASSWORD '$DB_PASS';" > /dev/null
@@ -287,24 +299,38 @@ ok "项目依赖安装完成"
 info "正在编译构建（可能需要几分钟）..."
 export NODE_OPTIONS="--max-old-space-size=1024"
 export NEXT_TELEMETRY_DISABLED=1
-cd "$APP_DIR"
+BUILD_LOG="/tmp/nextpanel-build.log"
 
 # 逐个构建，确保每步都成功
-cd "$APP_DIR/packages/shared" && pnpm build > /dev/null 2>&1 || true
-cd "$APP_DIR/apps/server" && pnpm build > /dev/null 2>&1
-[ -f "$APP_DIR/apps/server/dist/main.js" ] || fail "后端编译失败：dist/main.js 不存在"
+cd "$APP_DIR/packages/shared" && pnpm build >> "$BUILD_LOG" 2>&1 || true
 
-cd "$APP_DIR/apps/web" && pnpm build > /dev/null 2>&1
-[ -d "$APP_DIR/apps/web/.next" ] || fail "前端编译失败：.next 目录不存在"
+cd "$APP_DIR/apps/server" && pnpm build >> "$BUILD_LOG" 2>&1
+if [ ! -f "$APP_DIR/apps/server/dist/main.js" ] || [ ! -s "$APP_DIR/apps/server/dist/main.js" ]; then
+  echo "--- 构建日志 ---"
+  tail -30 "$BUILD_LOG"
+  fail "后端编译失败：dist/main.js 不存在或为空"
+fi
+ok "后端编译完成"
 
+cd "$APP_DIR/apps/web" && pnpm build >> "$BUILD_LOG" 2>&1
+if [ ! -d "$APP_DIR/apps/web/.next" ]; then
+  echo "--- 构建日志 ---"
+  tail -30 "$BUILD_LOG"
+  fail "前端编译失败：.next 目录不存在"
+fi
+ok "前端编译完成"
+
+rm -f "$BUILD_LOG"
 unset NODE_OPTIONS NEXT_TELEMETRY_DISABLED
-ok "编译构建完成"
 
 # ── 步骤 18：执行数据库迁移 ──────────────────────────────────────────────
 
 info "正在执行数据库迁移..."
 cd "$APP_DIR/apps/server"
-pnpm exec prisma migrate deploy > /dev/null 2>&1
+MIGRATE_OUTPUT=$(pnpm exec prisma migrate deploy 2>&1) || {
+  echo "$MIGRATE_OUTPUT"
+  fail "数据库迁移失败"
+}
 ok "数据库迁移完成"
 
 # ── 步骤 19：创建管理员账号 ──────────────────────────────────────────────
@@ -326,7 +352,35 @@ pm2 startup systemd -u root --hp /root 2>/dev/null | tail -n 1 | bash > /dev/nul
 pm2 save > /dev/null 2>&1
 ok "服务启动完成"
 
-# ── 步骤 21：申请 SSL 证书（域名模式）────────────────────────────────────
+# ── 步骤 21：健康检查 ────────────────────────────────────────────────────
+
+info "正在验证服务就绪..."
+
+# 等待后端启动
+for i in $(seq 1 30); do
+  if curl -sf http://127.0.0.1:3001/api/docs > /dev/null 2>&1; then
+    ok "后端服务就绪"
+    break
+  fi
+  if [ "$i" -eq 30 ]; then
+    warn "后端服务启动超时，请检查日志：pm2 logs nextpanel-server"
+  fi
+  sleep 1
+done
+
+# 等待前端启动
+for i in $(seq 1 30); do
+  if curl -sf http://127.0.0.1:3000/ > /dev/null 2>&1; then
+    ok "前端服务就绪"
+    break
+  fi
+  if [ "$i" -eq 30 ]; then
+    warn "前端服务启动超时，请检查日志：pm2 logs nextpanel-web"
+  fi
+  sleep 1
+done
+
+# ── 步骤 22：申请 SSL 证书（域名模式）────────────────────────────────────
 
 if [ "$MODE" = "DOMAIN" ]; then
   info "正在申请 SSL 证书..."
@@ -338,7 +392,7 @@ if [ "$MODE" = "DOMAIN" ]; then
   fi
 fi
 
-# ── 步骤 22：安装 Xray 和 sing-box（可选）─────────────────────────────────
+# ── 步骤 23：安装 Xray 和 sing-box（可选）─────────────────────────────────
 
 ARCH=$(uname -m | sed 's/x86_64/64/;s/aarch64/arm64-v8a/')
 if ! command -v xray &>/dev/null; then
@@ -348,7 +402,7 @@ if ! command -v xray &>/dev/null; then
     rm -f /tmp/xray.zip
     ok "Xray 已安装"
   else
-    warn "Xray 安装失败（可选组件，已跳过）"
+    warn "Xray 安装失败（可选组件，节点连通性测试将不可用）"
   fi
 fi
 
@@ -363,22 +417,32 @@ if ! command -v sing-box &>/dev/null; then
       rm -rf /tmp/sb.tar.gz /tmp/sing-box-*/
       ok "sing-box 已安装"
     else
-      warn "sing-box 安装失败（可选组件，已跳过）"
+      warn "sing-box 安装失败（可选组件，Hysteria2 测试将不可用）"
     fi
   fi
 fi
 
-# ── 步骤 23：安装 CLI 管理工具 ───────────────────────────────────────────
+# ── 步骤 24：配置日志轮转 ────────────────────────────────────────────────
+
+cat > /etc/logrotate.d/nextpanel <<'LOGROTATE'
+/var/log/nextpanel/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+LOGROTATE
+ok "日志轮转已配置"
+
+# ── 步骤 25：安装 CLI 管理工具 ───────────────────────────────────────────
 
 info "正在安装 nextpanel 命令行工具..."
 cp "$APP_DIR/scripts/nextpanel" /usr/local/bin/nextpanel
 chmod +x /usr/local/bin/nextpanel
 ok "命令行工具已安装"
-
-# ── 步骤 24：等待服务就绪 ────────────────────────────────────────────────
-
-info "等待服务启动..."
-sleep 8
 
 # ── 安装完成 ─────────────────────────────────────────────────────────────
 
