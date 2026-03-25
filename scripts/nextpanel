@@ -214,7 +214,8 @@ cmd_restore() {
   cmd_backup_quiet
 
   info "Stopping services..."
-  pm2 stop all > /dev/null 2>&1
+  pm2 stop nextpanel-server > /dev/null 2>&1 || true
+  pm2 stop nextpanel-web > /dev/null 2>&1 || true
 
   info "Restoring database..."
   sudo -u postgres dropdb nextpanel --if-exists 2>/dev/null
@@ -270,10 +271,22 @@ cmd_domain_set() {
     ok "DNS verified: $DOMAIN -> $SERVER_IP"
   fi
 
+  # Detect and disable conflicting Nginx configs for this domain
+  CONFLICT=$(grep -rl "server_name.*$DOMAIN" /etc/nginx/sites-enabled/ 2>/dev/null | grep -v nextpanel || true)
+  if [ -n "$CONFLICT" ]; then
+    warn "Domain $DOMAIN found in existing config: $CONFLICT"
+    warn "Disabling conflicting config..."
+    for f in $CONFLICT; do
+      rm -f "$f"
+      ok "Disabled: $f"
+    done
+  fi
+
   # Update Nginx config
   info "Updating Nginx configuration..."
   sed "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" "$APP_DIR/scripts/nginx/domain.conf" \
     > /etc/nginx/sites-available/nextpanel
+  ln -sf /etc/nginx/sites-available/nextpanel /etc/nginx/sites-enabled/
   nginx -t > /dev/null 2>&1 || fail "Nginx config test failed"
   systemctl reload nginx
   ok "Nginx updated"

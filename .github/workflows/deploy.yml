@@ -90,7 +90,8 @@ jobs:
               echo 'c2VydmVyIHsKICBsaXN0ZW4gODA7CiAgc2VydmVyX25hbWUgRE9NQUlOX1BMQUNFSE9MREVSOwoKICBsb2NhdGlvbiAvYXBpLyB7CiAgICBwcm94eV9wYXNzIGh0dHA6Ly8xMjcuMC4wLjE6MzAwMTsKICAgIHByb3h5X2h0dHBfdmVyc2lvbiAxLjE7CiAgICBwcm94eV9zZXRfaGVhZGVyIFVwZ3JhZGUgJGh0dHBfdXBncmFkZTsKICAgIHByb3h5X3NldF9oZWFkZXIgQ29ubmVjdGlvbiB1cGdyYWRlOwogICAgcHJveHlfc2V0X2hlYWRlciBIb3N0ICRob3N0OwogICAgcHJveHlfc2V0X2hlYWRlciBYLVJlYWwtSVAgJHJlbW90ZV9hZGRyOwogICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Gb3IgJHByb3h5X2FkZF94X2ZvcndhcmRlZF9mb3I7CiAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLVByb3RvICRzY2hlbWU7CiAgICBwcm94eV9jYWNoZV9ieXBhc3MgJGh0dHBfdXBncmFkZTsKICB9CgogIGxvY2F0aW9uIC8gewogICAgcHJveHlfcGFzcyBodHRwOi8vMTI3LjAuMC4xOjMwMDA7CiAgICBwcm94eV9odHRwX3ZlcnNpb24gMS4xOwogICAgcHJveHlfc2V0X2hlYWRlciBVcGdyYWRlICRodHRwX3VwZ3JhZGU7CiAgICBwcm94eV9zZXRfaGVhZGVyIENvbm5lY3Rpb24gdXBncmFkZTsKICAgIHByb3h5X3NldF9oZWFkZXIgSG9zdCAkaG9zdDsKICAgIHByb3h5X3NldF9oZWFkZXIgWC1SZWFsLUlQICRyZW1vdGVfYWRkcjsKICAgIHByb3h5X3NldF9oZWFkZXIgWC1Gb3J3YXJkZWQtRm9yICRwcm94eV9hZGRfeF9mb3J3YXJkZWRfZm9yOwogICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Qcm90byAkc2NoZW1lOwogICAgcHJveHlfY2FjaGVfYnlwYXNzICRodHRwX3VwZ3JhZGU7CiAgfQp9Cg==' \
                 | base64 -d | sed "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" > /etc/nginx/sites-available/nextpanel
 
-              rm -f /etc/nginx/sites-enabled/default
+              # Disable conflicting configs for this domain (preserve other sites)
+              grep -rl "server_name.*$DOMAIN" /etc/nginx/sites-enabled/ 2>/dev/null | grep -v nextpanel | xargs rm -f 2>/dev/null || true
               ln -sf /etc/nginx/sites-available/nextpanel /etc/nginx/sites-enabled/
               nginx -t && systemctl reload nginx
 

@@ -236,14 +236,26 @@ ok "Configuration written"
 # ── Step 14: Configure Nginx ──────────────────────────────────────────────
 
 info "Configuring Nginx..."
+
+# Check for existing Nginx configs that might conflict
 if [ "$MODE" = "DOMAIN" ]; then
+  # Detect if another config already uses this domain
+  CONFLICT=$(grep -rl "server_name.*$DOMAIN" /etc/nginx/sites-enabled/ 2>/dev/null | grep -v nextpanel || true)
+  if [ -n "$CONFLICT" ]; then
+    warn "Domain $DOMAIN is already configured in: $CONFLICT"
+    warn "Disabling conflicting config to avoid routing issues..."
+    for f in $CONFLICT; do
+      rm -f "$f"
+      ok "Disabled: $f"
+    done
+  fi
   sed "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" "$APP_DIR/scripts/nginx/domain.conf" \
     > /etc/nginx/sites-available/nextpanel
 else
-  cp "$APP_DIR/scripts/nginx/ip.conf" /etc/nginx/sites-available/nextpanel
+  sed "s/IP_PLACEHOLDER/$SERVER_IP/g" "$APP_DIR/scripts/nginx/ip.conf" \
+    > /etc/nginx/sites-available/nextpanel
 fi
 
-rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/nextpanel /etc/nginx/sites-enabled/
 nginx -t > /dev/null 2>&1 || fail "Nginx config test failed"
 systemctl reload nginx
