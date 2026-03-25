@@ -126,8 +126,9 @@ jobs:
             grep -q '^GFW_CHECK_FUNCTION_URL=' $APP_DIR/apps/server/.env \
               || echo 'GFW_CHECK_FUNCTION_URL=https://1259731148-dkqsal68t7.ap-guangzhou.tencentscf.com' >> $APP_DIR/apps/server/.env
 
-            # 先停服务，释放内存供构建使用
-            pm2 stop all 2>/dev/null || true
+            # 先停 NextPanel 服务，释放内存供构建使用（不影响其他 PM2 进程）
+            pm2 stop nextpanel-server 2>/dev/null || true
+            pm2 stop nextpanel-web 2>/dev/null || true
 
             # ── 安装/检测 Xray（节点连通性测试客户端，幂等）────────────────
             if ! command -v xray &>/dev/null; then
