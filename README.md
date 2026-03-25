@@ -49,7 +49,7 @@
 - IP 基础信息：类型（住宅/数据中心）、ASN、运营商、地区
 - 流媒体解锁检测：Netflix、Disney+、YouTube、Hulu、Bilibili
 - AI 服务可用性：OpenAI、Claude、Gemini
-- GFW 封锁检测
+- 可达性检测
 - 路由测试：去程（面板端 itdog/chinaz API）+ 回程（Agent 测 9 个国内 ISP 节点）
 - 测试结果矩阵展示，延迟按颜色分级
 
@@ -198,8 +198,8 @@ Auth, Servers, Nodes, ExternalNodes, Subscriptions, IpCheck, Metrics, Agent, Aud
 | `PANEL_URL` | 面板公网地址 |
 | `ALLOWED_ORIGIN` | CORS 允许来源 |
 | `GITHUB_REPO` | Agent 发布的 GitHub 仓库路径 |
-| `GFW_CHECK_FUNCTION_URL` | GFW 封锁检测函数地址（可选，见下方说明） |
-| `GFW_CHECK_FUNCTION_TOKEN` | GFW 检测函数认证 Token（可选） |
+| `GFW_CHECK_FUNCTION_URL` | 可达性检测函数地址（可选，见下方说明） |
+| `GFW_CHECK_FUNCTION_TOKEN` | 可达性检测函数认证 Token（可选） |
 
 **前端** (`apps/web/.env.local`)：
 
@@ -207,11 +207,11 @@ Auth, Servers, Nodes, ExternalNodes, Subscriptions, IpCheck, Metrics, Agent, Aud
 |------|------|
 | `API_URL` | 后端 API 地址（默认 `http://localhost:3001`） |
 
-## GFW 封锁检测（可选）
+## 可达性检测（可选）
 
 IP 检测中的大部分功能（地理位置、流媒体解锁、AI 服务可用性、回程路由测试）安装后即可使用，无需额外配置。
 
-**GFW 封锁检测**是唯一需要额外配置的可选功能。该功能通过部署在中国大陆的 Serverless 函数，从国内测试目标服务器 IP 是否被封锁。不配置此功能不影响其他检测。
+**可达性检测**是唯一需要额外配置的可选功能。该功能通过部署在中国大陆的 Serverless 函数，从国内测试目标服务器 IP 是否可达。不配置此功能不影响其他检测。
 
 ### 工作原理
 
