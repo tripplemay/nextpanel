@@ -156,9 +156,11 @@ export default function SubscriptionsPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Split data based on role
-  const viewerData = isViewer ? (rawData as ViewerSubscriptionList | undefined) : undefined;
-  const ownerData = !isViewer ? (rawData as Subscription[] | undefined) : undefined;
+  // Detect response shape instead of relying on cached role
+  // (role in Zustand may be stale if admin changed it after login)
+  const isViewerResponse = rawData != null && !Array.isArray(rawData) && 'mine' in rawData;
+  const viewerData = isViewerResponse ? (rawData as ViewerSubscriptionList) : undefined;
+  const ownerData = !isViewerResponse ? (rawData as Subscription[] | undefined) : undefined;
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => subscriptionsApi.delete(id),
@@ -318,7 +320,7 @@ export default function SubscriptionsPage() {
   }
 
   // ── VIEWER view ─────────────────────────────────────────────────────────────
-  if (isViewer) {
+  if (isViewerResponse) {
     const mine = viewerData?.mine ?? [];
     const shared = viewerData?.shared ?? [];
 

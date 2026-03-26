@@ -90,10 +90,14 @@ export class OpenRouterService {
         },
       });
       if (!res.ok) {
+        if (res.status === 403) {
+          throw new BadRequestException('该网站有反爬保护（HTTP 403），无法自动识别，请手动填写');
+        }
         throw new Error(`HTTP ${res.status}`);
       }
       html = await res.text();
     } catch (err) {
+      if (err instanceof BadRequestException) throw err;
       this.logger.error(`Failed to fetch URL ${url}: ${err}`);
       throw new BadRequestException(`无法访问该 URL: ${err}`);
     }

@@ -511,7 +511,18 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
     '  - MATCH,🐟 漏网之鱼',
   ].join('\n');
 
+  // ── top-level config (required by ClashX / original Clash) ────────────────
+  const topLevel = [
+    'mixed-port: 7890',
+    'allow-lan: false',
+    'mode: rule',
+    'log-level: info',
+    'external-controller: 127.0.0.1:9090',
+  ].join('\n');
+
   return [
+    topLevel,
+    '',
     ruleProviderLines.join('\n'),
     '',
     proxiesSection,
