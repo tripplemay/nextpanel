@@ -59,7 +59,7 @@ export default function AccountSettingsPage() {
   async function handleBind() {
     try {
       const device = isMobile ? 'mobile' : 'desktop';
-      const res = await wxWorkApi.loginUrl(device, `${window.location.origin}/auth/wxwork/bind-callback`);
+      const res = await wxWorkApi.loginUrl(device, `${window.location.origin}/wxwork/bind-callback`);
       window.location.href = res.data.url;
     } catch {
       message.error('获取企业微信授权链接失败');

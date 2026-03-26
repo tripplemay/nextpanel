@@ -67,7 +67,7 @@ export class AuthController {
   ) {
     const d = device === 'mobile' ? 'mobile' : 'desktop';
     const panelUrl = this.config.get<string>('PANEL_URL') ?? '';
-    const callbackUri = redirectUri || `${panelUrl}/auth/wxwork/callback`;
+    const callbackUri = redirectUri || `${panelUrl}/wxwork/callback`;
     const state = Math.random().toString(36).slice(2);
     const url = await this.wxWorkService.getLoginUrl(callbackUri, state, d);
     return { url, state };
