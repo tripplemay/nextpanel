@@ -546,11 +546,17 @@ export class NodeDeployService {
     const tag = tagMatch[1];
     log(`Latest Xray version: ${tag}, arch: ${arch}`);
 
-    // Download zip and extract with python3 — no unzip or apt-get required
+    // Ensure unzip is available
+    await ssh.execCommand(
+      `command -v unzip >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq unzip) || (yum install -y unzip)`,
+    );
+
+    // Download zip and extract
     const zipName = `Xray-linux-${arch}.zip`;
     const { stderr } = await ssh.execCommand(
       `curl -fsSL -o /tmp/${zipName} "https://github.com/XTLS/Xray-core/releases/download/${tag}/${zipName}" && ` +
-      `python3 -c "import zipfile; zipfile.ZipFile('/tmp/${zipName}').extract('xray', '/tmp/xray_extract')" && ` +
+      `mkdir -p /tmp/xray_extract && ` +
+      `unzip -o /tmp/${zipName} xray -d /tmp/xray_extract && ` +
       `mv /tmp/xray_extract/xray /usr/local/bin/xray && ` +
       `chmod +x /usr/local/bin/xray && ` +
       `rm -rf /tmp/${zipName} /tmp/xray_extract`,
