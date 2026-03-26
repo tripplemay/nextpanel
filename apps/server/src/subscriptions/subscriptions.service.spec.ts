@@ -12,6 +12,12 @@ const mockPrisma = {
     update: jest.fn(),
     delete: jest.fn(),
   },
+  node: {
+    findMany: jest.fn(),
+  },
+  externalNode: {
+    findMany: jest.fn(),
+  },
 } as unknown as PrismaService;
 
 const mockNodes = {
@@ -220,6 +226,7 @@ describe('SubscriptionsService – CRUD', () => {
   it('update replaces nodes when nodeIds is provided', async () => {
     const fakeSub = { id: 'sub-1', ownerId: 'owner-1' };
     (mockPrisma.subscription.findFirst as jest.Mock).mockResolvedValue(fakeSub);
+    (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([{ id: 'n1' }, { id: 'n2' }]);
     (mockPrisma.subscription.update as jest.Mock).mockResolvedValue(fakeSub);
 
     await svc.update('sub-1', undefined, ['n1', 'n2'], 'owner-1');
@@ -243,6 +250,7 @@ describe('SubscriptionsService – CRUD', () => {
   });
 
   it('create calls prisma with correct data', async () => {
+    (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([{ id: 'n1' }, { id: 'n2' }]);
     (mockPrisma.subscription.create as jest.Mock).mockResolvedValue({ id: 'sub-1' });
     await svc.create('My Sub', ['n1', 'n2'], 'owner-1');
     const call = (mockPrisma.subscription.create as jest.Mock).mock.calls[0][0];

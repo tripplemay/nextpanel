@@ -122,7 +122,8 @@ export default function AccountSettingsPage() {
         </Form>
       </Card>
 
-      {wxConfig?.configured && (
+      {/* TODO: 企业微信绑定暂时屏蔽，等可信IP配置完成后恢复 */}
+      {false && wxConfig?.configured && (
         <Card title="企业微信绑定" size="small" style={{ maxWidth: 400, marginTop: 16 }}>
           {bindStatus?.bound ? (
             <Space direction="vertical" size={12}>

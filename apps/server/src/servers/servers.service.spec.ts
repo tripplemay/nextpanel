@@ -146,7 +146,8 @@ describe('ServersService', () => {
 
       const result = await svc.findOne('srv-1', 'user-id-1');
 
-      expect(result).toBe(fakeServer);
+      const { sshAuthEnc, ...rest } = fakeServer;
+      expect(result).toEqual({ ...rest, credentialsDestroyed: false });
     });
 
     it('throws NotFoundException when server is missing', async () => {
