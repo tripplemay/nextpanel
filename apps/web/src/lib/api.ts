@@ -85,6 +85,9 @@ export const serversApi = {
   delete: (id: string, force?: boolean) => api.delete<void>(`/servers/${id}`, { params: force ? { force: 'true' } : {} }),
   testSsh: (id: string) => api.post<{ success: boolean; message: string }>(`/servers/${id}/test-ssh`),
   checkIp: (ip: string) => api.get<{ exists: boolean }>('/servers/check-ip', { params: { ip } }),
+  destroyCredentials: (id: string) => api.post<{ success: boolean }>(`/servers/${id}/destroy-credentials`),
+  restoreCredentials: (id: string, data: { sshAuth: string; sshAuthType: 'PASSWORD' | 'KEY' }) =>
+    api.patch<{ success: boolean }>(`/servers/${id}/restore-credentials`, data),
 };
 
 // ── Nodes ─────────────────────────────────────────────

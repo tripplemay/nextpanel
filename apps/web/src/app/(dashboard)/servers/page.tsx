@@ -358,7 +358,10 @@ export default function ServersPage() {
       dataIndex: 'status',
       render: (status: string, record) => (
         <Space direction="vertical" size={2}>
-          <StatusTag status={status} />
+          <Space size={4}>
+            <StatusTag status={status} />
+            {record.credentialsDestroyed && <Tag color="red">凭证已销毁</Tag>}
+          </Space>
           <Text style={{ fontSize: 11, color: heartbeatColor(record.lastSeenAt) }}>
             {record.lastSeenAt ? dayjs(record.lastSeenAt).fromNow() : '从未连接'}
           </Text>

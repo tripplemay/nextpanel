@@ -1,4 +1,4 @@
-import { Injectable, Logger, MessageEvent, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, MessageEvent, NotFoundException, BadRequestException } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
@@ -43,6 +43,9 @@ export class AutoSetupService {
     const server = await this.prisma.server.findUnique({ where: { id: serverId } });
     if (!server) throw new NotFoundException(`Server ${serverId} not found`);
 
+    if (!server.sshAuthEnc) {
+      throw new BadRequestException('SSH 凭证已销毁，请先在服务器详情页恢复凭证');
+    }
     const sshAuth = this.crypto.decrypt(server.sshAuthEnc);
 
     log(`=== 开始自动配置服务器: ${server.name} (${server.ip}) ===`);

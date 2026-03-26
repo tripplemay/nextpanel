@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, MessageEvent } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, MessageEvent } from '@nestjs/common';
 import { NodeSSH } from 'node-ssh';
 import { Observable } from 'rxjs';
 import { PrismaService } from '../prisma.service';
@@ -10,6 +10,7 @@ import { IpCheckService } from '../ip-check/ip-check.service';
 import { connectSsh } from '../nodes/ssh/ssh.util';
 import { CreateServerDto } from './dto/create-server.dto';
 import { UpdateServerDto } from './dto/update-server.dto';
+import { RestoreCredentialsDto } from './dto/restore-credentials.dto';
 
 @Injectable()
 export class ServersService {
@@ -51,20 +52,25 @@ export class ServersService {
   }
 
   async findAll(userId: string) {
-    return this.prisma.server.findMany({
+    const servers = await this.prisma.server.findMany({
       where: { userId },
-      select: { ...this.safeSelect(), ipCheck: { select: { gfwBlocked: true } } },
+      select: { ...this.safeSelect(), sshAuthEnc: true, ipCheck: { select: { gfwBlocked: true } } },
       orderBy: { createdAt: 'desc' },
     });
+    return servers.map(({ sshAuthEnc, ...rest }) => ({
+      ...rest,
+      credentialsDestroyed: !sshAuthEnc,
+    }));
   }
 
   async findOne(id: string, userId: string) {
     const server = await this.prisma.server.findFirst({
       where: { id, userId },
-      select: { ...this.safeSelect(), ipCheck: { select: { gfwBlocked: true } } },
+      select: { ...this.safeSelect(), sshAuthEnc: true, ipCheck: { select: { gfwBlocked: true } } },
     });
     if (!server) throw new NotFoundException(`Server ${id} not found`);
-    return server;
+    const { sshAuthEnc, ...rest } = server;
+    return { ...rest, credentialsDestroyed: !sshAuthEnc };
   }
 
   async update(id: string, dto: UpdateServerDto, userId: string) {
@@ -174,6 +180,9 @@ export class ServersService {
     const server = await this.prisma.server.findFirst({ where: { id, userId } });
     if (!server) throw new NotFoundException(`Server ${id} not found`);
 
+    if (!server.sshAuthEnc) {
+      throw new BadRequestException('SSH 凭证已销毁，请先在服务器详情页恢复凭证');
+    }
     const sshAuth = this.crypto.decrypt(server.sshAuthEnc);
     const ssh = new NodeSSH();
 
@@ -256,6 +265,9 @@ export class ServersService {
       throw new Error('agentToken 包含无效字符');
     }
 
+    if (!server.sshAuthEnc) {
+      throw new BadRequestException('SSH 凭证已销毁，请先在服务器详情页恢复凭证');
+    }
     const sshAuth = this.crypto.decrypt(server.sshAuthEnc);
 
     onLog(`正在连接 ${server.ip}...`);
@@ -474,6 +486,27 @@ export class ServersService {
       data: { pendingAgentUpdate: true },
     });
     return { ok: true, count };
+  }
+
+  async destroyCredentials(id: string, userId: string) {
+    const server = await this.prisma.server.findFirst({ where: { id, userId } });
+    if (!server) throw new NotFoundException('服务器不存在');
+    await this.prisma.server.update({
+      where: { id },
+      data: { sshAuthEnc: '' },
+    });
+    return { success: true };
+  }
+
+  async restoreCredentials(id: string, userId: string, dto: RestoreCredentialsDto) {
+    const server = await this.prisma.server.findFirst({ where: { id, userId } });
+    if (!server) throw new NotFoundException('服务器不存在');
+    const sshAuthEnc = this.crypto.encrypt(dto.sshAuth);
+    await this.prisma.server.update({
+      where: { id },
+      data: { sshAuthEnc, sshAuthType: dto.sshAuthType },
+    });
+    return { success: true };
   }
 
   /** Returns a select object that excludes sshAuthEnc */

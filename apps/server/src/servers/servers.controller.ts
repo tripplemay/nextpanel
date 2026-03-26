@@ -23,6 +23,7 @@ import { ServersService } from './servers.service';
 import { AutoSetupService } from './auto-setup.service';
 import { CreateServerDto } from './dto/create-server.dto';
 import { UpdateServerDto } from './dto/update-server.dto';
+import { RestoreCredentialsDto } from './dto/restore-credentials.dto';
 
 @ApiTags('servers')
 @ApiBearerAuth()
@@ -105,6 +106,29 @@ export class ServersController {
     @CurrentUser() user: { id: string },
   ) {
     return this.serversService.testSsh(id, user.id);
+  }
+
+  @Post(':id/destroy-credentials')
+  @Roles('ADMIN', 'OPERATOR')
+  @Audit('UPDATE', 'server')
+  @ApiOperation({ summary: 'Destroy SSH credentials for a server' })
+  destroyCredentials(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.serversService.destroyCredentials(id, user.id);
+  }
+
+  @Patch(':id/restore-credentials')
+  @Roles('ADMIN', 'OPERATOR')
+  @Audit('UPDATE', 'server')
+  @ApiOperation({ summary: 'Restore SSH credentials for a server' })
+  restoreCredentials(
+    @Param('id') id: string,
+    @Body() dto: RestoreCredentialsDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.serversService.restoreCredentials(id, user.id, dto);
   }
 
   @Post(':id/agent-update')

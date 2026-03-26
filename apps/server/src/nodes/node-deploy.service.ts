@@ -1,5 +1,5 @@
 import * as crypto from 'crypto';
-import { Injectable, Logger, MessageEvent, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, MessageEvent, NotFoundException, BadRequestException } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { NodeSSH } from 'node-ssh';
 import { PrismaService } from '../prisma.service';
@@ -100,6 +100,9 @@ export class NodeDeployService {
 
     // ── 3. SSH connect ───────────────────────────────────────────────────────
     const server = node.server;
+    if (!server.sshAuthEnc) {
+      throw new BadRequestException('SSH 凭证已销毁，请先在服务器详情页恢复凭证');
+    }
     const sshAuth = this.crypto.decrypt(server.sshAuthEnc);
     let ssh: NodeSSH | null = null;
 
@@ -291,6 +294,9 @@ export class NodeDeployService {
     });
     if (!node) throw new NotFoundException(`节点 ${nodeId} 不存在`);
 
+    if (!node.server.sshAuthEnc) {
+      throw new BadRequestException('SSH 凭证已销毁，请先在服务器详情页恢复凭证');
+    }
     const sshAuth = this.crypto.decrypt(node.server.sshAuthEnc);
     const serviceName = `nextpanel-${node.id}`;
     const undeployLogs: string[] = [];
@@ -391,6 +397,9 @@ export class NodeDeployService {
     });
     if (!node) return;
 
+    if (!node.server.sshAuthEnc) {
+      throw new BadRequestException('SSH 凭证已销毁，请先在服务器详情页恢复凭证');
+    }
     const sshAuth = this.crypto.decrypt(node.server.sshAuthEnc);
     const serviceName = `nextpanel-${node.id}`;
 
@@ -428,6 +437,9 @@ export class NodeDeployService {
     });
     if (!node) throw new NotFoundException(`Node ${nodeId} not found`);
 
+    if (!node.server.sshAuthEnc) {
+      throw new BadRequestException('SSH 凭证已销毁，请先在服务器详情页恢复凭证');
+    }
     const sshAuth = this.crypto.decrypt(node.server.sshAuthEnc);
     const serviceName = `nextpanel-${node.id}`;
     const cmd = enable
@@ -466,6 +478,9 @@ export class NodeDeployService {
     if (!node) throw new NotFoundException(`Node ${nodeId} not found`);
     if (!node.domain) return;
 
+    if (!node.server.sshAuthEnc) {
+      throw new BadRequestException('SSH 凭证已销毁，请先在服务器详情页恢复凭证');
+    }
     const sshAuth = this.crypto.decrypt(node.server.sshAuthEnc);
     const serviceName = `nextpanel-${node.id}`;
     const baseDomain = node.domain.split('.').slice(1).join('.');

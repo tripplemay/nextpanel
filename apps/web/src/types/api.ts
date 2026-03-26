@@ -193,6 +193,7 @@ export interface Server {
   agentVersion: string | null;
   agentToken: string;
   pendingAgentUpdate: boolean;
+  credentialsDestroyed: boolean;
   deleteError: string | null;
   createdAt: string;
   updatedAt: string;

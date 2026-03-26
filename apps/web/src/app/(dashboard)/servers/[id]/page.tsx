@@ -1,12 +1,13 @@
 'use client';
 
-import { use, useState, useEffect } from 'react';
+import { use, useState, useEffect, useCallback } from 'react';
 import { Grid } from 'antd';
 import { useRouter } from 'next/navigation';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 import {
+  App,
   Card,
   Row,
   Col,
@@ -21,6 +22,11 @@ import {
   Badge,
   Statistic,
   Tooltip as AntTooltip,
+  Alert,
+  Modal,
+  Form,
+  Select,
+  Input,
 } from 'antd';
 import { ArrowLeftOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
@@ -36,6 +42,7 @@ import {
 } from 'recharts';
 import { serversApi, metricsApi, nodesApi, operationLogsApi } from '@/lib/api';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
+import { ExclamationCircleOutlined } from '@ant-design/icons';
 import StatusTag from '@/components/common/StatusTag';
 import IpCheckCard from '@/components/servers/IpCheckCard';
 import ServerTagList from '@/components/servers/ServerTagList';
@@ -86,14 +93,50 @@ export default function ServerDetailPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const { message, modal } = App.useApp();
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
   const qc = useQueryClient();
+  const [restoreModalOpen, setRestoreModalOpen] = useState(false);
+  const [restoreForm] = Form.useForm();
 
   const updateTagsMutation = useMutation({
     mutationFn: (tags: string[]) => serversApi.update(id, { tags }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['server', id] }),
   });
+
+  const destroyCredentialsMutation = useMutation({
+    mutationFn: () => serversApi.destroyCredentials(id),
+    onSuccess: () => {
+      message.success('SSH 凭证已销毁');
+      qc.invalidateQueries({ queryKey: ['server', id] });
+    },
+    onError: () => message.error('销毁凭证失败'),
+  });
+
+  const restoreCredentialsMutation = useMutation({
+    mutationFn: (data: { sshAuth: string; sshAuthType: 'PASSWORD' | 'KEY' }) =>
+      serversApi.restoreCredentials(id, data),
+    onSuccess: () => {
+      message.success('SSH 凭证已恢复');
+      qc.invalidateQueries({ queryKey: ['server', id] });
+      setRestoreModalOpen(false);
+      restoreForm.resetFields();
+    },
+    onError: () => message.error('恢复凭证失败'),
+  });
+
+  const handleDestroyCredentials = useCallback(() => {
+    modal.confirm({
+      title: '确认销毁 SSH 凭证？',
+      icon: <ExclamationCircleOutlined />,
+      content: '销毁后将无法通过面板进行部署、删除等需要 SSH 连接的管理操作。此操作可通过"恢复凭证"撤销。',
+      okText: '确认销毁',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: () => destroyCredentialsMutation.mutateAsync(),
+    });
+  }, [modal, destroyCredentialsMutation]);
 
   const { data: server, isLoading: serverLoading } = useQuery({
     queryKey: ['server', id],
@@ -297,6 +340,14 @@ export default function ServerDetailPage({
         </Col>
         <Col xs={24} md={12}>
           <Card title="SSH 配置" size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+            {server.credentialsDestroyed && (
+              <Alert
+                type="warning"
+                showIcon
+                message="SSH 凭证已销毁，部署、删除等管理操作不可用"
+                style={{ marginBottom: 12 }}
+              />
+            )}
             <Descriptions column={1} size="small">
               <Descriptions.Item label="SSH 端口">{server.sshPort}</Descriptions.Item>
               <Descriptions.Item label="SSH 用户">{server.sshUser}</Descriptions.Item>
@@ -304,7 +355,69 @@ export default function ServerDetailPage({
                 <Tag>{server.sshAuthType === 'KEY' ? '私钥' : '密码'}</Tag>
               </Descriptions.Item>
             </Descriptions>
+            <div style={{ marginTop: 12 }}>
+              {server.credentialsDestroyed ? (
+                <Button type="primary" onClick={() => setRestoreModalOpen(true)}>
+                  恢复凭证
+                </Button>
+              ) : (
+                <Button
+                  danger
+                  loading={destroyCredentialsMutation.isPending}
+                  onClick={handleDestroyCredentials}
+                >
+                  销毁凭证
+                </Button>
+              )}
+            </div>
           </Card>
+          <Modal
+            title="恢复 SSH 凭证"
+            open={restoreModalOpen}
+            onCancel={() => { setRestoreModalOpen(false); restoreForm.resetFields(); }}
+            onOk={() => restoreForm.submit()}
+            confirmLoading={restoreCredentialsMutation.isPending}
+            okText="确认恢复"
+            cancelText="取消"
+          >
+            <Form
+              form={restoreForm}
+              layout="vertical"
+              initialValues={{ sshAuthType: 'PASSWORD' }}
+              onFinish={(values) => restoreCredentialsMutation.mutate(values)}
+            >
+              <Form.Item
+                name="sshAuthType"
+                label="认证方式"
+                rules={[{ required: true, message: '请选择认证方式' }]}
+              >
+                <Select
+                  options={[
+                    { value: 'PASSWORD', label: '密码' },
+                    { value: 'KEY', label: '私钥' },
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item noStyle shouldUpdate={(prev, cur) => prev.sshAuthType !== cur.sshAuthType}>
+                {({ getFieldValue }) => (
+                  <Form.Item
+                    name="sshAuth"
+                    label={getFieldValue('sshAuthType') === 'KEY' ? 'SSH 私钥' : 'SSH 密码'}
+                    rules={[{ required: true, message: '请输入凭证内容' }]}
+                  >
+                    <Input.TextArea
+                      rows={getFieldValue('sshAuthType') === 'KEY' ? 6 : 2}
+                      placeholder={
+                        getFieldValue('sshAuthType') === 'KEY'
+                          ? '请粘贴 SSH 私钥内容（-----BEGIN ... KEY-----）'
+                          : '请输入 SSH 密码'
+                      }
+                    />
+                  </Form.Item>
+                )}
+              </Form.Item>
+            </Form>
+          </Modal>
         </Col>
       </Row>
 

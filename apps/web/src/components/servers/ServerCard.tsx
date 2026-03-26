@@ -155,7 +155,10 @@ export default function ServerCard({
 
       {/* 状态 + 延迟 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <StatusTag status={server.status} />
+        <Space size={4}>
+          <StatusTag status={server.status} />
+          {server.credentialsDestroyed && <Tag color="red">凭证已销毁</Tag>}
+        </Space>
         <Space size={8}>
           {server.pingMs != null && (
             <Text style={{ fontSize: 12, color: pingColor(server.pingMs) }}>
