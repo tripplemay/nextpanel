@@ -272,6 +272,44 @@ export interface SubscriptionShare {
   user: { id: string; username: string; role: string };
 }
 
+export interface OpenRouterSetting {
+  id: string;
+  model: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertOpenRouterSettingDto {
+  apiKey: string;
+  model?: string;
+}
+
+export interface ServerRecommendCategory {
+  id: string;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  recommends: ServerRecommend[];
+  createdAt: string;
+}
+
+export interface ServerRecommend {
+  id: string;
+  categoryId: string;
+  name: string;
+  price: string;
+  regions: string[];
+  link: string;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface ExtractResult {
+  name: string;
+  price: string;
+  regions: string[];
+}
+
 export interface AuditLog {
   id: string;
   actor: { username: string };

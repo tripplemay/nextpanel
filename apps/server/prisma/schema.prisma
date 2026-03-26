@@ -435,6 +435,44 @@ model WxWorkSetting {
   updatedAt  DateTime @updatedAt
 }
 
+// ──────────────────────────── OpenRouterSetting ────────────────────────────
+
+model OpenRouterSetting {
+  id         String   @id @default(cuid())
+  apiKeyEnc  String
+  model      String   @default("anthropic/claude-sonnet-4")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ──────────────────────────── ServerRecommend ────────────────────────────
+
+model ServerRecommendCategory {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  recommends  ServerRecommend[]
+}
+
+model ServerRecommend {
+  id         String                  @id @default(cuid())
+  category   ServerRecommendCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId String
+  name       String
+  price      String
+  regions    String[]
+  link       String
+  sortOrder  Int                     @default(0)
+  createdAt  DateTime                @default(now())
+  updatedAt  DateTime                @updatedAt
+
+  @@index([categoryId])
+}
+
 // ──────────────────────────── CloudflareSetting ────────────────────────────
 
 model CloudflareSetting {

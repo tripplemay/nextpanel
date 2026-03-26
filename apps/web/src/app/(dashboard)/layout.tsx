@@ -19,6 +19,8 @@ import {
   LockOutlined,
   MenuOutlined,
   ImportOutlined,
+  StarOutlined,
+  ApiOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/auth';
 import { authApi } from '@/lib/api';
@@ -35,6 +37,7 @@ const baseMenuItems: ItemType[] = [
   { key: '/nodes', icon: <NodeIndexOutlined />, label: '节点管理' },
   { key: '/external-nodes', icon: <ImportOutlined />, label: '外部节点' },
   { key: '/subscriptions', icon: <LinkOutlined />, label: '订阅管理' },
+  { key: '/recommends', icon: <StarOutlined />, label: '服务器推荐' },
   { key: '/audit-logs', icon: <AuditOutlined />, label: '审计日志' },
   {
     key: 'settings',
@@ -43,6 +46,8 @@ const baseMenuItems: ItemType[] = [
     children: [
       { key: '/settings/cloudflare', icon: <CloudOutlined />, label: 'Cloudflare DNS' },
       { key: '/settings/wxwork', icon: <TeamOutlined />, label: '企业微信' },
+      { key: '/settings/openrouter', icon: <ApiOutlined />, label: 'OpenRouter' },
+      { key: '/settings/recommends', icon: <StarOutlined />, label: '服务器推荐' },
       { key: '/settings/account', icon: <LockOutlined />, label: '账户安全' },
     ],
   },

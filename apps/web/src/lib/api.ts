@@ -28,6 +28,10 @@ import type {
   UserRecord,
   InviteCode,
   ServerIpCheck,
+  OpenRouterSetting,
+  UpsertOpenRouterSettingDto,
+  ServerRecommendCategory,
+  ExtractResult,
 } from '@/types/api';
 
 export const api = axios.create({
@@ -192,6 +196,25 @@ export const wxWorkApi = {
   getSettings: () => api.get<WxWorkSetting | null>('/wxwork/settings'),
   upsertSettings: (data: UpsertWxWorkSettingDto) => api.put<WxWorkSetting>('/wxwork/settings', data),
   removeSettings: () => api.delete<void>('/wxwork/settings'),
+};
+
+// ── OpenRouter ───────────────────────────────────────
+export const openRouterApi = {
+  getSettings: () => api.get<OpenRouterSetting | null>('/openrouter/settings'),
+  upsertSettings: (data: UpsertOpenRouterSettingDto) => api.put<OpenRouterSetting>('/openrouter/settings', data),
+  removeSettings: () => api.delete<void>('/openrouter/settings'),
+};
+
+// ── Recommends ───────────────────────────────────────
+export const recommendsApi = {
+  list: () => api.get<ServerRecommendCategory[]>('/recommends'),
+  createCategory: (data: { name: string; description?: string; sortOrder?: number }) => api.post('/recommends/categories', data),
+  updateCategory: (id: string, data: { name?: string; description?: string; sortOrder?: number }) => api.patch(`/recommends/categories/${id}`, data),
+  removeCategory: (id: string) => api.delete(`/recommends/categories/${id}`),
+  extract: (url: string) => api.post<ExtractResult>('/recommends/extract', { url }),
+  create: (data: { categoryId: string; name: string; price: string; regions: string[]; link: string; sortOrder?: number }) => api.post('/recommends', data),
+  update: (id: string, data: { name?: string; price?: string; regions?: string[]; link?: string; sortOrder?: number }) => api.patch(`/recommends/${id}`, data),
+  remove: (id: string) => api.delete(`/recommends/${id}`),
 };
 
 // ── Cloudflare ────────────────────────────────────────

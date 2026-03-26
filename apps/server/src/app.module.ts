@@ -19,6 +19,8 @@ import { UsersModule } from './users/users.module';
 import { ExternalNodesModule } from './external-nodes/external-nodes.module';
 import { IpCheckModule } from './ip-check/ip-check.module';
 import { WxWorkModule } from './wxwork/wxwork.module';
+import { OpenRouterModule } from './openrouter/openrouter.module';
+import { RecommendsModule } from './recommends/recommends.module';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 
 @Module({
@@ -42,6 +44,8 @@ import { AuditInterceptor } from './common/interceptors/audit.interceptor';
     ExternalNodesModule,
     IpCheckModule,
     WxWorkModule,
+    OpenRouterModule,
+    RecommendsModule,
   ],
   providers: [
     {

@@ -1,0 +1,108 @@
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { OpenRouterSettingsService } from './openrouter-settings.service';
+
+export interface ExtractResult {
+  name: string;
+  price: string;
+  regions: string[];
+}
+
+@Injectable()
+export class OpenRouterService {
+  private readonly logger = new Logger(OpenRouterService.name);
+
+  constructor(private readonly settings: OpenRouterSettingsService) {}
+
+  async extractFromUrl(url: string): Promise<ExtractResult> {
+    const config = await this.settings.getDecrypted();
+    if (!config) throw new BadRequestException('OpenRouter 未配置');
+
+    // Step 1: Fetch the URL HTML
+    let html: string;
+    try {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(15_000),
+        redirect: 'follow',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        },
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      html = await res.text();
+    } catch (err) {
+      this.logger.error(`Failed to fetch URL ${url}: ${err}`);
+      throw new BadRequestException(`无法访问该 URL: ${err}`);
+    }
+
+    // Step 2: Strip HTML to plain text
+    let text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // Step 3: Truncate to 8000 chars
+    if (text.length > 8000) {
+      text = text.slice(0, 8000);
+    }
+
+    // Step 4: Call OpenRouter API
+    const systemPrompt =
+      '你是一个VPS服务商信息提取助手。从以下网页内容中提取：1.服务商名称 2.最低价格(含周期) 3.支持的地区/机房位置。返回JSON格式：{"name":"...","price":"...","regions":["..."]}';
+
+    let responseText: string;
+    try {
+      const apiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: config.model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: text },
+          ],
+        }),
+        signal: AbortSignal.timeout(60_000),
+      });
+
+      if (!apiRes.ok) {
+        const errBody = await apiRes.text();
+        this.logger.error(`OpenRouter API error: ${apiRes.status} ${errBody}`);
+        throw new Error(`OpenRouter API HTTP ${apiRes.status}`);
+      }
+
+      const data = (await apiRes.json()) as {
+        choices?: { message?: { content?: string } }[];
+      };
+      responseText = data.choices?.[0]?.message?.content ?? '';
+    } catch (err) {
+      this.logger.error(`OpenRouter API call failed: ${err}`);
+      throw new BadRequestException(`AI 提取失败: ${err}`);
+    }
+
+    // Step 5: Parse JSON from response
+    try {
+      // Extract JSON from potential markdown code block
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No JSON found in response');
+      }
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        name: parsed.name ?? '',
+        price: parsed.price ?? '',
+        regions: Array.isArray(parsed.regions) ? parsed.regions : [],
+      };
+    } catch (err) {
+      this.logger.error(`Failed to parse AI response: ${responseText}`);
+      throw new BadRequestException('AI 返回格式无法解析');
+    }
+  }
+}
