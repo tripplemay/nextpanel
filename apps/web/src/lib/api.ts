@@ -203,6 +203,8 @@ export const openRouterApi = {
   getSettings: () => api.get<OpenRouterSetting | null>('/openrouter/settings'),
   upsertSettings: (data: UpsertOpenRouterSettingDto) => api.put<OpenRouterSetting>('/openrouter/settings', data),
   removeSettings: () => api.delete<void>('/openrouter/settings'),
+  listModels: () => api.get<{ id: string; name: string; promptPrice: string; completionPrice: string }[]>('/openrouter/models'),
+  test: (model?: string) => api.post<{ success: boolean; message: string }>('/openrouter/test', { model }),
 };
 
 // ── Recommends ───────────────────────────────────────

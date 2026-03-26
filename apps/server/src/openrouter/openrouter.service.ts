@@ -13,6 +13,67 @@ export class OpenRouterService {
 
   constructor(private readonly settings: OpenRouterSettingsService) {}
 
+  /** Fetch available models from OpenRouter */
+  async listModels(): Promise<{ id: string; name: string; promptPrice: string; completionPrice: string }[]> {
+    const config = await this.settings.getDecrypted();
+    if (!config) throw new BadRequestException('OpenRouter 未配置');
+
+    const res = await fetch('https://openrouter.ai/api/v1/models', {
+      headers: { Authorization: `Bearer ${config.apiKey}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!res.ok) {
+      throw new BadRequestException(`获取模型列表失败：HTTP ${res.status}`);
+    }
+
+    const data = (await res.json()) as {
+      data: { id: string; name: string; pricing: { prompt: string; completion: string } }[];
+    };
+
+    return (data.data ?? []).map((m) => ({
+      id: m.id,
+      name: m.name,
+      promptPrice: m.pricing?.prompt ?? '0',
+      completionPrice: m.pricing?.completion ?? '0',
+    }));
+  }
+
+  /** Test API key validity and model availability */
+  async testConnection(model?: string): Promise<{ success: boolean; message: string }> {
+    const config = await this.settings.getDecrypted();
+    if (!config) throw new BadRequestException('OpenRouter 未配置');
+
+    const targetModel = model ?? config.model;
+
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: targetModel,
+          messages: [{ role: 'user', content: 'hi' }],
+          max_tokens: 5,
+        }),
+        signal: AbortSignal.timeout(30_000),
+      });
+
+      if (!res.ok) {
+        const body = await res.text();
+        if (res.status === 401) return { success: false, message: 'API Key 无效' };
+        if (res.status === 404) return { success: false, message: `模型 ${targetModel} 不可用` };
+        return { success: false, message: `请求失败：HTTP ${res.status} ${body}` };
+      }
+
+      return { success: true, message: `连接成功，模型 ${targetModel} 可用` };
+    } catch (err) {
+      return { success: false, message: `连接失败：${err}` };
+    }
+  }
+
   async extractFromUrl(url: string): Promise<ExtractResult> {
     const config = await this.settings.getDecrypted();
     if (!config) throw new BadRequestException('OpenRouter 未配置');
