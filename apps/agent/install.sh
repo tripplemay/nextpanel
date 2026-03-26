@@ -13,6 +13,18 @@ if [ -z "$PANEL_URL" ] || [ -z "$AGENT_TOKEN" ]; then
   exit 1
 fi
 
+# Validate PANEL_URL format
+if ! echo "$PANEL_URL" | grep -qE '^https?://'; then
+  echo "错误: PANEL_URL 必须以 http:// 或 https:// 开头"
+  exit 1
+fi
+
+# Validate AGENT_TOKEN length
+if [ ${#AGENT_TOKEN} -lt 10 ]; then
+  echo "错误: AGENT_TOKEN 无效（太短）"
+  exit 1
+fi
+
 echo "[1/6] 检测系统架构..."
 ARCH=$(uname -m)
 case $ARCH in

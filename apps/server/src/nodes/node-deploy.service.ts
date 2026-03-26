@@ -111,7 +111,7 @@ export class NodeDeployService {
         username: server.sshUser,
         authType: server.sshAuthType as 'KEY' | 'PASSWORD',
         auth: sshAuth,
-        readyTimeout: 10000,
+        readyTimeout: 30000,
       });
       log(`SSH connected to ${server.ip}:${server.sshPort}`);
 
@@ -209,6 +209,11 @@ export class NodeDeployService {
       );
       if (startErr) log(`Start warning: ${startErr}`);
 
+      // Verify service actually started
+      await new Promise((r) => setTimeout(r, 2000));
+      const { stdout: activeStatus } = await ssh.execCommand(`systemctl is-active ${serviceName}`);
+      log(`Service post-start status: ${activeStatus.trim()}`);
+
       // ── 9. Open firewall port (best-effort) ───────────────────────────────
       for (const proto of this.getFirewallProtocols(node.protocol)) {
         await this.openFirewallPort(ssh, node.listenPort, proto, log);
@@ -304,7 +309,7 @@ export class NodeDeployService {
         username: node.server.sshUser,
         authType: node.server.sshAuthType as 'KEY' | 'PASSWORD',
         auth: sshAuth,
-        readyTimeout: 10000,
+        readyTimeout: 30000,
       });
       trackLog('SSH 已连接');
 
@@ -397,7 +402,7 @@ export class NodeDeployService {
         username: node.server.sshUser,
         authType: node.server.sshAuthType as 'KEY' | 'PASSWORD',
         auth: sshAuth,
-        readyTimeout: 10000,
+        readyTimeout: 30000,
       });
       await ssh.execCommand(
         `systemctl stop ${serviceName}; systemctl disable ${serviceName}; ` +
@@ -437,7 +442,7 @@ export class NodeDeployService {
         username: node.server.sshUser,
         authType: node.server.sshAuthType as 'KEY' | 'PASSWORD',
         auth: sshAuth,
-        readyTimeout: 10000,
+        readyTimeout: 30000,
       });
       await ssh.execCommand(cmd);
       ssh.dispose();
@@ -473,7 +478,7 @@ export class NodeDeployService {
         username: node.server.sshUser,
         authType: node.server.sshAuthType as 'KEY' | 'PASSWORD',
         auth: sshAuth,
-        readyTimeout: 10000,
+        readyTimeout: 30000,
       });
       await this.certService.pushCertToNode(ssh, node.id, baseDomain, (msg) =>
         this.logger.log(`[refreshCert ${nodeId}] ${msg}`),
@@ -690,10 +695,14 @@ export class NodeDeployService {
     log?.(`Opening firewall port ${port}/${proto}...`);
     try {
       // If ufw is active, delegate entirely to ufw (mixing ufw + raw iptables breaks ufw chains).
+      // If firewalld is active, use firewall-cmd.
       // Otherwise fall back to direct iptables + netfilter-persistent for persistence.
       await ssh.execCommand(
         `if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then ` +
         `  ufw allow ${port}/${proto} 2>/dev/null || true; ` +
+        `elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null | grep -q running; then ` +
+        `  firewall-cmd --permanent --add-port=${port}/${proto} 2>/dev/null || true; ` +
+        `  firewall-cmd --reload 2>/dev/null || true; ` +
         `else ` +
         `  iptables -C INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || ` +
         `  iptables -I INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || true; ` +
@@ -726,6 +735,9 @@ export class NodeDeployService {
       await ssh.execCommand(
         `if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then ` +
         `  ufw delete allow ${port}/${proto} 2>/dev/null || true; ` +
+        `elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null | grep -q running; then ` +
+        `  firewall-cmd --permanent --remove-port=${port}/${proto} 2>/dev/null || true; ` +
+        `  firewall-cmd --reload 2>/dev/null || true; ` +
         `else ` +
         `  iptables -D INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || true; ` +
         `  command -v netfilter-persistent >/dev/null 2>&1 && netfilter-persistent save 2>/dev/null || true; ` +

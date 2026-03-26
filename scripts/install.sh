@@ -204,9 +204,24 @@ chmod 755 "$LOG_DIR"
 
 # ── 步骤 12：克隆代码仓库 ────────────────────────────────────────────────
 
+# Pre-flight check: verify git repo is accessible
+info "正在检查代码仓库可访问性..."
+if ! git ls-remote --exit-code "$REPO_URL" HEAD > /dev/null 2>&1; then
+  fail "无法访问代码仓库：$REPO_URL（请检查网络连接或仓库地址）"
+fi
+ok "代码仓库可访问"
+
 if [ ! -d "$APP_DIR/.git" ]; then
   info "正在克隆 NextPanel 代码仓库..."
-  git clone --depth 1 "$REPO_URL" "$APP_DIR" > /dev/null 2>&1 || fail "代码仓库克隆失败"
+  if ! git clone --depth 1 "$REPO_URL" "$APP_DIR" > /dev/null 2>&1; then
+    # Clean up partial clone if any
+    rm -rf "$APP_DIR"
+    fail "代码仓库克隆失败，请检查磁盘空间和网络连接"
+  fi
+  if [ ! -f "$APP_DIR/package.json" ]; then
+    rm -rf "$APP_DIR"
+    fail "代码仓库克隆不完整：缺少 package.json"
+  fi
   ok "代码仓库克隆完成"
 else
   info "代码仓库已存在，正在拉取最新代码..."

@@ -245,6 +245,23 @@ cmd_restore() {
   sudo -u postgres dropdb nextpanel --if-exists 2>/dev/null
   sudo -u postgres createdb nextpanel -O nextpanel 2>/dev/null
   gunzip < "$BACKUP_FILE" | sudo -u postgres psql -d nextpanel > /dev/null 2>&1
+  if [ $? -ne 0 ]; then
+    warn "恢复失败，正在回滚到安全备份..."
+    # Find the latest safety backup (the one we just created before restore)
+    SAFETY_BACKUP=$(ls -t "$BACKUP_DIR"/nextpanel_*.sql.gz 2>/dev/null | head -1)
+    if [ -n "$SAFETY_BACKUP" ] && [ "$SAFETY_BACKUP" != "$BACKUP_FILE" ]; then
+      sudo -u postgres dropdb nextpanel --if-exists 2>/dev/null
+      sudo -u postgres createdb nextpanel -O nextpanel 2>/dev/null
+      if gunzip < "$SAFETY_BACKUP" | sudo -u postgres psql -d nextpanel > /dev/null 2>&1; then
+        ok "已回滚到安全备份：$SAFETY_BACKUP"
+      else
+        fail "回滚也失败了，数据库可能处于不一致状态，请手动恢复"
+      fi
+    else
+      fail "未找到可用的安全备份进行回滚，数据库可能处于不一致状态"
+    fi
+    fail "数据库恢复失败，已回滚到恢复前的状态"
+  fi
   ok "数据库已恢复"
 
   info "正在重启服务..."

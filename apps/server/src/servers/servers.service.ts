@@ -248,6 +248,14 @@ export class ServersService {
     if (!panelUrl) throw new Error('未配置 PANEL_URL 环境变量');
     if (!githubRepo) throw new Error('未配置 GITHUB_REPO 环境变量');
 
+    // Sanitize values to prevent command injection
+    if (!/^https?:\/\/[a-zA-Z0-9._:@\/-]+$/.test(panelUrl)) {
+      throw new Error('PANEL_URL 包含无效字符');
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(server.agentToken)) {
+      throw new Error('agentToken 包含无效字符');
+    }
+
     const sshAuth = this.crypto.decrypt(server.sshAuthEnc);
 
     onLog(`正在连接 ${server.ip}...`);
