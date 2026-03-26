@@ -130,7 +130,7 @@ export class OpenRouterService {
             { role: 'user', content: text },
           ],
         }),
-        signal: AbortSignal.timeout(60_000),
+        signal: AbortSignal.timeout(120_000),
       });
 
       if (!apiRes.ok) {

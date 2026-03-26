@@ -7,8 +7,11 @@ interface WxWorkAccessToken {
 }
 
 interface WxWorkUserTicket {
-  userId: string;
+  UserId?: string;
+  userid?: string;
   user_ticket?: string;
+  errcode?: number;
+  errmsg?: string;
 }
 
 interface WxWorkUserInfo {
@@ -56,13 +59,16 @@ export class WxWorkService {
       `https://qyapi.weixin.qq.com/cgi-bin/auth/getuserinfo?access_token=${accessToken}&code=${code}`,
       config.proxyUrl,
     );
-    if (!userTicket.userId) {
-      throw new BadRequestException('企业微信授权失败：无法获取用户ID');
+    // WeChat Work API returns UserId (capital U) or userid depending on version
+    const wxUserId = userTicket.UserId ?? userTicket.userid;
+    if (!wxUserId) {
+      this.logger.error(`getuserinfo response: ${JSON.stringify(userTicket)}`);
+      throw new BadRequestException(`企业微信授权失败：无法获取用户ID（errcode: ${userTicket.errcode}, errmsg: ${userTicket.errmsg}）`);
     }
 
     // Step 3: Get user detail
     const userInfo = await this.fetchJson<WxWorkUserInfo>(
-      `https://qyapi.weixin.qq.com/cgi-bin/user/get?access_token=${accessToken}&userid=${userTicket.userId}`,
+      `https://qyapi.weixin.qq.com/cgi-bin/user/get?access_token=${accessToken}&userid=${wxUserId}`,
       config.proxyUrl,
     );
     if (userInfo.errcode !== 0) {
