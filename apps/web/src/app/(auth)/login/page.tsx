@@ -74,7 +74,8 @@ export default function LoginPage() {
         </Button>
       </Form>
 
-      {wxConfig?.configured && (
+      {/* TODO: 企业微信登录暂时屏蔽，等可信IP配置完成后恢复 */}
+      {false && wxConfig?.configured && (
         <>
           <Divider plain style={{ margin: '24px 0 16px', color: '#8c8c8c', fontSize: 13 }}>
             或
