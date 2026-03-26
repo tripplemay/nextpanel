@@ -696,7 +696,7 @@ export class NodeDeployService {
         `  ufw allow ${port}/${proto} 2>/dev/null || true; ` +
         `else ` +
         `  iptables -C INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || ` +
-        `  iptables -A INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || true; ` +
+        `  iptables -I INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || true; ` +
         `  command -v netfilter-persistent >/dev/null 2>&1 && netfilter-persistent save 2>/dev/null || true; ` +
         `fi`,
       );
