@@ -129,7 +129,7 @@ export default function AccountSettingsPage() {
             <Space direction="vertical" size={12}>
               <div>
                 <Text type="secondary">已绑定：</Text>
-                <Tag color="green" style={{ marginLeft: 8 }}>{bindStatus.wxWorkName}</Tag>
+                <Tag color="green" style={{ marginLeft: 8 }}>{bindStatus?.wxWorkName}</Tag>
               </div>
               <Button
                 danger
