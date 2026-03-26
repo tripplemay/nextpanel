@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   App,
   Button,
   Card,
-  Divider,
+  Collapse,
+  Empty,
   Form,
   Input,
   InputNumber,
@@ -13,6 +14,7 @@ import {
   Popconfirm,
   Select,
   Space,
+  Spin,
   Table,
   Tag,
   Typography,
@@ -20,14 +22,15 @@ import {
 import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { recommendsApi } from '@/lib/api';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import PageHeader from '@/components/common/PageHeader';
 import type { ServerRecommendCategory, ServerRecommend } from '@/types/api';
-
-const { Title } = Typography;
+import type { ColumnType } from 'antd/es/table';
 
 export default function RecommendsManagePage() {
   const { message } = App.useApp();
   const qc = useQueryClient();
+  const { isMobile } = useIsMobile();
 
   const [catModalOpen, setCatModalOpen] = useState(false);
   const [editingCat, setEditingCat] = useState<ServerRecommendCategory | null>(null);
@@ -38,14 +41,17 @@ export default function RecommendsManagePage() {
   const [recForm] = Form.useForm();
   const [extracting, setExtracting] = useState(false);
 
+  // Track collapsed IDs (all expanded by default)
+  const [collapsedIds, setCollapsedIds] = useState<string[]>([]);
+
   const { data: categories = [], isLoading } = useQuery({
     queryKey: ['recommends'],
     queryFn: () => recommendsApi.list().then((r) => r.data),
   });
 
-  // Flatten recommends for table
-  const allRecommends = categories.flatMap((cat) =>
-    cat.recommends.map((rec) => ({ ...rec, categoryName: cat.name })),
+  const activeKeys = useMemo(
+    () => categories.map((c) => c.id).filter((id) => !collapsedIds.includes(id)),
+    [categories, collapsedIds],
   );
 
   // ── Category mutations ──
@@ -85,7 +91,7 @@ export default function RecommendsManagePage() {
 
   // ── Recommend mutations ──
   const createRecMutation = useMutation({
-    mutationFn: (data: { categoryId: string; name: string; price: string; regions: string[]; link: string; sortOrder?: number }) =>
+    mutationFn: (data: { categoryIds: string[]; name: string; price: string; regions: string[]; link: string; sortOrder?: number }) =>
       recommendsApi.create(data),
     onSuccess: () => {
       message.success('服务商已创建');
@@ -97,7 +103,7 @@ export default function RecommendsManagePage() {
   });
 
   const updateRecMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { name?: string; price?: string; regions?: string[]; link?: string; sortOrder?: number } }) =>
+    mutationFn: ({ id, data }: { id: string; data: { name?: string; price?: string; regions?: string[]; link?: string; categoryIds?: string[]; sortOrder?: number } }) =>
       recommendsApi.update(id, data),
     onSuccess: () => {
       message.success('服务商已更新');
@@ -175,7 +181,7 @@ export default function RecommendsManagePage() {
   function openEditRec(rec: ServerRecommend) {
     setEditingRec(rec);
     recForm.setFieldsValue({
-      categoryId: rec.categoryId,
+      categoryIds: rec.categories?.map((c) => c.category.id) ?? [],
       name: rec.name,
       price: rec.price,
       regions: rec.regions,
@@ -195,62 +201,41 @@ export default function RecommendsManagePage() {
     });
   }
 
-  // ── Category table columns ──
-  const catColumns = [
-    { title: '名称', dataIndex: 'name' },
-    { title: '描述', dataIndex: 'description', render: (v: string | null) => v || '-' },
-    { title: '排序', dataIndex: 'sortOrder', width: 80 },
-    {
-      title: '操作',
-      width: 120,
-      render: (_: unknown, record: ServerRecommendCategory) => (
-        <Space size={4}>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEditCat(record)} />
-          <Popconfirm
-            title="确认删除该分类？"
-            description="删除分类会同时删除其下所有服务商推荐。"
-            onConfirm={() => removeCatMutation.mutate(record.id)}
-            okText="删除"
-            okType="danger"
-            cancelText="取消"
-          >
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ];
-
   // ── Recommend table columns ──
-  const recColumns = [
-    { title: '名称', dataIndex: 'name' },
-    { title: '分类', dataIndex: 'categoryName' },
-    { title: '价格', dataIndex: 'price' },
-    {
-      title: '地区',
-      dataIndex: 'regions',
-      render: (regions: string[]) =>
-        regions?.map((r) => (
-          <Tag key={r} color="blue" style={{ marginBottom: 2 }}>
-            {r}
-          </Tag>
-        )),
-    },
-    {
-      title: '链接',
-      dataIndex: 'link',
-      ellipsis: true,
-      render: (v: string) => (
-        <a href={v} target="_blank" rel="noopener noreferrer">
-          {v}
-        </a>
-      ),
-    },
-    { title: '排序', dataIndex: 'sortOrder', width: 80 },
-    {
+  const recColumns: ColumnType<ServerRecommend>[] = useMemo(() => {
+    const cols: ColumnType<ServerRecommend>[] = [
+      { title: '名称', dataIndex: 'name', ellipsis: true },
+      { title: '价格', dataIndex: 'price', width: 140 },
+    ];
+
+    if (!isMobile) {
+      cols.push({
+        title: '地区',
+        dataIndex: 'regions',
+        render: (regions: string[]) =>
+          regions?.map((r) => (
+            <Tag key={r} color="blue" style={{ marginBottom: 2 }}>
+              {r}
+            </Tag>
+          )),
+      });
+      cols.push({
+        title: '链接',
+        dataIndex: 'link',
+        ellipsis: true,
+        render: (v: string) => (
+          <a href={v} target="_blank" rel="noopener noreferrer">
+            {v}
+          </a>
+        ),
+      });
+      cols.push({ title: '排序', dataIndex: 'sortOrder', width: 80 });
+    }
+
+    cols.push({
       title: '操作',
-      width: 120,
-      render: (_: unknown, record: ServerRecommend & { categoryName: string }) => (
+      width: 100,
+      render: (_: unknown, record: ServerRecommend) => (
         <Space size={4}>
           <Button size="small" icon={<EditOutlined />} onClick={() => openEditRec(record)} />
           <Popconfirm
@@ -264,49 +249,82 @@ export default function RecommendsManagePage() {
           </Popconfirm>
         </Space>
       ),
-    },
-  ];
+    });
+
+    return cols;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile]);
+
+  const collapseItems = categories.map((cat) => {
+    const recommends = cat.recommends.map((r) => r.recommend);
+    return {
+      key: cat.id,
+      label: (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+          <span style={{ fontWeight: 500 }}>{cat.name}</span>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {recommends.length} 个服务商
+          </Typography.Text>
+          <div style={{ marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
+            <Space size={4}>
+              <Button size="small" icon={<EditOutlined />} onClick={() => openEditCat(cat)} />
+              <Popconfirm
+                title="确认删除该分类？"
+                description="删除分类会同时删除其下所有服务商推荐。"
+                onConfirm={() => removeCatMutation.mutate(cat.id)}
+                okText="删除"
+                okType="danger"
+                cancelText="取消"
+              >
+                <Button size="small" danger icon={<DeleteOutlined />} />
+              </Popconfirm>
+            </Space>
+          </div>
+        </div>
+      ),
+      children: recommends.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该分类暂无服务商" style={{ padding: '16px 0' }} />
+      ) : (
+        <Table
+          rowKey="id"
+          size="middle"
+          dataSource={recommends}
+          columns={recColumns}
+          scroll={isMobile ? undefined : { x: 'max-content' }}
+          pagination={recommends.length > 10 ? { showTotal: (total) => `共 ${total} 条` } : false}
+        />
+      ),
+    };
+  });
 
   return (
     <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
       <PageHeader title="服务器推荐管理" />
 
-      {/* ── Category section ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <Title level={5} style={{ margin: 0 }}>分类管理</Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openAddCat}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12 }}>
+        <Button icon={<PlusOutlined />} onClick={openAddCat}>
           新增分类
         </Button>
-      </div>
-
-      <Table
-        rowKey="id"
-        size="middle"
-        loading={isLoading}
-        dataSource={categories}
-        columns={catColumns}
-        pagination={{ showTotal: (total) => `共 ${total} 条` }}
-      />
-
-      <Divider />
-
-      {/* ── Recommend section ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <Title level={5} style={{ margin: 0 }}>服务商管理</Title>
         <Button type="primary" icon={<PlusOutlined />} onClick={openAddRec}>
           新增服务商
         </Button>
       </div>
 
-      <Table
-        rowKey="id"
-        size="middle"
-        loading={isLoading}
-        dataSource={allRecommends}
-        columns={recColumns}
-        scroll={{ x: 'max-content' }}
-        pagination={{ showTotal: (total) => `共 ${total} 条` }}
-      />
+      <Spin spinning={isLoading}>
+        {!isLoading && categories.length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无分类" style={{ padding: '32px 0' }} />
+        ) : (
+          <Collapse
+            activeKey={activeKeys}
+            onChange={(keys) => {
+              const activeSet = new Set(Array.isArray(keys) ? keys : [keys]);
+              setCollapsedIds(categories.map((c) => c.id).filter((id) => !activeSet.has(id)));
+            }}
+            items={collapseItems}
+            style={{ background: 'transparent' }}
+          />
+        )}
+      </Spin>
 
       {/* ── Category Modal ── */}
       <Modal
@@ -351,8 +369,8 @@ export default function RecommendsManagePage() {
               </Button>
             </Space.Compact>
           </Form.Item>
-          <Form.Item name="categoryId" label="分类" rules={[{ required: true, message: '请选择分类' }]}>
-            <Select placeholder="选择分类">
+          <Form.Item name="categoryIds" label="分类" rules={[{ required: true, message: '请选择分类' }]}>
+            <Select mode="multiple" placeholder="选择分类（可多选）">
               {categories.map((cat) => (
                 <Select.Option key={cat.id} value={cat.id}>
                   {cat.name}

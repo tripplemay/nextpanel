@@ -289,18 +289,18 @@ export interface ServerRecommendCategory {
   name: string;
   description: string | null;
   sortOrder: number;
-  recommends: ServerRecommend[];
+  recommends: Array<{ recommend: ServerRecommend }>;
   createdAt: string;
 }
 
 export interface ServerRecommend {
   id: string;
-  categoryId: string;
   name: string;
   price: string;
   regions: string[];
   link: string;
   sortOrder: number;
+  categories?: Array<{ category: { id: string; name: string } }>;
   createdAt: string;
 }
 

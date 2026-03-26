@@ -14,7 +14,10 @@ export class RecommendsService {
       orderBy: { sortOrder: 'asc' },
       include: {
         recommends: {
-          orderBy: { sortOrder: 'asc' },
+          include: {
+            recommend: true,
+          },
+          orderBy: { recommend: { sortOrder: 'asc' } },
         },
       },
     });
@@ -54,21 +57,18 @@ export class RecommendsService {
   // ── Recommend CRUD ─────────────────────────────────────────────────────
 
   async createRecommend(dto: CreateRecommendDto) {
-    // Validate category exists
-    const category = await this.prisma.serverRecommendCategory.findUnique({
-      where: { id: dto.categoryId },
-    });
-    if (!category) throw new NotFoundException('分类不存在');
-
     return this.prisma.serverRecommend.create({
       data: {
-        categoryId: dto.categoryId,
         name: dto.name,
         price: dto.price,
         regions: dto.regions,
         link: dto.link,
         sortOrder: dto.sortOrder ?? 0,
+        categories: {
+          create: dto.categoryIds.map((categoryId) => ({ categoryId })),
+        },
       },
+      include: { categories: { include: { category: true } } },
     });
   }
 
@@ -76,23 +76,22 @@ export class RecommendsService {
     const existing = await this.prisma.serverRecommend.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('推荐不存在');
 
-    if (dto.categoryId) {
-      const category = await this.prisma.serverRecommendCategory.findUnique({
-        where: { id: dto.categoryId },
-      });
-      if (!category) throw new NotFoundException('分类不存在');
-    }
-
     return this.prisma.serverRecommend.update({
       where: { id },
       data: {
-        ...(dto.categoryId !== undefined && { categoryId: dto.categoryId }),
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.price !== undefined && { price: dto.price }),
         ...(dto.regions !== undefined && { regions: dto.regions }),
         ...(dto.link !== undefined && { link: dto.link }),
         ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
+        ...(dto.categoryIds !== undefined && {
+          categories: {
+            deleteMany: {},
+            create: dto.categoryIds.map((categoryId) => ({ categoryId })),
+          },
+        }),
       },
+      include: { categories: { include: { category: true } } },
     });
   }
 

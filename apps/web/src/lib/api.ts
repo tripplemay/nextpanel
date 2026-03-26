@@ -214,8 +214,8 @@ export const recommendsApi = {
   updateCategory: (id: string, data: { name?: string; description?: string; sortOrder?: number }) => api.patch(`/recommends/categories/${id}`, data),
   removeCategory: (id: string) => api.delete(`/recommends/categories/${id}`),
   extract: (url: string) => api.post<ExtractResult>('/recommends/extract', { url }),
-  create: (data: { categoryId: string; name: string; price: string; regions: string[]; link: string; sortOrder?: number }) => api.post('/recommends', data),
-  update: (id: string, data: { name?: string; price?: string; regions?: string[]; link?: string; sortOrder?: number }) => api.patch(`/recommends/${id}`, data),
+  create: (data: { categoryIds: string[]; name: string; price: string; regions: string[]; link: string; sortOrder?: number }) => api.post('/recommends', data),
+  update: (id: string, data: { name?: string; price?: string; regions?: string[]; link?: string; categoryIds?: string[]; sortOrder?: number }) => api.patch(`/recommends/${id}`, data),
   remove: (id: string) => api.delete(`/recommends/${id}`),
 };
 

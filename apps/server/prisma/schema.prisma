@@ -455,22 +455,29 @@ model ServerRecommendCategory {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  recommends  ServerRecommend[]
+  recommends  ServerRecommendOnCategory[]
 }
 
 model ServerRecommend {
-  id         String                  @id @default(cuid())
-  category   ServerRecommendCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  categoryId String
+  id         String   @id @default(cuid())
   name       String
   price      String
   regions    String[]
   link       String
-  sortOrder  Int                     @default(0)
-  createdAt  DateTime                @default(now())
-  updatedAt  DateTime                @updatedAt
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  @@index([categoryId])
+  categories ServerRecommendOnCategory[]
+}
+
+model ServerRecommendOnCategory {
+  category    ServerRecommendCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId  String
+  recommend   ServerRecommend @relation(fields: [recommendId], references: [id], onDelete: Cascade)
+  recommendId String
+
+  @@id([categoryId, recommendId])
 }
 
 // ──────────────────────────── CloudflareSetting ────────────────────────────
