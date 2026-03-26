@@ -17,15 +17,15 @@
 - 流量统计（上传/下载累计）
 - 节点启用/禁用开关
 
-### 支持的协议
+### 支持的协议预设
 
-| 协议 | 实现 | 传输层 | TLS |
-|------|------|--------|-----|
-| VMESS | Xray | TCP, WS, gRPC | 无, TLS |
-| VLESS | Xray | TCP, WS, gRPC | 无, TLS, REALITY |
-| Trojan | Xray | TCP, WS | TLS |
-| Shadowsocks | Xray / sing-box | TCP | 无 |
-| Hysteria2 | sing-box | QUIC | TLS（自签证书）|
+| 预设 | 实现 | 传输层 | TLS | 说明 |
+|------|------|--------|-----|------|
+| VLESS + REALITY | Xray | TCP | REALITY | 裸 IP 直连，抗识别最强，首选方案 |
+| VLESS + WS + TLS | Xray | WebSocket | TLS | 经 Cloudflare CDN 中转，IP 被封时的保底方案 |
+| VLESS + TCP + TLS | Xray | TCP | TLS | 直连真实 TLS，兼容 Quantumult X 等客户端 |
+| Hysteria2 | sing-box | QUIC | TLS（自签） | 基于 UDP，速度极快 |
+| VMess + TCP | Xray | TCP | 无 | 兼容性最广的兜底方案，适合老旧客户端 |
 
 ### 外部节点导入
 - 支持粘贴 URI（vmess:// vless:// ss:// trojan:// hysteria2://）
@@ -73,9 +73,22 @@
 - 可展开查看变更 diff 和关联的部署日志
 - correlationId 将审计记录与 SSH 终端输出关联
 
+### 服务器推荐
+- 管理员配置推荐分类和服务商（名称、价格、地区、购买链接）
+- 服务商支持多分类归属
+- OpenRouter AI 自动识别：粘贴服务商 URL 自动提取名称、价格、地区
+- 按分类折叠展示，主题色卡片网格
+
+### 企业微信登录
+- 扫码登录（桌面端）/ App 跳转授权（移动端）
+- 首次登录自动创建 OPERATOR 账号，免邀请码
+- 已有账号可绑定/解绑企业微信
+- 管理后台配置企业 ID、应用 ID、密钥，支持 API 代理
+
 ### 安全
 - JWT 认证 + Token 吊销机制
 - AES-256-GCM 加密存储 SSH 凭证、节点密码、API Token
+- SSH 凭证销毁/恢复：用户可主动销毁服务器 SSH 凭证，缩小攻击面
 - 登录速率限制（100 次/分钟）
 - 账号锁定（5 次失败后锁定 15 分钟）
 - X-Forwarded-For 真实 IP 记录
@@ -112,6 +125,7 @@ nextpanel update              # 更新到最新版本（自动备份数据库）
 nextpanel backup              # 手动备份数据库（自动保留最近 5 份）
 nextpanel restore <文件>       # 从备份恢复数据库
 nextpanel domain set <域名>    # 绑定域名并自动申请 SSL 证书
+nextpanel fix-nginx           # 修复 Nginx 配置（与其他站点共存）
 nextpanel logs [server|web]   # 查看服务日志
 nextpanel uninstall           # 卸载 NextPanel
 ```
@@ -156,8 +170,8 @@ nextpanel domain set panel.example.com
 ```
 nextpanel/
   apps/
-    server/           # NestJS 后端（14 个功能模块）
-    web/              # Next.js 前端（10 个页面）
+    server/           # NestJS 后端（17 个功能模块）
+    web/              # Next.js 前端（14 个页面）
     agent/            # Go Agent
   packages/
     shared/           # 共享 TypeScript 枚举和类型
@@ -169,7 +183,7 @@ nextpanel/
 
 ### 后端模块
 
-Auth, Servers, Nodes, ExternalNodes, Subscriptions, IpCheck, Metrics, Agent, Audit, OperationLog, Cloudflare, Rules, InviteCodes, Users
+Auth, Servers, Nodes, ExternalNodes, Subscriptions, IpCheck, Metrics, Agent, Audit, OperationLog, Cloudflare, Rules, InviteCodes, Users, WxWork, OpenRouter, Recommends
 
 ### 前端页面
 
@@ -181,8 +195,12 @@ Auth, Servers, Nodes, ExternalNodes, Subscriptions, IpCheck, Metrics, Agent, Aud
 | `/external-nodes` | 外部节点（导入/测试/删除） |
 | `/subscriptions` | 订阅管理（创建/编辑/导出/分享） |
 | `/audit-logs` | 审计日志（筛选/展开详情） |
+| `/recommends` | 服务器推荐（按分类展示） |
 | `/settings/cloudflare` | Cloudflare DNS 配置 |
-| `/settings/account` | 账户安全（修改密码） |
+| `/settings/wxwork` | 企业微信登录配置 |
+| `/settings/openrouter` | OpenRouter AI 配置 |
+| `/settings/recommends` | 服务器推荐管理 |
+| `/settings/account` | 账户安全（修改密码、凭证管理） |
 | `/users` | 用户管理（仅管理员） |
 | `/invite-codes` | 邀请码管理（仅管理员） |
 
