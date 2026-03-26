@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { CryptoService } from '../common/crypto/crypto.service';
+import { WxWorkModule } from '../wxwork/wxwork.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { CryptoService } from '../common/crypto/crypto.service';
       }),
       inject: [ConfigService],
     }),
+    WxWorkModule,
   ],
   providers: [AuthService, JwtStrategy, CryptoService],
   controllers: [AuthController],

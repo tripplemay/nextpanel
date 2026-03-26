@@ -40,6 +40,22 @@ export interface CloudflareSetting {
   updatedAt: string;
 }
 
+export interface WxWorkSetting {
+  id: string;
+  corpId: string;
+  agentId: string;
+  proxyUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertWxWorkSettingDto {
+  corpId: string;
+  agentId: string;
+  secret: string;
+  proxyUrl?: string;
+}
+
 export interface UpsertCloudflareSettingDto {
   apiToken: string;
   zoneId: string;

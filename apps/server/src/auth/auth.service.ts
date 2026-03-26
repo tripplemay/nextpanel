@@ -114,6 +114,88 @@ export class AuthService {
     return this.prisma.user.findUnique({ where: { id } });
   }
 
+  // ─── WeChat Work OAuth ────────────────────────────────────────────────────
+
+  async wxWorkLogin(wxWorkUserId: string, wxWorkName: string) {
+    // Find existing user by wxWorkUserId
+    let user = await this.prisma.user.findUnique({ where: { wxWorkUserId } });
+
+    if (user) {
+      // Update name on every login (sync from WeChat Work)
+      if (user.wxWorkName !== wxWorkName) {
+        await this.prisma.user.update({ where: { id: user.id }, data: { wxWorkName } });
+      }
+    } else {
+      // Auto-create user with OPERATOR role
+      let username = wxWorkName;
+      // Handle duplicate username
+      const existing = await this.prisma.user.findUnique({ where: { username } });
+      if (existing) {
+        let suffix = 2;
+        while (await this.prisma.user.findUnique({ where: { username: `${wxWorkName}-${suffix}` } })) {
+          suffix++;
+        }
+        username = `${wxWorkName}-${suffix}`;
+      }
+
+      user = await this.prisma.user.create({
+        data: {
+          username,
+          passwordHash: '', // No password for wxwork-only users
+          role: 'OPERATOR',
+          wxWorkUserId,
+          wxWorkName,
+        },
+      });
+    }
+
+    const jti = randomUUID();
+    const token = this.jwt.sign({ sub: user.id, role: user.role, jti });
+    return {
+      accessToken: token,
+      user: { id: user.id, username: user.username, role: user.role },
+    };
+  }
+
+  async wxWorkBind(userId: string, wxWorkUserId: string, wxWorkName: string) {
+    // Check if this wxWorkUserId is already bound to another user
+    const existing = await this.prisma.user.findUnique({ where: { wxWorkUserId } });
+    if (existing && existing.id !== userId) {
+      throw new ConflictException('该企业微信账号已绑定其他用户');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { wxWorkUserId, wxWorkName },
+    });
+  }
+
+  async wxWorkUnbind(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user?.wxWorkUserId) throw new BadRequestException('未绑定企业微信');
+
+    // Don't allow unbind if user has no password (wxwork-only account)
+    if (!user.passwordHash) {
+      throw new BadRequestException('企业微信创建的账号无法解绑，请先设置密码');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { wxWorkUserId: null, wxWorkName: null },
+    });
+  }
+
+  async getWxWorkBindStatus(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { wxWorkUserId: true, wxWorkName: true },
+    });
+    return {
+      bound: !!user?.wxWorkUserId,
+      wxWorkName: user?.wxWorkName ?? null,
+    };
+  }
+
   async changePassword(userId: string, dto: ChangePasswordDto) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new UnauthorizedException();

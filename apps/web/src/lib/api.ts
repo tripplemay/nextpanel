@@ -4,6 +4,8 @@ import type {
   Server,
   Node,
   ExternalNode,
+  WxWorkSetting,
+  UpsertWxWorkSettingDto,
   Subscription,
   SubscriptionShare,
   ViewerSubscriptionList,
@@ -175,6 +177,21 @@ export const externalNodesApi = {
   import: (text: string) => api.post<{ success: number; failed: number; errors: string[] }>('/external-nodes/import', { text }),
   test: (id: string) => api.post<ConnectivityResult>(`/external-nodes/${id}/test`),
   remove: (id: string) => api.delete<void>(`/external-nodes/${id}`),
+};
+
+// ── WeChat Work ──────────────────────────────────────
+export const wxWorkApi = {
+  configured: () => api.get<{ configured: boolean }>('/auth/wxwork/configured'),
+  loginUrl: (device: string, redirectUri?: string) =>
+    api.get<{ url: string; state: string }>('/auth/wxwork/login-url', { params: { device, redirect_uri: redirectUri } }),
+  callback: (code: string) =>
+    api.post<{ accessToken: string; user: { id: string; username: string; role: string } }>('/auth/wxwork/callback', { code }),
+  bind: (code: string) => api.post<{ bound: boolean; wxWorkName: string }>('/auth/wxwork/bind', { code }),
+  unbind: () => api.delete<{ bound: boolean }>('/auth/wxwork/unbind'),
+  bindStatus: () => api.get<{ bound: boolean; wxWorkName: string | null }>('/auth/wxwork/bind-status'),
+  getSettings: () => api.get<WxWorkSetting | null>('/wxwork/settings'),
+  upsertSettings: (data: UpsertWxWorkSettingDto) => api.put<WxWorkSetting>('/wxwork/settings', data),
+  removeSettings: () => api.delete<void>('/wxwork/settings'),
 };
 
 // ── Cloudflare ────────────────────────────────────────

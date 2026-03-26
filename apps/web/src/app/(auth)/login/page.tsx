@@ -1,13 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { App, Form, Input, Button, Typography } from 'antd';
+import { useEffect, useState } from 'react';
+import { App, Form, Input, Button, Typography, Divider } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useQueryClient } from '@tanstack/react-query';
-import { authApi } from '@/lib/api';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
+import { authApi, wxWorkApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import AuthLayout from '@/components/auth/AuthLayout';
 
 const { Title, Text } = Typography;
@@ -17,7 +18,15 @@ export default function LoginPage() {
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
   const qc = useQueryClient();
+  const { isMobile } = useIsMobile();
   const [loading, setLoading] = useState(false);
+  const [wxLoading, setWxLoading] = useState(false);
+
+  const { data: wxConfig } = useQuery({
+    queryKey: ['wxwork-configured'],
+    queryFn: () => wxWorkApi.configured().then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
+  });
 
   async function onFinish(values: { username: string; password: string }) {
     setLoading(true);
@@ -30,6 +39,18 @@ export default function LoginPage() {
       message.error('用户名或密码错误');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleWxWorkLogin() {
+    setWxLoading(true);
+    try {
+      const device = isMobile ? 'mobile' : 'desktop';
+      const res = await wxWorkApi.loginUrl(device);
+      window.location.href = res.data.url;
+    } catch {
+      message.error('获取企业微信登录链接失败');
+      setWxLoading(false);
     }
   }
 
@@ -52,6 +73,29 @@ export default function LoginPage() {
           登录
         </Button>
       </Form>
+
+      {wxConfig?.configured && (
+        <>
+          <Divider plain style={{ margin: '24px 0 16px', color: '#8c8c8c', fontSize: 13 }}>
+            或
+          </Divider>
+          <Button
+            block
+            size="large"
+            loading={wxLoading}
+            onClick={handleWxWorkLogin}
+            style={{
+              background: '#07c160',
+              borderColor: '#07c160',
+              color: '#fff',
+              fontWeight: 500,
+            }}
+          >
+            企业微信登录
+          </Button>
+        </>
+      )}
+
       <div style={{ textAlign: 'center', marginTop: 16 }}>
         <Text type="secondary">没有账号？</Text>{' '}
         <Link href="/register">注册账号</Link>

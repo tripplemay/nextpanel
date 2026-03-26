@@ -42,6 +42,7 @@ const baseMenuItems: ItemType[] = [
     label: '系统设置',
     children: [
       { key: '/settings/cloudflare', icon: <CloudOutlined />, label: 'Cloudflare DNS' },
+      { key: '/settings/wxwork', icon: <TeamOutlined />, label: '企业微信' },
       { key: '/settings/account', icon: <LockOutlined />, label: '账户安全' },
     ],
   },

@@ -1,13 +1,18 @@
 'use client';
 
-import { App, Button, Card, Form, Input } from 'antd';
-import { useMutation } from '@tanstack/react-query';
-import { authApi } from '@/lib/api';
+import { App, Button, Card, Form, Input, Space, Tag, Typography } from 'antd';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { authApi, wxWorkApi } from '@/lib/api';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import PageHeader from '@/components/common/PageHeader';
 import type { AxiosError } from 'axios';
 
+const { Text } = Typography;
+
 export default function AccountSettingsPage() {
   const { message } = App.useApp();
+  const qc = useQueryClient();
+  const { isMobile } = useIsMobile();
   const [form] = Form.useForm();
 
   const mutation = useMutation({
@@ -24,6 +29,42 @@ export default function AccountSettingsPage() {
       message.error(text);
     },
   });
+
+  // WeChat Work bind status
+  const { data: wxConfig } = useQuery({
+    queryKey: ['wxwork-configured'],
+    queryFn: () => wxWorkApi.configured().then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: bindStatus } = useQuery({
+    queryKey: ['wxwork-bind-status'],
+    queryFn: () => wxWorkApi.bindStatus().then((r) => r.data),
+    enabled: !!wxConfig?.configured,
+  });
+
+  const unbindMutation = useMutation({
+    mutationFn: () => wxWorkApi.unbind(),
+    onSuccess: () => {
+      message.success('已解除企业微信绑定');
+      qc.invalidateQueries({ queryKey: ['wxwork-bind-status'] });
+    },
+    onError: (err) => {
+      const axiosErr = err as AxiosError<{ message: string | string[] }>;
+      const msg = axiosErr.response?.data?.message;
+      message.error(Array.isArray(msg) ? msg[0] : msg ?? '解绑失败');
+    },
+  });
+
+  async function handleBind() {
+    try {
+      const device = isMobile ? 'mobile' : 'desktop';
+      const res = await wxWorkApi.loginUrl(device, `${window.location.origin}/auth/wxwork/bind-callback`);
+      window.location.href = res.data.url;
+    } catch {
+      message.error('获取企业微信授权链接失败');
+    }
+  }
 
   return (
     <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
@@ -80,6 +121,36 @@ export default function AccountSettingsPage() {
           </Button>
         </Form>
       </Card>
+
+      {wxConfig?.configured && (
+        <Card title="企业微信绑定" size="small" style={{ maxWidth: 400, marginTop: 16 }}>
+          {bindStatus?.bound ? (
+            <Space direction="vertical" size={12}>
+              <div>
+                <Text type="secondary">已绑定：</Text>
+                <Tag color="green" style={{ marginLeft: 8 }}>{bindStatus.wxWorkName}</Tag>
+              </div>
+              <Button
+                danger
+                onClick={() => unbindMutation.mutate()}
+                loading={unbindMutation.isPending}
+              >
+                解除绑定
+              </Button>
+            </Space>
+          ) : (
+            <Space direction="vertical" size={12}>
+              <Text type="secondary">绑定后可使用企业微信扫码登录此账号</Text>
+              <Button
+                onClick={handleBind}
+                style={{ background: '#07c160', borderColor: '#07c160', color: '#fff' }}
+              >
+                绑定企业微信
+              </Button>
+            </Space>
+          )}
+        </Card>
+      )}
     </Card>
   );
 }
