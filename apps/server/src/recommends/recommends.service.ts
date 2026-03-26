@@ -30,6 +30,8 @@ export class RecommendsService {
       data: {
         name: dto.name,
         description: dto.description,
+        color: dto.color,
+        featuredId: dto.featuredId,
         sortOrder: dto.sortOrder ?? 0,
       },
     });
@@ -43,6 +45,8 @@ export class RecommendsService {
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.color !== undefined && { color: dto.color }),
+        ...(dto.featuredId !== undefined && { featuredId: dto.featuredId }),
         ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
       },
     });

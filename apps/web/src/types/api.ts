@@ -290,6 +290,8 @@ export interface ServerRecommendCategory {
   name: string;
   description: string | null;
   sortOrder: number;
+  color: string | null;
+  featuredId: string | null;
   recommends: Array<{ recommend: ServerRecommend }>;
   createdAt: string;
 }

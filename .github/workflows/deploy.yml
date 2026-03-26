@@ -3,6 +3,12 @@ name: Deploy — 项目自动部署
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'scripts/**'
+      - '.gitignore'
+      - 'LICENSE'
   workflow_dispatch:
 
 jobs:

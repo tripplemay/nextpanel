@@ -34,14 +34,24 @@ const DEFAULT_THEME = { color: '#1677ff', icon: <GlobalOutlined /> };
 
 const THEME_COLORS = ['#722ed1', '#1677ff', '#52c41a', '#fa8c16', '#eb2f96', '#13c2c2'];
 
-function getCategoryTheme(name: string, index: number) {
+function getCategoryIcon(name: string): React.ReactNode {
+  if (CATEGORY_THEMES[name]) return CATEGORY_THEMES[name].icon;
+  for (const [key, theme] of Object.entries(CATEGORY_THEMES)) {
+    if (name.includes(key)) return theme.icon;
+  }
+  return <StarOutlined />;
+}
+
+function getCategoryTheme(name: string, index: number, color?: string | null) {
+  const icon = getCategoryIcon(name);
+  if (color) return { color, icon };
   // Try exact match first, then keyword match
   if (CATEGORY_THEMES[name]) return CATEGORY_THEMES[name];
   for (const [key, theme] of Object.entries(CATEGORY_THEMES)) {
     if (name.includes(key)) return theme;
   }
   // Fallback: cycle through colors
-  return { color: THEME_COLORS[index % THEME_COLORS.length], icon: <StarOutlined /> };
+  return { color: THEME_COLORS[index % THEME_COLORS.length], icon };
 }
 
 export default function RecommendsPage() {
@@ -65,8 +75,12 @@ export default function RecommendsPage() {
   );
 
   const collapseItems = nonEmptyCategories.map((cat, index) => {
-    const recommends = cat.recommends.map((r) => r.recommend);
-    const theme = getCategoryTheme(cat.name, index);
+    const recommends = cat.recommends.map((r) => r.recommend).sort((a, b) => {
+      if (cat.featuredId === a.id) return -1;
+      if (cat.featuredId === b.id) return 1;
+      return 0;
+    });
+    const theme = getCategoryTheme(cat.name, index, cat.color);
 
     return {
       key: cat.id,
@@ -109,9 +123,27 @@ export default function RecommendsPage() {
                 }}
                 styles={{ body: { display: 'flex', flexDirection: 'column', height: '100%', padding: '16px' } }}
               >
-                <Typography.Text strong style={{ fontSize: 15, display: 'block', marginBottom: 8 }}>
-                  {rec.name}
-                </Typography.Text>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  {(() => {
+                    try {
+                      const hostname = new URL(rec.link).hostname;
+                      return (
+                        <img
+                          src={`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`}
+                          alt=""
+                          width={20}
+                          height={20}
+                          style={{ borderRadius: 4, flexShrink: 0 }}
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        />
+                      );
+                    } catch {
+                      return null;
+                    }
+                  })()}
+                  <Typography.Text strong style={{ fontSize: 15 }}>{rec.name}</Typography.Text>
+                  {cat.featuredId === rec.id && <Tag color="red" style={{ margin: 0 }}>推荐</Tag>}
+                </div>
 
                 <Typography.Text
                   style={{

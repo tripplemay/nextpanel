@@ -27,6 +27,17 @@ import PageHeader from '@/components/common/PageHeader';
 import type { ServerRecommendCategory, ServerRecommend } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
+const COLOR_OPTIONS = [
+  { value: '#722ed1', label: '紫色' },
+  { value: '#1677ff', label: '蓝色' },
+  { value: '#52c41a', label: '绿色' },
+  { value: '#fa8c16', label: '橙色' },
+  { value: '#eb2f96', label: '粉色' },
+  { value: '#13c2c2', label: '青色' },
+  { value: '#f5222d', label: '红色' },
+  { value: '#faad14', label: '金色' },
+];
+
 export default function RecommendsManagePage() {
   const { message } = App.useApp();
   const qc = useQueryClient();
@@ -56,7 +67,7 @@ export default function RecommendsManagePage() {
 
   // ── Category mutations ──
   const createCatMutation = useMutation({
-    mutationFn: (data: { name: string; description?: string; sortOrder?: number }) =>
+    mutationFn: (data: { name: string; description?: string; sortOrder?: number; color?: string; featuredId?: string }) =>
       recommendsApi.createCategory(data),
     onSuccess: () => {
       message.success('分类已创建');
@@ -68,7 +79,7 @@ export default function RecommendsManagePage() {
   });
 
   const updateCatMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { name?: string; description?: string; sortOrder?: number } }) =>
+    mutationFn: ({ id, data }: { id: string; data: { name?: string; description?: string; sortOrder?: number; color?: string; featuredId?: string } }) =>
       recommendsApi.updateCategory(id, data),
     onSuccess: () => {
       message.success('分类已更新');
@@ -141,8 +152,9 @@ export default function RecommendsManagePage() {
         regions: result.regions,
       });
       message.success('识别成功');
-    } catch {
-      message.error('自动识别失败，请手动填写');
+    } catch (err: any) {
+      const msg = err?.response?.data?.message;
+      message.error(typeof msg === 'string' ? msg : '自动识别失败，请手动填写');
     } finally {
       setExtracting(false);
     }
@@ -157,7 +169,7 @@ export default function RecommendsManagePage() {
 
   function openEditCat(cat: ServerRecommendCategory) {
     setEditingCat(cat);
-    catForm.setFieldsValue({ name: cat.name, description: cat.description ?? '', sortOrder: cat.sortOrder });
+    catForm.setFieldsValue({ name: cat.name, description: cat.description ?? '', sortOrder: cat.sortOrder, color: cat.color ?? undefined, featuredId: cat.featuredId ?? undefined });
     setCatModalOpen(true);
   }
 
@@ -342,6 +354,27 @@ export default function RecommendsManagePage() {
           </Form.Item>
           <Form.Item name="description" label="描述">
             <Input placeholder="分类描述（可选）" />
+          </Form.Item>
+          <Form.Item name="color" label="主题色">
+            <Select allowClear placeholder="默认按名称自动匹配">
+              {COLOR_OPTIONS.map((opt) => (
+                <Select.Option key={opt.value} value={opt.value}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: '50%', background: opt.value, flexShrink: 0 }} />
+                    {opt.label} ({opt.value})
+                  </span>
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item name="featuredId" label="推荐服务商">
+            <Select allowClear placeholder="无">
+              {(editingCat?.recommends ?? []).map((r) => (
+                <Select.Option key={r.recommend.id} value={r.recommend.id}>
+                  {r.recommend.name}
+                </Select.Option>
+              ))}
+            </Select>
           </Form.Item>
           <Form.Item name="sortOrder" label="排序" initialValue={0}>
             <InputNumber min={0} style={{ width: '100%' }} placeholder="数字越小越靠前" />
