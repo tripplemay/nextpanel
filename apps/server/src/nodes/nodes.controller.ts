@@ -28,6 +28,7 @@ import { NodeDeployService } from './node-deploy.service';
 import { XrayTestService } from './xray-test/xray-test.service';
 import { CreateNodeDto } from './dto/create-node.dto';
 import { CreateNodeFromPresetDto } from './dto/create-node-from-preset.dto';
+import { CreateChainNodeDto } from './dto/create-chain-node.dto';
 import { UpdateNodeDto } from './dto/update-node.dto';
 import { PROTOCOL_PRESETS, SUPPORTED_PROTOCOLS } from './protocols/presets';
 
@@ -72,6 +73,17 @@ export class NodesController {
     @CurrentUser() user: { id: string },
   ) {
     return this.nodesService.createFromPreset(user.id, dto);
+  }
+
+  @Post('chain')
+  @Roles('ADMIN', 'OPERATOR')
+  @Audit('CREATE', 'node')
+  @ApiOperation({ summary: 'Create a chain proxy node (entry + exit)' })
+  createChainNode(
+    @Body() dto: CreateChainNodeDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.nodesService.createChainNode(user.id, dto);
   }
 
   @Get()

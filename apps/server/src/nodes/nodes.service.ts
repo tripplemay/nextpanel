@@ -8,6 +8,7 @@ import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.ser
 import { CreateNodeDto } from './dto/create-node.dto';
 import { UpdateNodeDto } from './dto/update-node.dto';
 import { CreateNodeFromPresetDto } from './dto/create-node-from-preset.dto';
+import { CreateChainNodeDto } from './dto/create-chain-node.dto';
 import { buildShareUri } from '../subscriptions/uri-builder';
 import { PROTOCOL_PRESETS, CREDENTIAL_GENERATORS, type SupportedProtocol } from './protocols/presets';
 
@@ -257,6 +258,65 @@ export class NodesService {
     return JSON.parse(this.crypto.decrypt(node.credentialsEnc)) as Record<string, string>;
   }
 
+  async createChainNode(userId: string, dto: CreateChainNodeDto) {
+    // Validate both servers belong to user
+    const entryServer = await this.prisma.server.findFirst({ where: { id: dto.entryServerId, userId } });
+    if (!entryServer) throw new NotFoundException('入口服务器不存在');
+    if (!entryServer.sshAuthEnc) throw new BadRequestException('入口服务器凭证已销毁');
+
+    const exitServer = await this.prisma.server.findFirst({ where: { id: dto.exitServerId, userId } });
+    if (!exitServer) throw new NotFoundException('出口服务器不存在');
+    if (!exitServer.sshAuthEnc) throw new BadRequestException('出口服务器凭证已销毁');
+
+    if (dto.entryServerId === dto.exitServerId) throw new BadRequestException('入口和出口不能是同一台服务器');
+
+    const preset = PROTOCOL_PRESETS[dto.preset as SupportedProtocol];
+    const credentials = CREDENTIAL_GENERATORS[dto.preset as SupportedProtocol]();
+    const listenPort = await this.pickPort(dto.entryServerId, preset.fixedPort, preset.portBase);
+    const exitPort = await this.pickChainExitPort(dto.exitServerId);
+    const credentialsEnc = this.crypto.encrypt(JSON.stringify(credentials));
+
+    // Generate a UUID for the internal VLESS connection between A and B
+    const chainUuid = crypto.randomUUID();
+    const chainCredEnc = this.crypto.encrypt(chainUuid);
+
+    const node = await this.prisma.node.create({
+      data: {
+        serverId: dto.entryServerId,
+        userId,
+        name: dto.name,
+        protocol: preset.protocol as any,
+        implementation: preset.implementation as any,
+        transport: preset.transport as any,
+        tls: preset.tls as any,
+        listenPort,
+        domain: null,
+        credentialsEnc,
+        exitServerId: dto.exitServerId,
+        exitPort,
+        chainCredEnc,
+        source: 'AUTO',
+      },
+      select: this.safeSelect(),
+    });
+
+    return this.findOne(node.id, userId);
+  }
+
+  // Port allocation for chain exit (15000-15999 range on exit server)
+  private async pickChainExitPort(exitServerId: string): Promise<number> {
+    const existingNodes = await this.prisma.node.findMany({
+      where: { exitServerId },
+      select: { exitPort: true },
+    });
+    const usedPorts = new Set(existingNodes.map(n => n.exitPort).filter(Boolean));
+    for (let i = 0; i < 1000; i++) {
+      const port = 15000 + i;
+      if (!usedPorts.has(port)) return port;
+    }
+    throw new BadRequestException('出口服务器链式端口已用尽（15000-15999）');
+  }
+
   private async pickPort(
     serverId: string,
     fixedPort: number | null,
@@ -360,6 +420,9 @@ export class NodesService {
       lastTestedAt: true,
       createdAt: true,
       updatedAt: true,
+      exitServerId: true,
+      exitPort: true,
+      exitServer: { select: { id: true, name: true, ip: true } },
       server: { select: { id: true, name: true, ip: true, tags: true, autoTags: true } },
     } as const;
   }

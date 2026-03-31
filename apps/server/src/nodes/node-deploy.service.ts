@@ -8,7 +8,7 @@ import { OperationLogService } from '../operation-log/operation-log.service';
 import { CertService } from '../common/cert/cert.service';
 import { CloudflareService } from '../cloudflare/cloudflare.service';
 import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.service';
-import { generateConfig, getBinaryCommand, NodeInfo } from './config/config-generator';
+import { generateConfig, generateChainExitConfig, getBinaryCommand, NodeInfo } from './config/config-generator';
 import { connectSsh, uploadText, binaryExists, whichBinary, detectPackageManager } from './ssh/ssh.util';
 
 export interface DeployResult {
@@ -89,6 +89,18 @@ export class NodeDeployService {
       domain: node.domain,
       statsPort,
     };
+
+    // If chain node, add chain info to NodeInfo
+    if (node.exitServerId && node.exitPort && node.chainCredEnc) {
+      const exitServer = await this.prisma.server.findUnique({ where: { id: node.exitServerId } });
+      if (exitServer) {
+        const chainUuid = this.crypto.decrypt(node.chainCredEnc);
+        nodeInfo.chainExitIp = exitServer.ip;
+        nodeInfo.chainExitPort = node.exitPort;
+        nodeInfo.chainUuid = chainUuid;
+      }
+    }
+
     const configJson = generateConfig(nodeInfo, credentials);
     const configPath = `/etc/nextpanel/nodes/${node.id}.json`;
     const serviceName = `nextpanel-${node.id}`;
@@ -167,6 +179,19 @@ export class NodeDeployService {
         } else {
           await this.generateSelfSignedCert(ssh, node.id, node.domain ?? node.server.ip, log);
         }
+      }
+
+      // ── 5b. Chain: deploy exit server first ─────────────────────────────────
+      if (node.exitServerId && node.exitPort && node.chainCredEnc) {
+        const exitServer = await this.prisma.server.findUnique({ where: { id: node.exitServerId } });
+        if (!exitServer) throw new Error('出口服务器不存在');
+        if (!exitServer.sshAuthEnc) throw new Error('出口服务器凭证已销毁');
+        await this.deployChainExit(
+          { id: node.id, exitPort: node.exitPort, chainCredEnc: node.chainCredEnc },
+          { ip: node.server.ip },
+          exitServer,
+          log,
+        );
       }
 
       // ── 6. Upload config file (base64 to avoid shell escaping issues) ──────
@@ -355,6 +380,33 @@ export class NodeDeployService {
     }
     ssh.dispose();
 
+    // ── Step 1b: Clean up chain exit service if this is a chain node ─────────
+    if (node.exitServerId && node.exitPort) {
+      try {
+        const exitServer = await this.prisma.server.findUnique({ where: { id: node.exitServerId } });
+        if (exitServer?.sshAuthEnc) {
+          const exitSsh = new NodeSSH();
+          const exitAuth = this.crypto.decrypt(exitServer.sshAuthEnc);
+          await exitSsh.connect({
+            host: exitServer.ip,
+            port: exitServer.sshPort,
+            username: exitServer.sshUser,
+            ...(exitServer.sshAuthType === 'KEY' ? { privateKey: exitAuth } : { password: exitAuth }),
+            readyTimeout: 30000,
+          });
+          const exitServiceName = `nextpanel-chain-${node.id}`;
+          await exitSsh.execCommand(`systemctl stop ${exitServiceName} && systemctl disable ${exitServiceName}`);
+          await exitSsh.execCommand(`rm -f /etc/systemd/system/${exitServiceName}.service`);
+          await exitSsh.execCommand(`rm -f /etc/nextpanel/nodes/chain-${node.id}.json`);
+          await exitSsh.execCommand('systemctl daemon-reload');
+          exitSsh.dispose();
+          trackLog('[出口] 链式出口已清理');
+        }
+      } catch (err) {
+        trackLog(`[出口] 链式出口清理失败: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     // ── Step 2: Cloudflare DNS cleanup (non-fatal) ────────────────────────────
     if (node.cfDnsRecordId && node.userId) {
       trackLog('正在清理 Cloudflare DNS 记录...');
@@ -422,6 +474,32 @@ export class NodeDeployService {
         await this.closeFirewallPort(ssh, node.listenPort, proto);
       }
       ssh.dispose();
+
+      // Clean up chain exit service if this is a chain node
+      if (node.exitServerId && node.exitPort) {
+        try {
+          const exitServer = await this.prisma.server.findUnique({ where: { id: node.exitServerId } });
+          if (exitServer?.sshAuthEnc) {
+            const exitSsh = new NodeSSH();
+            const exitAuth = this.crypto.decrypt(exitServer.sshAuthEnc);
+            await exitSsh.connect({
+              host: exitServer.ip,
+              port: exitServer.sshPort,
+              username: exitServer.sshUser,
+              ...(exitServer.sshAuthType === 'KEY' ? { privateKey: exitAuth } : { password: exitAuth }),
+              readyTimeout: 30000,
+            });
+            const exitServiceName = `nextpanel-chain-${node.id}`;
+            await exitSsh.execCommand(`systemctl stop ${exitServiceName} && systemctl disable ${exitServiceName}`);
+            await exitSsh.execCommand(`rm -f /etc/systemd/system/${exitServiceName}.service`);
+            await exitSsh.execCommand(`rm -f /etc/nextpanel/nodes/chain-${node.id}.json`);
+            await exitSsh.execCommand('systemctl daemon-reload');
+            exitSsh.dispose();
+          }
+        } catch {
+          // Chain exit cleanup failure is non-fatal for undeploy
+        }
+      }
     } catch (err: unknown) {
       ssh?.dispose();
       // Re-throw so callers (NodesService.remove) know cleanup failed
@@ -504,6 +582,100 @@ export class NodeDeployService {
       ssh?.dispose();
       throw err;
     }
+  }
+
+  // ── Chain exit deployment ─────────────────────────────────────────────────
+
+  private async deployChainExit(
+    node: { id: string; exitPort: number; chainCredEnc: string },
+    entryServer: { ip: string },
+    exitServer: { id: string; ip: string; sshPort: number; sshUser: string; sshAuthType: string; sshAuthEnc: string },
+    log: (msg: string) => void,
+  ): Promise<void> {
+    const exitSsh = new NodeSSH();
+    const sshAuth = this.crypto.decrypt(exitServer.sshAuthEnc);
+
+    log(`[出口] 连接 ${exitServer.ip}:${exitServer.sshPort}...`);
+    await exitSsh.connect({
+      host: exitServer.ip,
+      port: exitServer.sshPort,
+      username: exitServer.sshUser,
+      ...(exitServer.sshAuthType === 'KEY' ? { privateKey: sshAuth } : { password: sshAuth }),
+      readyTimeout: 30000,
+    });
+
+    // Check/install xray
+    log(`[出口] 检查 Xray...`);
+    const { code } = await exitSsh.execCommand('test -x /usr/local/bin/xray');
+    if (code !== 0) {
+      log(`[出口] 安装 Xray...`);
+      const installed = await this.installXray(exitSsh, (m) => log(`[出口] ${m}`));
+      if (!installed) {
+        exitSsh.dispose();
+        throw new Error('出口服务器 Xray 安装失败');
+      }
+    }
+
+    // Generate and upload exit config
+    const chainUuid = this.crypto.decrypt(node.chainCredEnc);
+    const exitConfig = generateChainExitConfig(node.id, node.exitPort, chainUuid, entryServer.ip);
+    const exitConfigPath = `/etc/nextpanel/nodes/chain-${node.id}.json`;
+    const exitServiceName = `nextpanel-chain-${node.id}`;
+
+    log(`[出口] 上传配置到 ${exitConfigPath}...`);
+    await exitSsh.execCommand(`mkdir -p /etc/nextpanel/nodes`);
+    await uploadText(exitSsh, exitConfig, exitConfigPath);
+
+    // Write systemd unit
+    const unit = [
+      '[Unit]',
+      `Description=NextPanel Chain Exit: ${node.id}`,
+      'After=network.target',
+      '',
+      '[Service]',
+      'Type=simple',
+      `ExecStart=/usr/local/bin/xray run -config ${exitConfigPath}`,
+      'Restart=always',
+      'RestartSec=3',
+      'LimitNOFILE=1048576',
+      '',
+      '[Install]',
+      'WantedBy=multi-user.target',
+    ].join('\n');
+
+    await uploadText(exitSsh, unit, `/etc/systemd/system/${exitServiceName}.service`);
+
+    // Start service
+    await exitSsh.execCommand('systemctl daemon-reload');
+    await exitSsh.execCommand(`systemctl stop ${exitServiceName} 2>/dev/null || true`);
+    await exitSsh.execCommand(`systemctl enable ${exitServiceName} && systemctl start ${exitServiceName}`);
+
+    // Open firewall for entry server IP only
+    log(`[出口] 配置防火墙（仅允许 ${entryServer.ip}）...`);
+    await exitSsh.execCommand(
+      `if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then ` +
+      `  ufw allow from ${entryServer.ip} to any port ${node.exitPort} proto tcp 2>/dev/null || true; ` +
+      `elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null | grep -q running; then ` +
+      `  firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="${entryServer.ip}" port protocol="tcp" port="${node.exitPort}" accept' 2>/dev/null || true; ` +
+      `  firewall-cmd --reload 2>/dev/null || true; ` +
+      `else ` +
+      `  iptables -C INPUT -s ${entryServer.ip} -p tcp --dport ${node.exitPort} -j ACCEPT 2>/dev/null || ` +
+      `  iptables -I INPUT -s ${entryServer.ip} -p tcp --dport ${node.exitPort} -j ACCEPT 2>/dev/null || true; ` +
+      `fi`,
+    );
+
+    // Verify
+    await new Promise(r => setTimeout(r, 2000));
+    const { stdout: status } = await exitSsh.execCommand(`systemctl is-active ${exitServiceName}`);
+    if (status.trim() !== 'active') {
+      const { stdout: journal } = await exitSsh.execCommand(`journalctl -u ${exitServiceName} -n 20 --no-pager`);
+      log(`[出口] 服务启动失败: ${journal}`);
+      exitSsh.dispose();
+      throw new Error('出口服务器链式服务启动失败');
+    }
+
+    log(`[出口] 链式出口部署完成`);
+    exitSsh.dispose();
   }
 
   // ── Cert helpers ──────────────────────────────────────────────────────────

@@ -16,6 +16,12 @@ export interface NodeInfo {
   domain: string | null;
   /** xray stats API port — only passed for xray/v2ray nodes during deploy */
   statsPort?: number;
+  /** Chain proxy: exit server IP (when set, outbound goes to exit server instead of freedom) */
+  chainExitIp?: string;
+  /** Chain proxy: exit server port (dokodemo-door / internal VLESS on exit server) */
+  chainExitPort?: number;
+  /** Chain proxy: UUID for internal VLESS between entry and exit */
+  chainUuid?: string;
 }
 
 export interface NodeCredentials {
@@ -42,6 +48,48 @@ export function generateConfig(node: NodeInfo, creds: NodeCredentials): string {
     default:
       return generateXrayConfig(node, creds);
   }
+}
+
+/**
+ * Generate config for the exit server (B) in a chain proxy setup.
+ * B runs a minimal VLESS(no TLS) inbound + freedom outbound with IP whitelist.
+ */
+export function generateChainExitConfig(
+  nodeId: string,
+  exitPort: number,
+  chainUuid: string,
+  entryServerIp: string,
+): string {
+  return JSON.stringify(
+    {
+      log: { loglevel: 'warning' },
+      inbounds: [
+        {
+          tag: `chain-in-${nodeId}`,
+          port: exitPort,
+          listen: '0.0.0.0',
+          protocol: 'vless',
+          settings: {
+            clients: [{ id: chainUuid, encryption: 'none' }],
+            decryption: 'none',
+          },
+          streamSettings: { network: 'tcp', security: 'none' },
+        },
+      ],
+      outbounds: [
+        { protocol: 'freedom', tag: 'direct' },
+        { protocol: 'blackhole', tag: 'blocked' },
+      ],
+      routing: {
+        rules: [
+          { type: 'field', source: [entryServerIp], outboundTag: 'direct' },
+          { type: 'field', outboundTag: 'blocked' },
+        ],
+      },
+    },
+    null,
+    2,
+  );
 }
 
 /** Returns the binary path and CLI args for starting the service */

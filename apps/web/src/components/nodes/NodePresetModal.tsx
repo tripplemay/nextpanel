@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { App, Modal, Form, Input, Select, Tag, Space } from 'antd';
+import { App, Modal, Form, Input, Select, Tag, Space, Radio } from 'antd';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { nodesApi, serversApi } from '@/lib/api';
 import type { Node } from '@/types/api';
 import type { AxiosError } from 'axios';
 
 const { Option } = Select;
+
+type DeployMode = 'direct' | 'chain';
 
 interface Props {
   open: boolean;
@@ -19,6 +21,7 @@ interface Props {
 export default function NodePresetModal({ open, onClose, onSuccess, defaultServerId }: Props) {
   const { message } = App.useApp();
   const [form] = Form.useForm();
+  const [deployMode, setDeployMode] = useState<DeployMode>('direct');
   const [serverId, setServerId] = useState<string | undefined>(undefined);
 
   const { data: presets } = useQuery({
@@ -33,16 +36,20 @@ export default function NodePresetModal({ open, onClose, onSuccess, defaultServe
     enabled: open,
   });
 
+  // For direct mode, use serverId; for chain mode, use entryServerId
+  const effectiveServerId = deployMode === 'direct' ? serverId : form.getFieldValue('entryServerId') as string | undefined;
+
   const { data: serverNodes } = useQuery({
-    queryKey: ['nodes', serverId],
-    queryFn: () => nodesApi.list(serverId).then((r) => r.data),
-    enabled: open && !!serverId,
+    queryKey: ['nodes', effectiveServerId],
+    queryFn: () => nodesApi.list(effectiveServerId).then((r) => r.data),
+    enabled: open && !!effectiveServerId,
   });
 
   // 根据服务器名和已有节点序号自动生成节点名称
   useEffect(() => {
-    if (!serverId || !servers || serverNodes === undefined) return;
-    const server = servers.find((s) => s.id === serverId);
+    const sid = deployMode === 'direct' ? serverId : form.getFieldValue('entryServerId') as string | undefined;
+    if (!sid || !servers || serverNodes === undefined) return;
+    const server = servers.find((s) => s.id === sid);
     if (!server) return;
 
     const escaped = server.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -55,11 +62,12 @@ export default function NodePresetModal({ open, onClose, onSuccess, defaultServe
     let n = 1;
     while (usedNumbers.has(n)) n++;
     form.setFieldsValue({ name: `${server.name}-${n}` });
-  }, [serverId, servers, serverNodes, form]);
+  }, [serverId, servers, serverNodes, form, deployMode]);
 
   useEffect(() => {
     if (open) {
       form.resetFields();
+      setDeployMode('direct');
       if (defaultServerId) {
         form.setFieldValue('serverId', defaultServerId);
         setServerId(defaultServerId);
@@ -69,7 +77,7 @@ export default function NodePresetModal({ open, onClose, onSuccess, defaultServe
     }
   }, [open, form, defaultServerId]);
 
-  const mutation = useMutation({
+  const directMutation = useMutation({
     mutationFn: (values: { serverId: string; preset: string; name: string }) =>
       nodesApi.createFromPreset(values),
     onSuccess: (res) => {
@@ -83,29 +91,97 @@ export default function NodePresetModal({ open, onClose, onSuccess, defaultServe
     },
   });
 
+  const chainMutation = useMutation({
+    mutationFn: (values: { entryServerId: string; exitServerId: string; preset: string; name: string }) =>
+      nodesApi.createChainNode(values),
+    onSuccess: (res) => {
+      onSuccess(res.data);
+    },
+    onError: (err) => {
+      const axiosErr = err as AxiosError<{ message: string | string[] }>;
+      const msgs = axiosErr.response?.data?.message;
+      const text = Array.isArray(msgs) ? msgs[0] : typeof msgs === 'string' ? msgs : '创建失败';
+      message.error(text);
+    },
+  });
+
+  const isPending = directMutation.isPending || chainMutation.isPending;
+
+  function handleFinish(values: Record<string, unknown>) {
+    if (deployMode === 'chain') {
+      const { entryServerId, exitServerId, preset, name } = values as {
+        entryServerId: string; exitServerId: string; preset: string; name: string;
+      };
+      if (entryServerId === exitServerId) {
+        message.error('入口和出口不能是同一台服务器');
+        return;
+      }
+      chainMutation.mutate({ entryServerId, exitServerId, preset, name });
+    } else {
+      directMutation.mutate(values as { serverId: string; preset: string; name: string });
+    }
+  }
+
   return (
     <Modal
       open={open}
       title="新增节点"
       onCancel={onClose}
       onOk={() => form.submit()}
-      confirmLoading={mutation.isPending}
+      confirmLoading={isPending}
       width={480}
       style={{ maxWidth: '95vw' }}
     >
       <Form
         form={form}
         layout="vertical"
-        onFinish={(v) => mutation.mutate(v as { serverId: string; preset: string; name: string })}
+        onFinish={handleFinish}
         onValuesChange={(changed) => {
           if ('serverId' in changed) setServerId(changed.serverId as string | undefined);
+          if ('entryServerId' in changed) setServerId(changed.entryServerId as string | undefined);
         }}
       >
-        <Form.Item name="serverId" label="服务器" rules={[{ required: true, message: '请选择服务器' }]}>
-          <Select placeholder="选择服务器">
-            {servers?.map((s) => <Option key={s.id} value={s.id}>{s.name}</Option>)}
-          </Select>
+        <Form.Item label="部署模式">
+          <Radio.Group
+            value={deployMode}
+            onChange={(e) => {
+              setDeployMode(e.target.value as DeployMode);
+              form.resetFields(['serverId', 'entryServerId', 'exitServerId', 'name']);
+              setServerId(undefined);
+            }}
+            optionType="button"
+            buttonStyle="solid"
+            options={[
+              { label: '直连', value: 'direct' },
+              { label: '链式', value: 'chain' },
+            ]}
+          />
         </Form.Item>
+
+        {deployMode === 'direct' ? (
+          <Form.Item name="serverId" label="服务器" rules={[{ required: true, message: '请选择服务器' }]}>
+            <Select placeholder="选择服务器">
+              {servers?.map((s) => <Option key={s.id} value={s.id}>{s.name}</Option>)}
+            </Select>
+          </Form.Item>
+        ) : (
+          <>
+            <Form.Item name="entryServerId" label="入口服务器" rules={[{ required: true, message: '请选择入口服务器' }]}
+              extra="用户连接到此服务器"
+            >
+              <Select placeholder="选择入口服务器">
+                {servers?.map((s) => <Option key={s.id} value={s.id}>{s.name}</Option>)}
+              </Select>
+            </Form.Item>
+            <Form.Item name="exitServerId" label="出口服务器" rules={[{ required: true, message: '请选择出口服务器' }]}
+              extra="流量从此服务器出站"
+            >
+              <Select placeholder="选择出口服务器">
+                {servers?.map((s) => <Option key={s.id} value={s.id}>{s.name}</Option>)}
+              </Select>
+            </Form.Item>
+          </>
+        )}
 
         <Form.Item name="preset" label="协议预设" rules={[{ required: true, message: '请选择协议预设' }]}>
           <Select

@@ -33,6 +33,13 @@ export interface CreateNodeFromPresetDto {
   preset: string;
 }
 
+export interface CreateChainNodeDto {
+  name: string;
+  preset: string;
+  entryServerId: string;
+  exitServerId: string;
+}
+
 export interface CloudflareSetting {
   domain: string;
   zoneId: string;
@@ -220,6 +227,9 @@ export interface Node {
   statsPort: number | null;
   trafficUpBytes: number;
   trafficDownBytes: number;
+  exitServerId: string | null;
+  exitPort: number | null;
+  exitServer?: Pick<Server, 'id' | 'name' | 'ip'> | null;
   createdAt: string;
   updatedAt: string;
 }

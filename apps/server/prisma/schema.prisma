@@ -91,9 +91,10 @@ model Server {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
-  nodes        Node[]
-  metrics      ServerMetric[]
-  ipCheck      ServerIpCheck?
+  nodes            Node[]
+  chainExitNodes   Node[]         @relation("chainExitServer")
+  metrics          ServerMetric[]
+  ipCheck          ServerIpCheck?
 
   @@index([userId])
 }
@@ -145,6 +146,13 @@ model Node {
   trafficUpBytes   Float           @default(0)
   /// Cumulative download bytes since last deploy (xray nodes only) — reset on redeploy
   trafficDownBytes Float           @default(0)
+  /// Chain proxy: exit server (when set, this is a chain node — entry on this server, exit on exitServer)
+  exitServer       Server?         @relation("chainExitServer", fields: [exitServerId], references: [id])
+  exitServerId     String?
+  /// Chain proxy: port on exit server for dokodemo-door / internal VLESS
+  exitPort         Int?
+  /// Chain proxy: UUID for internal VLESS between entry and exit (AES-GCM encrypted)
+  chainCredEnc     String?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 

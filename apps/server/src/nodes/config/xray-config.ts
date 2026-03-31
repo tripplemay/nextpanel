@@ -13,7 +13,35 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
     streamSettings: xrayStreamSettings(node.id, node.transport, node.tls, node.domain, creds),
   };
 
+  // Determine outbound: chain exit or direct freedom
+  const isChain = !!(node.chainExitIp && node.chainExitPort && node.chainUuid);
+  const outbounds: unknown[] = isChain
+    ? [
+        {
+          protocol: 'vless',
+          tag: 'chain-exit',
+          settings: {
+            vnext: [{
+              address: node.chainExitIp,
+              port: node.chainExitPort,
+              users: [{ id: node.chainUuid, encryption: 'none' }],
+            }],
+          },
+          streamSettings: { network: 'tcp', security: 'none' },
+        },
+      ]
+    : [{ protocol: 'freedom', tag: 'direct' }];
+
+  const defaultOutboundTag = isChain ? 'chain-exit' : 'direct';
+
   if (node.statsPort) {
+    const routingRules: unknown[] = [
+      { type: 'field', inboundTag: ['api'], outboundTag: 'api' },
+    ];
+    if (isChain) {
+      routingRules.push({ type: 'field', inboundTag: [`in-${node.id}`], outboundTag: 'chain-exit' });
+    }
+
     return JSON.stringify(
       {
         log: { loglevel: 'warning' },
@@ -30,9 +58,9 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
           },
           proxyInbound,
         ],
-        outbounds: [{ protocol: 'freedom', tag: 'direct' }],
+        outbounds: outbounds,
         routing: {
-          rules: [{ type: 'field', inboundTag: ['api'], outboundTag: 'api' }],
+          rules: routingRules,
         },
       },
       null,
@@ -40,15 +68,19 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
     );
   }
 
-  return JSON.stringify(
-    {
-      log: { loglevel: 'warning' },
-      inbounds: [proxyInbound],
-      outbounds: [{ protocol: 'freedom', tag: 'direct' }],
-    },
-    null,
-    2,
-  );
+  const config: Record<string, unknown> = {
+    log: { loglevel: 'warning' },
+    inbounds: [proxyInbound],
+    outbounds: outbounds,
+  };
+
+  if (isChain) {
+    config.routing = {
+      rules: [{ type: 'field', inboundTag: [`in-${node.id}`], outboundTag: 'chain-exit' }],
+    };
+  }
+
+  return JSON.stringify(config, null, 2);
 }
 
 function xrayProtocol(protocol: string): string {

@@ -274,6 +274,12 @@ export default function NodesPage() {
       title: '名称',
       dataIndex: 'name',
       ellipsis: true,
+      render: (_: unknown, r: Node) => (
+        <Space size={4}>
+          <span>{r.name}</span>
+          {r.exitServer && <Tag color="purple" style={{ margin: 0 }}>链式 → {r.exitServer.name}</Tag>}
+        </Space>
+      ),
     },
     {
       title: '协议',
@@ -547,7 +553,10 @@ export default function NodesPage() {
           return (
             <Card key={node.id} size="small" style={{ borderRadius: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6, overflow: 'hidden' }}>
-                <Typography.Text strong style={{ fontSize: 14, minWidth: 0, flex: 1, marginRight: 8 }} ellipsis>{node.name}</Typography.Text>
+                <Space size={4} style={{ minWidth: 0, flex: 1, marginRight: 8 }}>
+                  <Typography.Text strong style={{ fontSize: 14 }} ellipsis>{node.name}</Typography.Text>
+                  {node.exitServer && <Tag color="purple" style={{ margin: 0, fontSize: 11 }}>链式</Tag>}
+                </Space>
                 <StatusTag status={node.status} enabled={node.enabled} />
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
