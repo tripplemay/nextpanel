@@ -83,7 +83,7 @@ export function generateChainExitConfig(
       routing: {
         rules: [
           { type: 'field', source: [entryServerIp], outboundTag: 'direct' },
-          { type: 'field', outboundTag: 'blocked' },
+          { type: 'field', network: 'tcp,udp', outboundTag: 'blocked' },
         ],
       },
     },
