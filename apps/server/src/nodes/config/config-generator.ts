@@ -70,7 +70,7 @@ export function generateChainExitConfig(
           listen: '0.0.0.0',
           protocol: 'vless',
           settings: {
-            clients: [{ id: chainUuid, encryption: 'none' }],
+            clients: [{ id: chainUuid }],
             decryption: 'none',
           },
           streamSettings: { network: 'tcp', security: 'none' },
