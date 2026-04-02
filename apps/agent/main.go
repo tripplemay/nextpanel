@@ -12,12 +12,17 @@ import (
 )
 
 const (
-	version           = "1.5.6"
+	version           = "1.5.7"
 	heartbeatInterval = 10 * time.Second
 	httpTimeout       = 8 * time.Second
 )
 
-var httpClient = &http.Client{Timeout: httpTimeout}
+var httpClient = &http.Client{
+	Timeout: httpTimeout,
+	Transport: &http.Transport{
+		DisableKeepAlives: true,
+	},
+}
 
 type nodeStatus struct {
 	NodeID string `json:"nodeId"`
