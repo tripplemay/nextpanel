@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	version           = "1.5.5"
+	version           = "1.5.6"
 	heartbeatInterval = 10 * time.Second
 	httpTimeout       = 8 * time.Second
 )
@@ -67,7 +67,8 @@ func discoverChainServices() []nodeStatus {
 			continue
 		}
 		fields := strings.Fields(line)
-		if len(fields) < 3 {
+		// systemctl list-units columns: UNIT LOAD ACTIVE SUB [DESCRIPTION...]
+		if len(fields) < 4 {
 			continue
 		}
 		// fields[0] = "nextpanel-chain-<nodeId>.service"
@@ -78,9 +79,9 @@ func discoverChainServices() []nodeStatus {
 			continue
 		}
 		status := "STOPPED"
-		if fields[2] == "running" {
+		if fields[3] == "running" {
 			status = "RUNNING"
-		} else if fields[2] == "failed" {
+		} else if fields[3] == "failed" {
 			status = "ERROR"
 		}
 		statuses = append(statuses, nodeStatus{NodeID: name, Status: status})
