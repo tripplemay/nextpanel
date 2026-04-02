@@ -27,7 +27,11 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
               users: [{ id: node.chainUuid, encryption: 'none' }],
             }],
           },
-          streamSettings: { network: 'tcp', security: 'none' },
+          streamSettings: {
+            network: 'tcp',
+            security: 'none',
+            sockopt: { tcpKeepAliveInterval: 30 },
+          },
         },
       ]
     : [{ protocol: 'freedom', tag: 'direct' }];

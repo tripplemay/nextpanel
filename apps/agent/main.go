@@ -6,24 +6,34 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os/exec"
 	"strings"
 	"time"
 )
 
 const (
-	version           = "1.5.4"
+	version           = "1.5.5"
 	heartbeatInterval = 10 * time.Second
+	httpTimeout       = 8 * time.Second
 )
 
+var httpClient = &http.Client{Timeout: httpTimeout}
+
+type nodeStatus struct {
+	NodeID string `json:"nodeId"`
+	Status string `json:"status"` // RUNNING | STOPPED | ERROR
+}
+
 type heartbeatPayload struct {
-	AgentToken   string            `json:"agentToken"`
-	AgentVersion string            `json:"agentVersion"`
-	CPU          float64           `json:"cpu"`
-	Mem          float64           `json:"mem"`
-	Disk         float64           `json:"disk"`
-	NetworkIn    uint64            `json:"networkIn"`
-	NetworkOut   uint64            `json:"networkOut"`
-	NodeTraffic  []nodeTrafficStat `json:"nodeTraffic,omitempty"`
+	AgentToken    string            `json:"agentToken"`
+	AgentVersion  string            `json:"agentVersion"`
+	CPU           float64           `json:"cpu"`
+	Mem           float64           `json:"mem"`
+	Disk          float64           `json:"disk"`
+	NetworkIn     uint64            `json:"networkIn"`
+	NetworkOut    uint64            `json:"networkOut"`
+	NodeTraffic   []nodeTrafficStat `json:"nodeTraffic,omitempty"`
+	NodeStatuses  []nodeStatus      `json:"nodeStatuses,omitempty"`
 }
 
 type ipCheckTask struct {
@@ -42,16 +52,53 @@ type heartbeatResponse struct {
 	UpdateCommand *updateCommand `json:"updateCommand,omitempty"`
 }
 
-func sendHeartbeat(cfg *Config, m *Metrics, traffic []nodeTrafficStat) (*heartbeatResponse, error) {
+// discoverChainServices finds all nextpanel-chain-* systemd services and returns their statuses.
+func discoverChainServices() []nodeStatus {
+	out, err := exec.Command(
+		"systemctl", "list-units", "--type=service", "--plain", "--no-legend",
+		"--all", "nextpanel-chain-*",
+	).Output()
+	if err != nil {
+		return nil
+	}
+	var statuses []nodeStatus
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		// fields[0] = "nextpanel-chain-<nodeId>.service"
+		name := fields[0]
+		name = strings.TrimPrefix(name, "nextpanel-chain-")
+		name = strings.TrimSuffix(name, ".service")
+		if name == "" {
+			continue
+		}
+		status := "STOPPED"
+		if fields[2] == "running" {
+			status = "RUNNING"
+		} else if fields[2] == "failed" {
+			status = "ERROR"
+		}
+		statuses = append(statuses, nodeStatus{NodeID: name, Status: status})
+	}
+	return statuses
+}
+
+func sendHeartbeat(cfg *Config, m *Metrics, traffic []nodeTrafficStat, chainStatuses []nodeStatus) (*heartbeatResponse, error) {
 	payload := heartbeatPayload{
-		AgentToken:   cfg.AgentToken,
-		AgentVersion: version,
-		CPU:          m.CPU,
-		Mem:          m.Mem,
-		Disk:         m.Disk,
-		NetworkIn:    m.NetworkIn,
-		NetworkOut:   m.NetworkOut,
-		NodeTraffic:  traffic,
+		AgentToken:    cfg.AgentToken,
+		AgentVersion:  version,
+		CPU:           m.CPU,
+		Mem:           m.Mem,
+		Disk:          m.Disk,
+		NetworkIn:     m.NetworkIn,
+		NetworkOut:    m.NetworkOut,
+		NodeTraffic:   traffic,
+		NodeStatuses:  chainStatuses,
 	}
 
 	body, err := json.Marshal(payload)
@@ -60,7 +107,7 @@ func sendHeartbeat(cfg *Config, m *Metrics, traffic []nodeTrafficStat) (*heartbe
 	}
 
 	url := strings.TrimRight(cfg.ServerURL, "/") + "/api/agent/heartbeat"
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	resp, err := httpClient.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("请求失败: %w", err)
 	}
@@ -97,7 +144,8 @@ func main() {
 			log.Printf("采集指标失败: %v", err)
 		} else {
 			traffic := collectNodeTraffic(xrayNodes)
-			hbResp, err := sendHeartbeat(cfg, m, traffic)
+			chainStatuses := discoverChainServices()
+			hbResp, err := sendHeartbeat(cfg, m, traffic, chainStatuses)
 			if err != nil {
 				log.Printf("心跳发送失败: %v", err)
 			} else {

@@ -30,7 +30,7 @@ export class PingScheduler {
 
   @Interval(30_000)
   async markStaleServersOffline() {
-    const threshold = new Date(Date.now() - 60_000);
+    const threshold = new Date(Date.now() - 120_000);
     const result = await this.prisma.server.updateMany({
       where: {
         status: 'ONLINE',

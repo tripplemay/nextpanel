@@ -40,16 +40,5 @@ export class MetricsService {
     await this.prisma.serverMetric.create({
       data: { serverId, cpu, mem, disk, networkIn, networkOut },
     });
-
-    await this.prisma.server.update({
-      where: { id: serverId },
-      data: {
-        status: 'ONLINE',
-        cpuUsage: cpu,
-        memUsage: mem,
-        diskUsage: disk,
-        lastSeenAt: new Date(),
-      },
-    });
   }
 }

@@ -73,7 +73,11 @@ export function generateChainExitConfig(
             clients: [{ id: chainUuid }],
             decryption: 'none',
           },
-          streamSettings: { network: 'tcp', security: 'none' },
+          streamSettings: {
+            network: 'tcp',
+            security: 'none',
+            sockopt: { tcpKeepAliveInterval: 30 },
+          },
         },
       ],
       outbounds: [

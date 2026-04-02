@@ -181,8 +181,12 @@ export class AgentService {
 
     if (payload.nodeStatuses) {
       for (const { nodeId, status } of payload.nodeStatuses) {
+        // Update regular nodes on this server OR chain exit nodes hosted on this server
         await this.prisma.node.updateMany({
-          where: { id: nodeId, serverId: server.id },
+          where: {
+            id: nodeId,
+            OR: [{ serverId: server.id }, { exitServerId: server.id }],
+          },
           data: { status },
         });
       }
