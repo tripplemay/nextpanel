@@ -10,6 +10,7 @@ const configPath = "/etc/nextpanel/agent.json"
 
 type Config struct {
 	ServerURL  string `json:"serverUrl"`
+	DirectURL  string `json:"directUrl,omitempty"`
 	AgentToken string `json:"agentToken"`
 }
 

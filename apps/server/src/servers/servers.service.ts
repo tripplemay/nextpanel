@@ -406,10 +406,15 @@ export class ServersService {
 
       // 写入配置文件
       onLog('写入配置文件...');
-      const configJson = JSON.stringify({
+      const directUrl = process.env.PANEL_DIRECT_URL ?? '';
+      const agentConfig: Record<string, string> = {
         serverUrl: panelUrl,
         agentToken: server.agentToken,
-      });
+      };
+      if (directUrl) {
+        agentConfig.directUrl = directUrl;
+      }
+      const configJson = JSON.stringify(agentConfig);
       const b64Config = Buffer.from(configJson).toString('base64');
       await ssh.execCommand('mkdir -p /etc/nextpanel');
       await ssh.execCommand(

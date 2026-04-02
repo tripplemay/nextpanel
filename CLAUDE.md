@@ -145,6 +145,7 @@ Swagger UI：http://localhost:3001/api/docs（后端运行时可访问）
 | `PORT` | 服务端口，默认 `3001` |
 | `ALLOWED_ORIGIN` | CORS 来源，默认 `http://localhost:3000`——本地开发设为 `http://localhost:3400` |
 | `PANEL_URL` | 面板公网 URL（Agent 安装脚本使用），如 `https://your-panel-domain.com` |
+| `PANEL_DIRECT_URL` | Agent 直连 URL（绕过 CF），如 `http://面板IP:3003`。可选，设置后 Agent 心跳走 IP 直连 |
 | `GITHUB_REPO` | Agent 发布的 GitHub 仓库路径，如 `your-username/nextpanel` |
 
 前端（`apps/web/.env.local`）：

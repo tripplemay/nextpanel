@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	version           = "1.5.7"
+	version           = "1.6.0"
 	heartbeatInterval = 10 * time.Second
 	httpTimeout       = 8 * time.Second
 )
@@ -112,8 +112,18 @@ func sendHeartbeat(cfg *Config, m *Metrics, traffic []nodeTrafficStat, chainStat
 		return nil, err
 	}
 
-	url := strings.TrimRight(cfg.ServerURL, "/") + "/api/agent/heartbeat"
+	// Prefer direct IP connection (bypasses CF), fall back to CF URL
+	baseURL := cfg.ServerURL
+	if cfg.DirectURL != "" {
+		baseURL = cfg.DirectURL
+	}
+	url := strings.TrimRight(baseURL, "/") + "/api/agent/heartbeat"
 	resp, err := httpClient.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil && cfg.DirectURL != "" && baseURL == cfg.DirectURL {
+		// Direct connection failed, fall back to CF URL
+		url = strings.TrimRight(cfg.ServerURL, "/") + "/api/agent/heartbeat"
+		resp, err = httpClient.Post(url, "application/json", bytes.NewReader(body))
+	}
 	if err != nil {
 		return nil, fmt.Errorf("请求失败: %w", err)
 	}
@@ -136,7 +146,11 @@ func main() {
 		log.Fatalf("启动失败: %v", err)
 	}
 
-	log.Printf("NextPanel Agent v%s 启动，面板地址: %s", version, cfg.ServerURL)
+	if cfg.DirectURL != "" {
+		log.Printf("NextPanel Agent v%s 启动，直连: %s（备用: %s）", version, cfg.DirectURL, cfg.ServerURL)
+	} else {
+		log.Printf("NextPanel Agent v%s 启动，面板地址: %s", version, cfg.ServerURL)
+	}
 
 	ensureNexttrace()
 
