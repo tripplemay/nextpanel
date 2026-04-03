@@ -645,6 +645,37 @@ export class NodeDeployService {
 
     await uploadText(exitSsh, unit, `/etc/systemd/system/${exitServiceName}.service`);
 
+    // Kill any orphaned process occupying the exit port before starting
+    log(`[出口] 检查端口 ${node.exitPort} 是否被占用...`);
+    const { stdout: fuserOut } = await exitSsh.execCommand(
+      `fuser ${node.exitPort}/tcp 2>/dev/null || true`,
+    );
+    const occupyingPids = fuserOut.trim().split(/\s+/).filter(Boolean);
+    if (occupyingPids.length > 0) {
+      // Find and stop any orphaned nextpanel-chain-* service on this port
+      const { stdout: unitList } = await exitSsh.execCommand(
+        `systemctl list-units 'nextpanel-chain-*' --plain --no-legend --all | awk '{print $1}'`,
+      );
+      for (const unit of unitList.trim().split('\n').filter(Boolean)) {
+        if (unit === `${exitServiceName}.service`) continue; // skip our own service
+        const { stdout: mainPid } = await exitSsh.execCommand(
+          `systemctl show ${unit} -p MainPID --value 2>/dev/null || true`,
+        );
+        if (occupyingPids.includes(mainPid.trim())) {
+          log(`[出口] 停止占用端口的孤儿服务 ${unit} (PID ${mainPid.trim()})...`);
+          await exitSsh.execCommand(`systemctl stop ${unit}; systemctl disable ${unit}; rm -f /etc/systemd/system/${unit}`);
+        }
+      }
+      // Kill any remaining orphaned xray process on the port
+      for (const pid of occupyingPids) {
+        const { stdout: comm } = await exitSsh.execCommand(`cat /proc/${pid}/comm 2>/dev/null || true`);
+        if (comm.trim() === 'xray') {
+          log(`[出口] 终止占用端口的孤儿进程 (PID ${pid})...`);
+          await exitSsh.execCommand(`kill -9 ${pid} 2>/dev/null || true`);
+        }
+      }
+    }
+
     // Start service
     await exitSsh.execCommand('systemctl daemon-reload');
     await exitSsh.execCommand(`systemctl stop ${exitServiceName} 2>/dev/null || true`);
