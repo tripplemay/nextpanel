@@ -109,6 +109,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       add('alterId', 0);
       add('cipher', 'auto');
       add('network', net);
+      if (tls === 'REALITY') add('flow', REALITY_FLOW);
       if (tlsEnabled) add('tls', true);
       if (sni) add('servername', sni);
       if (net === 'ws') {
@@ -159,6 +160,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       add('server', host);
       add('port', port);
       add('password', creds.password ?? '');
+      add('tls', true);
       if (sni) add('sni', sni);
       add('network', net);
       if (net === 'ws') {
@@ -428,7 +430,6 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
       `    type: http`,
       `    behavior: ${RULE_BEHAVIOR[name]}`,
       `    url: "${base}/api/rules/${name}"`,
-      `    path: ./rules/${name}.yaml`,
       `    interval: 86400`,
     );
   }
@@ -513,11 +514,8 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
 
   // ── top-level config (required by ClashX / original Clash) ────────────────
   const topLevel = [
-    'mixed-port: 7890',
-    'allow-lan: false',
     'mode: rule',
     'log-level: info',
-    'external-controller: 127.0.0.1:9090',
   ].join('\n');
 
   return [

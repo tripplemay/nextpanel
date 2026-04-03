@@ -357,11 +357,12 @@ export class SubscriptionsService {
       });
     }
 
-    for (const { externalNode: en } of sub.externalNodes as { externalNode: { name: string; protocol: string; address: string; port: number; transport: string | null; tls: string; sni: string | null; path: string | null; uuid: string | null; password: string | null; method: string | null } }[]) {
+    for (const { externalNode: en } of sub.externalNodes as { externalNode: { name: string; protocol: string; address: string; port: number; transport: string | null; tls: string; sni: string | null; path: string | null; uuid: string | null; password: string | null; method: string | null; realityPublicKey: string | null } }[]) {
       const credentials: Record<string, string> = {};
       if (en.uuid) credentials.uuid = en.uuid;
       if (en.password) credentials.password = en.password;
       if (en.method) credentials.method = en.method;
+      if (en.realityPublicKey) credentials.realityPublicKey = en.realityPublicKey;
       result.push({
         name: en.name,
         protocol: en.protocol,

@@ -14,6 +14,7 @@ export interface ExternalNodeData {
   method?: string;
   transport?: string;
   tls: string;
+  realityPublicKey?: string;
   sni?: string;
   path?: string;
   rawUri: string;
@@ -95,6 +96,7 @@ function parseVless(uri: string): ExternalNodeData | null {
       uuid,
       transport,
       tls,
+      realityPublicKey: query.get('pbk') ?? undefined,
       sni: query.get('sni') ?? query.get('host') ?? '',
       path: query.get('path') ?? query.get('serviceName') ?? '',
       rawUri: uri,

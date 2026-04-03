@@ -56,6 +56,7 @@ export class ExternalNodesService {
         method: n.method,
         transport: n.transport,
         tls: n.tls,
+        realityPublicKey: n.realityPublicKey,
         sni: n.sni,
         path: n.path,
         rawUri: n.rawUri,

@@ -1,0 +1,289 @@
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+external-controller: :9090
+
+rule-providers:
+  reject:
+    type: http
+    behavior: domain
+    url: "https://vpn.vpanel.cc/api/rules/reject"
+    path: ./rules/reject.yaml
+    interval: 86400
+  proxy:
+    type: http
+    behavior: domain
+    url: "https://vpn.vpanel.cc/api/rules/proxy"
+    path: ./rules/proxy.yaml
+    interval: 86400
+  direct:
+    type: http
+    behavior: domain
+    url: "https://vpn.vpanel.cc/api/rules/direct"
+    path: ./rules/direct.yaml
+    interval: 86400
+  cncidr:
+    type: http
+    behavior: ipcidr
+    url: "https://vpn.vpanel.cc/api/rules/cncidr"
+    path: ./rules/cncidr.yaml
+    interval: 86400
+  telegramcidr:
+    type: http
+    behavior: ipcidr
+    url: "https://vpn.vpanel.cc/api/rules/telegramcidr"
+    path: ./rules/telegramcidr.yaml
+    interval: 86400
+  netflix:
+    type: http
+    behavior: classical
+    url: "https://vpn.vpanel.cc/api/rules/netflix"
+    path: ./rules/netflix.yaml
+    interval: 86400
+  youtube:
+    type: http
+    behavior: classical
+    url: "https://vpn.vpanel.cc/api/rules/youtube"
+    path: ./rules/youtube.yaml
+    interval: 86400
+  apple:
+    type: http
+    behavior: classical
+    url: "https://vpn.vpanel.cc/api/rules/apple"
+    path: ./rules/apple.yaml
+    interval: 86400
+  microsoft:
+    type: http
+    behavior: classical
+    url: "https://vpn.vpanel.cc/api/rules/microsoft"
+    path: ./rules/microsoft.yaml
+    interval: 86400
+  openai:
+    type: http
+    behavior: classical
+    url: "https://vpn.vpanel.cc/api/rules/openai"
+    path: ./rules/openai.yaml
+    interval: 86400
+
+proxies:
+  - name: Hong Kong · vienam
+    type: vless
+    server: 38.175.193.100
+    port: 10000
+    uuid: bb60d48e-5150-4cb3-a4cc-cc962f85296a
+    network: tcp
+    flow: xtls-rprx-vision
+    tls: true
+    servername: addons.mozilla.org
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: fUnPDuWTLUxpPAiRKRc20ij52ddE9UY28P7hv1m8Fmg
+      short-id: ""
+  - name: Singapore · vietnam
+    type: vless
+    server: 156.245.144.237
+    port: 10001
+    uuid: f1acdb97-2b64-46e8-b8d9-8f5f6e038551
+    network: tcp
+    flow: xtls-rprx-vision
+    tls: true
+    servername: addons.mozilla.org
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: BsOhQ6L-9mQ4_-JdFiGlNEUlogZ1KQIjteGfwZVjCy4
+      short-id: ""
+  - name: Hong Kong · Victoria-1
+    type: vless
+    server: 210.0.244.173
+    port: 10000
+    uuid: e72690e3-011b-40b2-afd2-2fcca2a3eb58
+    network: tcp
+    flow: xtls-rprx-vision
+    tls: true
+    servername: addons.mozilla.org
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: n3DqU4UthjFog8KHVvl9PdwI8JP6gBVsyTy8N_xsk0M
+      short-id: ""
+  - name: Vietnam · Quan Bon-1
+    type: vless
+    server: 180.93.128.123
+    port: 10000
+    uuid: 521b6ae4-72d3-4154-81a7-49073159355d
+    network: tcp
+    flow: xtls-rprx-vision
+    tls: true
+    servername: addons.mozilla.org
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: SEYVHs1qeqXiZDsbNV3vfhg4Ei8xd_nl5wVe-CCx1jU
+      short-id: ""
+  - name: Hong Kong · Victoria-2
+    type: vless
+    server: np-cmmgfa1r.3333770.xyz
+    port: 12000
+    uuid: fc5773d4-b0c0-49ec-8636-2b3ec572af66
+    network: tcp
+    tls: true
+    servername: np-cmmgfa1r.3333770.xyz
+  - name: Singapore · AI-2
+    type: vless
+    server: np-cmmegscs.3333770.xyz
+    port: 443
+    uuid: 6ba4e0cd-9ee2-4433-8f04-10607327be00
+    network: ws
+    tls: true
+    servername: np-cmmegscs.3333770.xyz
+    ws-opts:
+      path: /
+  - name: Singapore · AI-3
+    type: vless
+    server: np-cmmec0qy.3333770.xyz
+    port: 12000
+    uuid: 32d915aa-1893-438f-921f-4009a9f7bd2f
+    network: tcp
+    tls: true
+    servername: np-cmmec0qy.3333770.xyz
+  - name: Singapore · AI-1
+    type: vless
+    server: 156.245.144.237
+    port: 10000
+    uuid: 265392df-9ee3-4adb-a589-560b632151cc
+    network: tcp
+    flow: xtls-rprx-vision
+    tls: true
+    servername: addons.mozilla.org
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: SOCwFZ_OE9E2t4x4nFR3Bc8EusUp-rYc_Ap__9oiQVU
+      short-id: ""
+
+proxy-groups:
+  - name: 🚀 节点选择
+    type: select
+    proxies:
+      - ⚡ 自动选择
+      - Hong Kong · vienam
+      - Singapore · vietnam
+      - Hong Kong · Victoria-1
+      - Vietnam · Quan Bon-1
+      - Hong Kong · Victoria-2
+      - Singapore · AI-2
+      - Singapore · AI-3
+      - Singapore · AI-1
+  - name: ⚡ 自动选择
+    type: url-test
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+    proxies:
+      - Hong Kong · vienam
+      - Singapore · vietnam
+      - Hong Kong · Victoria-1
+      - Vietnam · Quan Bon-1
+      - Hong Kong · Victoria-2
+      - Singapore · AI-2
+      - Singapore · AI-3
+      - Singapore · AI-1
+  - name: 🎬 Netflix
+    type: select
+    proxies:
+      - 🚀 节点选择
+      - Hong Kong · vienam
+      - Singapore · vietnam
+      - Hong Kong · Victoria-1
+      - Vietnam · Quan Bon-1
+      - Hong Kong · Victoria-2
+      - Singapore · AI-2
+      - Singapore · AI-3
+      - Singapore · AI-1
+  - name: 📺 YouTube
+    type: select
+    proxies:
+      - 🚀 节点选择
+      - Hong Kong · vienam
+      - Singapore · vietnam
+      - Hong Kong · Victoria-1
+      - Vietnam · Quan Bon-1
+      - Hong Kong · Victoria-2
+      - Singapore · AI-2
+      - Singapore · AI-3
+      - Singapore · AI-1
+  - name: 📱 Telegram
+    type: select
+    proxies:
+      - 🚀 节点选择
+      - Hong Kong · vienam
+      - Singapore · vietnam
+      - Hong Kong · Victoria-1
+      - Vietnam · Quan Bon-1
+      - Hong Kong · Victoria-2
+      - Singapore · AI-2
+      - Singapore · AI-3
+      - Singapore · AI-1
+  - name: 🤖 AI 服务
+    type: select
+    proxies:
+      - 🚀 节点选择
+      - Hong Kong · vienam
+      - Singapore · vietnam
+      - Hong Kong · Victoria-1
+      - Vietnam · Quan Bon-1
+      - Hong Kong · Victoria-2
+      - Singapore · AI-2
+      - Singapore · AI-3
+      - Singapore · AI-1
+  - name: 🍎 Apple
+    type: select
+    proxies:
+      - DIRECT
+      - 🚀 节点选择
+      - Hong Kong · vienam
+      - Singapore · vietnam
+      - Hong Kong · Victoria-1
+      - Vietnam · Quan Bon-1
+      - Hong Kong · Victoria-2
+      - Singapore · AI-2
+      - Singapore · AI-3
+      - Singapore · AI-1
+  - name: 🪟 Microsoft
+    type: select
+    proxies:
+      - DIRECT
+      - 🚀 节点选择
+      - Hong Kong · vienam
+      - Singapore · vietnam
+      - Hong Kong · Victoria-1
+      - Vietnam · Quan Bon-1
+      - Hong Kong · Victoria-2
+      - Singapore · AI-2
+      - Singapore · AI-3
+      - Singapore · AI-1
+  - name: 🐟 漏网之鱼
+    type: select
+    proxies:
+      - 🚀 节点选择
+      - DIRECT
+      - Hong Kong · vienam
+      - Singapore · vietnam
+      - Hong Kong · Victoria-1
+      - Vietnam · Quan Bon-1
+      - Hong Kong · Victoria-2
+      - Singapore · AI-2
+      - Singapore · AI-3
+      - Singapore · AI-1
+
+rules:
+  - RULE-SET,reject,REJECT
+  - RULE-SET,netflix,🎬 Netflix
+  - RULE-SET,youtube,📺 YouTube
+  - RULE-SET,apple,🍎 Apple
+  - RULE-SET,microsoft,🪟 Microsoft
+  - RULE-SET,telegramcidr,📱 Telegram
+  - RULE-SET,openai,🤖 AI 服务
+  - RULE-SET,proxy,🚀 节点选择
+  - RULE-SET,direct,DIRECT
+  - RULE-SET,cncidr,DIRECT
+  - GEOIP,LAN,DIRECT
+  - GEOIP,CN,DIRECT
+  - MATCH,🐟 漏网之鱼

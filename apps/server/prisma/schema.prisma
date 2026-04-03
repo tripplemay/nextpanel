@@ -288,10 +288,11 @@ model ExternalNode {
   password      String?
   method        String?
   transport     String?
-  tls           String   @default("NONE")
-  sni           String?
-  path          String?
-  rawUri        String?
+  tls              String   @default("NONE")
+  realityPublicKey String?
+  sni              String?
+  path             String?
+  rawUri           String?
   lastTestedAt  DateTime?
   lastReachable Boolean?
   lastLatency   Int?
