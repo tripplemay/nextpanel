@@ -19,27 +19,25 @@ interface SubFormat {
   key: string;
   label: string;
   url: string;
+  /** Hiddify: the actual subscription URL (deep link is in url, this is the fallback V2Ray link) */
+  extra?: string;
 }
 
 function getFormats(token: string): SubFormat[] {
   const base = `${window.location.origin}/api/subscriptions/link/${token}`;
-  const singboxUrl = `${base}/singbox`;
   return [
-    { key: 'v2ray', label: 'V2Ray / Xray Base64', url: base },
-    { key: 'clash', label: 'Clash / Mihomo YAML', url: `${base}/clash` },
-    { key: 'singbox', label: 'Sing-box JSON', url: singboxUrl },
-    { key: 'hiddify', label: 'Hiddify', url: `hiddify://import/${btoa(singboxUrl)}` },
+    { key: 'hiddify', label: 'Hiddify（推荐）', url: `hiddify://import/${base}#NextPanel`, extra: base },
+    { key: 'clash', label: 'Clash', url: `${base}/clash` },
+    { key: 'v2ray', label: '通用', url: base },
   ];
 }
 
 function getShareFormats(shareToken: string): SubFormat[] {
   const base = `${window.location.origin}/api/subscriptions/share/${shareToken}`;
-  const singboxUrl = `${base}/singbox`;
   return [
-    { key: 'v2ray', label: 'V2Ray / Xray Base64', url: base },
-    { key: 'clash', label: 'Clash / Mihomo YAML', url: `${base}/clash` },
-    { key: 'singbox', label: 'Sing-box JSON', url: singboxUrl },
-    { key: 'hiddify', label: 'Hiddify', url: `hiddify://import/${btoa(singboxUrl)}` },
+    { key: 'hiddify', label: 'Hiddify（推荐）', url: `hiddify://import/${base}#NextPanel`, extra: base },
+    { key: 'clash', label: 'Clash', url: `${base}/clash` },
+    { key: 'v2ray', label: '通用', url: base },
   ];
 }
 
@@ -452,49 +450,59 @@ export default function SubscriptionsPage() {
 }
 
 const FORMAT_DESCRIPTIONS: Record<string, string> = {
-  v2ray: '通用格式，兼容 v2rayN、Shadowrocket 等',
-  clash: '适合 Clash Verge、Stash 等需要分流规则的客户端',
-  singbox: '适合 sing-box 原生客户端',
+  clash: '适合 Clash Verge、Stash 等需要精细分流规则的客户端',
+  v2ray: '适合 v2rayN、Shadowrocket 等客户端',
 };
 
 function LinkTabs({ formats, onCopy }: { formats: SubFormat[]; onCopy: (url: string) => void }) {
   const { isMobile } = useIsMobile();
-
-  // Find the sing-box URL for use in Hiddify tab QR code / fallback
-  const singboxFormat = formats.find((f) => f.key === 'singbox');
+  const [showQr, setShowQr] = useState(isMobile);
 
   return (
     <Tabs
+      defaultActiveKey="hiddify"
       items={formats.map((f) => ({
         key: f.key,
         label: f.label,
         children: f.key === 'hiddify' ? (
           <Space direction="vertical" style={{ width: '100%' }} size={16}>
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              推荐使用 Hiddify 客户端，全平台免费开源
+              推荐使用 Hiddify 客户端，全平台免费开源。支持 iOS / Android / Windows / macOS / Linux。
             </Typography.Text>
             <div style={{ textAlign: 'center' }}>
-              <a href={f.url} target="_self">
+              <a href={f.url}>
                 <Button type="primary" size="large" style={{ background: '#52c41a', borderColor: '#52c41a', fontWeight: 500, padding: '0 32px' }}>
                   一键导入 Hiddify
                 </Button>
               </a>
             </div>
-            {singboxFormat && (
-              <>
-                <div>
-                  <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-                    Sing-box 订阅链接（手动导入备用）
-                  </Typography.Text>
-                  <Space.Compact style={{ width: '100%' }}>
-                    <Input value={singboxFormat.url} readOnly />
-                    <Button onClick={() => onCopy(singboxFormat.url)}>复制</Button>
-                  </Space.Compact>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'center' }}>
-                  <QRCode value={singboxFormat.url} size={isMobile ? 160 : 200} />
-                </div>
-              </>
+            {f.extra && (
+              <div>
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                  订阅链接（手动添加时复制此链接）
+                </Typography.Text>
+                <Space.Compact style={{ width: '100%' }}>
+                  <Input value={f.extra} readOnly />
+                  <Button onClick={() => onCopy(f.extra!)}>复制</Button>
+                </Space.Compact>
+              </div>
+            )}
+            {isMobile && f.extra && (
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <QRCode value={f.extra} size={160} />
+              </div>
+            )}
+            {!isMobile && f.extra && (
+              <div style={{ textAlign: 'center' }}>
+                <Button type="link" size="small" onClick={() => setShowQr((v) => !v)}>
+                  {showQr ? '收起二维码' : '显示二维码'}
+                </Button>
+                {showQr && (
+                  <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+                    <QRCode value={f.extra} size={200} />
+                  </div>
+                )}
+              </div>
             )}
             <div style={{ textAlign: 'center' }}>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -513,9 +521,23 @@ function LinkTabs({ formats, onCopy }: { formats: SubFormat[]; onCopy: (url: str
               <Input value={f.url} readOnly />
               <Button onClick={() => onCopy(f.url)}>复制</Button>
             </Space.Compact>
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <QRCode value={f.url} size={isMobile ? 160 : 200} />
-            </div>
+            {isMobile && (
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <QRCode value={f.url} size={160} />
+              </div>
+            )}
+            {!isMobile && (
+              <div style={{ textAlign: 'center' }}>
+                <Button type="link" size="small" onClick={() => setShowQr((v) => !v)}>
+                  {showQr ? '收起二维码' : '显示二维码'}
+                </Button>
+                {showQr && (
+                  <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+                    <QRCode value={f.url} size={200} />
+                  </div>
+                )}
+              </div>
+            )}
           </Space>
         ),
       }))}

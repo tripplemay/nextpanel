@@ -85,7 +85,7 @@ export default function NodeShareModal({ node, onClose }: Props) {
                     推荐使用 Hiddify 客户端，全平台免费开源
                   </Typography.Text>
                   <div style={{ textAlign: 'center' }}>
-                    <a href={`hiddify://import/${btoa(uri)}`} target="_self">
+                    <a href={`hiddify://import/${uri}#NextPanel`}>
                       <Button type="primary" size="large" style={{ background: '#52c41a', borderColor: '#52c41a', fontWeight: 500, padding: '0 32px' }}>
                         一键导入 Hiddify
                       </Button>
