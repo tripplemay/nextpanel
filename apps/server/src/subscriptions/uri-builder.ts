@@ -394,6 +394,76 @@ function yamlScalar(v: string | number | boolean): string {
   return v;
 }
 
+// ─── Full Sing-box subscription JSON ─────────────────────────────────────────
+
+export function buildFullSingboxConfig(nodes: NodeExportInfo[]): string {
+  const outbounds = nodes
+    .map((n) => buildSingboxOutbound(n))
+    .filter((o): o is Record<string, unknown> => o !== null);
+
+  const proxyTags = outbounds.map((o) => o.tag as string);
+
+  const config = {
+    log: { level: 'info' },
+    dns: {
+      servers: [
+        { tag: 'proxy-dns', address: 'https://8.8.8.8/dns-query', detour: '🚀 节点选择' },
+        { tag: 'direct-dns', address: 'https://223.5.5.5/dns-query', detour: 'direct' },
+        { tag: 'block-dns', address: 'rcode://success' },
+      ],
+      rules: [
+        { rule_set: ['geosite-category-ads-all'], server: 'block-dns' },
+        { rule_set: ['geosite-cn'], server: 'direct-dns' },
+      ],
+      strategy: 'prefer_ipv4',
+    },
+    outbounds: [
+      ...outbounds,
+      {
+        type: 'urltest',
+        tag: '⚡ 自动选择',
+        outbounds: proxyTags.length > 0 ? proxyTags : ['direct'],
+        url: 'http://www.gstatic.com/generate_204',
+        interval: '5m',
+      },
+      {
+        type: 'selector',
+        tag: '🚀 节点选择',
+        outbounds: proxyTags.length > 0 ? ['⚡ 自动选择', ...proxyTags] : ['direct'],
+        default: '⚡ 自动选择',
+      },
+      { type: 'direct', tag: 'direct' },
+      { type: 'block', tag: 'block' },
+      { type: 'dns', tag: 'dns-out' },
+    ],
+    route: {
+      rule_set: [
+        { tag: 'geosite-cn', type: 'remote', format: 'binary', url: 'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs' },
+        { tag: 'geoip-cn', type: 'remote', format: 'binary', url: 'https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs' },
+        { tag: 'geosite-category-ads-all', type: 'remote', format: 'binary', url: 'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads-all.srs' },
+      ],
+      rules: [
+        { protocol: 'dns', outbound: 'dns-out' },
+        { rule_set: ['geosite-category-ads-all'], outbound: 'block' },
+        { rule_set: ['geosite-cn'], outbound: 'direct' },
+        { rule_set: ['geoip-cn'], outbound: 'direct' },
+        { ip_is_private: true, outbound: 'direct' },
+      ],
+      final: '🚀 节点选择',
+      auto_detect_interface: true,
+    },
+  };
+
+  return JSON.stringify(config, null, 2);
+}
+
+// ─── Hiddify deep link ──────────────────────────────────────────────────────
+
+/** Build Hiddify deep link from a subscription URL */
+export function buildHiddifyDeepLink(subscriptionUrl: string): string {
+  return `hiddify://import/${Buffer.from(subscriptionUrl).toString('base64')}`;
+}
+
 // ─── Full Clash / Mihomo subscription YAML ───────────────────────────────────
 
 const RULE_NAMES = ['reject', 'proxy', 'direct', 'cncidr', 'telegramcidr', 'netflix', 'youtube', 'apple', 'microsoft', 'openai'] as const;

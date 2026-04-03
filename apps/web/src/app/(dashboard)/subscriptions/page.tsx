@@ -23,19 +23,23 @@ interface SubFormat {
 
 function getFormats(token: string): SubFormat[] {
   const base = `${window.location.origin}/api/subscriptions/link/${token}`;
+  const singboxUrl = `${base}/singbox`;
   return [
     { key: 'v2ray', label: 'V2Ray / Xray Base64', url: base },
     { key: 'clash', label: 'Clash / Mihomo YAML', url: `${base}/clash` },
-    { key: 'singbox', label: 'Sing-box JSON', url: `${base}/singbox` },
+    { key: 'singbox', label: 'Sing-box JSON', url: singboxUrl },
+    { key: 'hiddify', label: 'Hiddify', url: `hiddify://import/${btoa(singboxUrl)}` },
   ];
 }
 
 function getShareFormats(shareToken: string): SubFormat[] {
   const base = `${window.location.origin}/api/subscriptions/share/${shareToken}`;
+  const singboxUrl = `${base}/singbox`;
   return [
     { key: 'v2ray', label: 'V2Ray / Xray Base64', url: base },
     { key: 'clash', label: 'Clash / Mihomo YAML', url: `${base}/clash` },
-    { key: 'singbox', label: 'Sing-box JSON', url: `${base}/singbox` },
+    { key: 'singbox', label: 'Sing-box JSON', url: singboxUrl },
+    { key: 'hiddify', label: 'Hiddify', url: `hiddify://import/${btoa(singboxUrl)}` },
   ];
 }
 
@@ -447,15 +451,64 @@ export default function SubscriptionsPage() {
   );
 }
 
+const FORMAT_DESCRIPTIONS: Record<string, string> = {
+  v2ray: '通用格式，兼容 v2rayN、Shadowrocket 等',
+  clash: '适合 Clash Verge、Stash 等需要分流规则的客户端',
+  singbox: '适合 sing-box 原生客户端',
+};
+
 function LinkTabs({ formats, onCopy }: { formats: SubFormat[]; onCopy: (url: string) => void }) {
   const { isMobile } = useIsMobile();
+
+  // Find the sing-box URL for use in Hiddify tab QR code / fallback
+  const singboxFormat = formats.find((f) => f.key === 'singbox');
+
   return (
     <Tabs
       items={formats.map((f) => ({
         key: f.key,
         label: f.label,
-        children: (
+        children: f.key === 'hiddify' ? (
           <Space direction="vertical" style={{ width: '100%' }} size={16}>
+            <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+              推荐使用 Hiddify 客户端，全平台免费开源
+            </Typography.Text>
+            <div style={{ textAlign: 'center' }}>
+              <a href={f.url} target="_self">
+                <Button type="primary" size="large" style={{ background: '#52c41a', borderColor: '#52c41a', fontWeight: 500, padding: '0 32px' }}>
+                  一键导入 Hiddify
+                </Button>
+              </a>
+            </div>
+            {singboxFormat && (
+              <>
+                <div>
+                  <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                    Sing-box 订阅链接（手动导入备用）
+                  </Typography.Text>
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Input value={singboxFormat.url} readOnly />
+                    <Button onClick={() => onCopy(singboxFormat.url)}>复制</Button>
+                  </Space.Compact>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <QRCode value={singboxFormat.url} size={isMobile ? 160 : 200} />
+                </div>
+              </>
+            )}
+            <div style={{ textAlign: 'center' }}>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                下载 Hiddify：<Typography.Link href="https://hiddify.com" target="_blank">hiddify.com</Typography.Link>
+              </Typography.Text>
+            </div>
+          </Space>
+        ) : (
+          <Space direction="vertical" style={{ width: '100%' }} size={16}>
+            {FORMAT_DESCRIPTIONS[f.key] && (
+              <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                {FORMAT_DESCRIPTIONS[f.key]}
+              </Typography.Text>
+            )}
             <Space.Compact style={{ width: '100%' }}>
               <Input value={f.url} readOnly />
               <Button onClick={() => onCopy(f.url)}>复制</Button>

@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException, ConflictException } 
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service';
 import { NodesService } from '../nodes/nodes.service';
-import { buildShareUri, buildClashSubscription, buildSingboxOutbound } from './uri-builder';
+import { buildShareUri, buildClashSubscription, buildSingboxOutbound, buildFullSingboxConfig } from './uri-builder';
 import type { NodeExportInfo } from './uri-builder';
 
 type SubscriptionNode = {
@@ -237,32 +237,7 @@ export class SubscriptionsService {
   /** Sing-box JSON subscription */
   async generateSingboxContent(token: string): Promise<string> {
     const nodes = await this.fetchActiveNodes({ token });
-
-    const outbounds = nodes
-      .map((n) => buildSingboxOutbound(n))
-      .filter((o): o is Record<string, unknown> => o !== null);
-
-    const tags = outbounds.map((o) => o.tag as string);
-
-    const config = {
-      log: { level: 'info' },
-      outbounds: [
-        ...outbounds,
-        {
-          type: 'selector',
-          tag: '🚀 节点选择',
-          outbounds: tags.length > 0 ? tags : ['direct'],
-          default: tags[0] ?? 'direct',
-        },
-        { type: 'direct', tag: 'direct' },
-        { type: 'block', tag: 'block' },
-      ],
-      route: {
-        final: '🚀 节点选择',
-      },
-    };
-
-    return JSON.stringify(config, null, 2);
+    return buildFullSingboxConfig(nodes);
   }
 
   /** Base64-encoded subscription via shareToken (VIEWER) */
@@ -287,30 +262,7 @@ export class SubscriptionsService {
   /** Sing-box JSON via shareToken (VIEWER) */
   async generateSingboxContentByShareToken(shareToken: string): Promise<string> {
     const nodes = await this.fetchActiveNodes({ shareToken });
-
-    const outbounds = nodes
-      .map((n) => buildSingboxOutbound(n))
-      .filter((o): o is Record<string, unknown> => o !== null);
-
-    const tags = outbounds.map((o) => o.tag as string);
-
-    const config = {
-      log: { level: 'info' },
-      outbounds: [
-        ...outbounds,
-        {
-          type: 'selector',
-          tag: '🚀 节点选择',
-          outbounds: tags.length > 0 ? tags : ['direct'],
-          default: tags[0] ?? 'direct',
-        },
-        { type: 'direct', tag: 'direct' },
-        { type: 'block', tag: 'block' },
-      ],
-      route: { final: '🚀 节点选择' },
-    };
-
-    return JSON.stringify(config, null, 2);
+    return buildFullSingboxConfig(nodes);
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────

@@ -26,7 +26,7 @@ const features = [
   {
     icon: <LinkOutlined style={{ fontSize: 18 }} />,
     title: '订阅管理',
-    desc: '生成 Clash / Sing-Box 订阅',
+    desc: '支持 Hiddify / Clash / Sing-Box 客户端',
   },
   {
     icon: <ImportOutlined style={{ fontSize: 18 }} />,
