@@ -46,7 +46,7 @@ return view.extend({
       _('Automatically syncs proxy configuration from your NextPanel panel to HomeProxy.'));
 
     // ── Settings section ──────────────────────────────────────────────────────
-    s = m.section(form.TypedSection, 'config', _('Settings'));
+    s = m.section(form.TypedSection, 'nextpanel', _('Settings'));
     s.anonymous = true;
     s.addremove = false;
 
@@ -69,7 +69,7 @@ return view.extend({
     o.rmempty = false;
 
     // ── Status section ────────────────────────────────────────────────────────
-    s = m.section(form.TypedSection, 'config', _('Sync Status'));
+    s = m.section(form.TypedSection, 'nextpanel', _('Sync Status'));
     s.anonymous = true;
     s.addremove = false;
 
@@ -100,7 +100,7 @@ return view.extend({
     };
 
     // ── Log section ───────────────────────────────────────────────────────────
-    s = m.section(form.TypedSection, 'config', _('Sync Log'));
+    s = m.section(form.TypedSection, 'nextpanel', _('Sync Log'));
     s.anonymous = true;
     s.addremove = false;
 
@@ -117,7 +117,7 @@ return view.extend({
     };
 
     // ── HomeProxy setup guide ─────────────────────────────────────────────────
-    s = m.section(form.TypedSection, 'config', _('HomeProxy Setup Guide'));
+    s = m.section(form.TypedSection, 'nextpanel', _('HomeProxy Setup Guide'));
     s.anonymous = true;
     s.addremove = false;
 
