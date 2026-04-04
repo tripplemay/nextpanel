@@ -140,7 +140,7 @@ setup_routing() {
         hp_add_list "np_proxy.urltest_nodes=$n"
     done
     hp_set "np_proxy.urltest_url=http://www.gstatic.com/generate_204"
-    hp_set "np_proxy.urltest_interval=3m"
+    hp_set "np_proxy.urltest_interval=180"   # strToTime adds 's' suffix → "180s" = 3 minutes
     hp_set "np_proxy.urltest_tolerance=50"
 
     # ── DNS servers ───────────────────────────────────────────────────────────
@@ -267,6 +267,15 @@ setup_routing() {
 
     # DNS global: default server = proxy DNS (8.8.8.8 via proxy)
     hp_set "dns.default_server=np_dns_proxy"
+
+    # Enable LAN traffic interception — without this HomeProxy generates
+    # empty firewall rules and no traffic is ever proxied
+    hp_set "control.lan_proxy_mode=allow_all"
+
+    # Disable HomeProxy server mode — it has no server node configured,
+    # causing generate_server.uc to fail and return 1 from start_service(),
+    # which skips the firewall setup entirely.
+    hp_set "server.enabled=0"
 
     uci commit "${HP_CFG}"
     log "UCI routing rules written (${node_count} nodes, 5 routing rules, 6 rule sets)"
