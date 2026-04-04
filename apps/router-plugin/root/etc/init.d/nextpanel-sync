@@ -1,12 +1,13 @@
 #!/bin/sh /etc/rc.common
-# NextPanel HomeProxy node sync service
-# Writes the NextPanel subscription URL into HomeProxy's UCI subscription list
-# and triggers HomeProxy's built-in node import.
+# NextPanel HomeProxy sync service
+# 1. Imports nodes via HomeProxy's subscription update script
+# 2. Writes complete routing rules into HomeProxy UCI (custom mode):
+#    ads block → AI services → streaming → China direct → default proxy
 
 START=99
 STOP=01
 EXTRA_COMMANDS="sync force_sync"
-EXTRA_HELP="	sync		Sync nodes from panel (respects enabled flag)
+EXTRA_HELP="	sync		Sync nodes and rules (respects enabled flag)
 	force_sync	Force sync regardless of enabled setting"
 
 LOGFILE=/var/log/nextpanel-sync.log
@@ -14,6 +15,9 @@ LOGMAX=200
 CRON_FILE=/etc/crontabs/root
 CRON_TAG="nextpanel-sync"
 HP_SCRIPTS="/etc/homeproxy/scripts"
+HP_CFG="homeproxy"
+
+# ─── Logging ──────────────────────────────────────────────────────────────────
 
 log() {
     local msg="$(date '+%Y-%m-%d %H:%M:%S') [nextpanel] $1"
@@ -21,26 +25,258 @@ log() {
     local lines
     lines=$(wc -l < "$LOGFILE" 2>/dev/null || echo 0)
     if [ "$lines" -gt "$LOGMAX" ]; then
-        local tmp="/tmp/nextpanel-log-trim-$$.tmp"
+        local tmp="/tmp/nextpanel-log-$$.tmp"
         tail -n "$LOGMAX" "$LOGFILE" > "$tmp" && mv "$tmp" "$LOGFILE"
     fi
 }
 
-get_cfg() {
-    uci -q get "nextpanel.config.$1"
-}
+# ─── UCI helpers ──────────────────────────────────────────────────────────────
+
+get_cfg() { uci -q get "nextpanel.config.$1"; }
 
 set_cfg() {
     uci -q set "nextpanel.config.$1=$2"
     uci -q commit nextpanel
 }
 
-# ─── Core sync logic ──────────────────────────────────────────────────────────
+hp_set()      { uci -q set      "${HP_CFG}.$1"; }
+hp_add_list() { uci -q add_list "${HP_CFG}.$1"; }
+hp_del()      { uci -q delete   "${HP_CFG}.$1" 2>/dev/null || true; }
+
+# ─── AI domain lists ─────────────────────────────────────────────────────────
+# domain_suffix: one entry covers ALL subdomains of a vendor's dedicated domain
+# These are written as inline UCI list options — no remote rule_set file needed.
+
+AI_SUFFIX="
+openai.com chatgpt.com oaiusercontent.com oaistatic.com sora.com
+anthropic.com claude.ai claudeusercontent.com
+perplexity.ai
+midjourney.com
+huggingface.co hf.co
+groq.com
+together.ai
+x.ai
+mistral.ai
+cohere.com cohere.ai
+stability.ai
+elevenlabs.io
+replicate.com replicate.delivery
+character.ai c.ai
+poe.com
+runwayml.com
+fireworks.ai
+deepseek.com
+inflection.ai pi.ai
+ai21.com
+aleph-alpha.com
+modal.com
+moonshot.ai kimi.ai
+"
+
+# domain: exact match — for AI APIs that share infrastructure domains
+AI_EXACT="
+generativelanguage.googleapis.com
+aistudio.google.com
+makersuite.google.com
+copilot.microsoft.com
+sydney.bing.com
+edgeservices.bing.com
+copilot.bing.com
+"
+
+# ─── Node import ─────────────────────────────────────────────────────────────
+
+import_nodes() {
+    local url="$1"
+
+    # Write subscription URL into HomeProxy's UCI subscription list
+    uci -q get "${HP_CFG}.subscription" > /dev/null 2>&1 || \
+        uci -q set "${HP_CFG}.subscription=${HP_CFG}"
+    uci -q delete "${HP_CFG}.subscription.subscription_url" 2>/dev/null || true
+    uci -q add_list "${HP_CFG}.subscription.subscription_url=${url}"
+    uci -q commit "${HP_CFG}"
+
+    log "Running HomeProxy subscription update..."
+    if ! ucode "${HP_SCRIPTS}/update_subscriptions.uc" >> "$LOGFILE" 2>&1; then
+        log "ERROR: HomeProxy subscription update failed"
+        return 1
+    fi
+    log "Node import complete"
+}
+
+# ─── Routing rules setup ─────────────────────────────────────────────────────
+
+setup_routing() {
+    # Collect UCI names of all imported nodes
+    local node_list
+    node_list=$(uci show "${HP_CFG}" 2>/dev/null | grep "=node$" | \
+                sed "s/${HP_CFG}\.\(.*\)=node/\1/")
+
+    if [ -z "$node_list" ]; then
+        log "ERROR: No nodes found in HomeProxy — cannot set up routing"
+        return 1
+    fi
+
+    local node_count
+    node_count=$(echo "$node_list" | wc -w)
+    log "Writing UCI routing rules for ${node_count} nodes..."
+
+    # ── Clean up all previous np_ sections ───────────────────────────────────
+    for sec in np_proxy \
+               np_dns_direct np_dns_proxy \
+               np_dns_rule_cn \
+               np_rs_ads np_rs_netflix np_rs_youtube np_rs_disney \
+               np_rs_cn_site np_rs_cn_ip \
+               np_rule_private np_rule_ads np_rule_ai \
+               np_rule_streaming np_rule_cn; do
+        hp_del "$sec"
+    done
+
+    # ── Routing node: urltest group with all imported nodes ───────────────────
+    hp_set "np_proxy=routing_node"
+    hp_set "np_proxy.enabled=1"
+    hp_set "np_proxy.node=urltest"
+    for n in $node_list; do
+        hp_add_list "np_proxy.urltest_nodes=$n"
+    done
+    hp_set "np_proxy.urltest_url=http://www.gstatic.com/generate_204"
+    hp_set "np_proxy.urltest_interval=3m"
+    hp_set "np_proxy.urltest_tolerance=50"
+
+    # ── DNS servers ───────────────────────────────────────────────────────────
+    hp_set "np_dns_direct=dns_server"
+    hp_set "np_dns_direct.enabled=1"
+    hp_set "np_dns_direct.address=223.5.5.5"        # Alibaba DNS — for CN domains
+    hp_set "np_dns_direct.outbound=direct-out"
+
+    hp_set "np_dns_proxy=dns_server"
+    hp_set "np_dns_proxy.enabled=1"
+    hp_set "np_dns_proxy.address=8.8.8.8"           # Google DNS — via proxy to avoid pollution
+    hp_set "np_dns_proxy.outbound=np_proxy"
+
+    # ── DNS rules ─────────────────────────────────────────────────────────────
+    # CN domains → direct DNS (223.5.5.5), everything else → proxy DNS (8.8.8.8)
+    hp_set "np_dns_rule_cn=dns_rule"
+    hp_set "np_dns_rule_cn.enabled=1"
+    hp_add_list "np_dns_rule_cn.rule_set=np_rs_cn_site"
+    hp_set "np_dns_rule_cn.server=np_dns_direct"
+
+    # ── Remote rule sets ──────────────────────────────────────────────────────
+    # Ads
+    hp_set "np_rs_ads=ruleset"
+    hp_set "np_rs_ads.enabled=1"
+    hp_set "np_rs_ads.type=remote"
+    hp_set "np_rs_ads.format=binary"
+    hp_set "np_rs_ads.url=https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-category-ads-all.srs"
+    hp_set "np_rs_ads.outbound=direct-out"
+    hp_set "np_rs_ads.update_interval=1d"
+
+    # Netflix
+    hp_set "np_rs_netflix=ruleset"
+    hp_set "np_rs_netflix.enabled=1"
+    hp_set "np_rs_netflix.type=remote"
+    hp_set "np_rs_netflix.format=binary"
+    hp_set "np_rs_netflix.url=https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-netflix.srs"
+    hp_set "np_rs_netflix.outbound=direct-out"
+    hp_set "np_rs_netflix.update_interval=1d"
+
+    # YouTube
+    hp_set "np_rs_youtube=ruleset"
+    hp_set "np_rs_youtube.enabled=1"
+    hp_set "np_rs_youtube.type=remote"
+    hp_set "np_rs_youtube.format=binary"
+    hp_set "np_rs_youtube.url=https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-youtube.srs"
+    hp_set "np_rs_youtube.outbound=direct-out"
+    hp_set "np_rs_youtube.update_interval=1d"
+
+    # Disney+
+    hp_set "np_rs_disney=ruleset"
+    hp_set "np_rs_disney.enabled=1"
+    hp_set "np_rs_disney.type=remote"
+    hp_set "np_rs_disney.format=binary"
+    hp_set "np_rs_disney.url=https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-disney.srs"
+    hp_set "np_rs_disney.outbound=direct-out"
+    hp_set "np_rs_disney.update_interval=1d"
+
+    # China sites (geosite-cn)
+    hp_set "np_rs_cn_site=ruleset"
+    hp_set "np_rs_cn_site.enabled=1"
+    hp_set "np_rs_cn_site.type=remote"
+    hp_set "np_rs_cn_site.format=binary"
+    hp_set "np_rs_cn_site.url=https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs"
+    hp_set "np_rs_cn_site.outbound=direct-out"
+    hp_set "np_rs_cn_site.update_interval=1d"
+
+    # China IPs (geoip-cn)
+    hp_set "np_rs_cn_ip=ruleset"
+    hp_set "np_rs_cn_ip.enabled=1"
+    hp_set "np_rs_cn_ip.type=remote"
+    hp_set "np_rs_cn_ip.format=binary"
+    hp_set "np_rs_cn_ip.url=https://cdn.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs"
+    hp_set "np_rs_cn_ip.outbound=direct-out"
+    hp_set "np_rs_cn_ip.update_interval=1d"
+
+    # ── Routing rules (processed top-to-bottom) ───────────────────────────────
+
+    # 1. Private / LAN → direct
+    hp_set "np_rule_private=routing_rule"
+    hp_set "np_rule_private.enabled=1"
+    hp_set "np_rule_private.ip_is_private=1"
+    hp_set "np_rule_private.outbound=direct-out"
+
+    # 2. Ads → block
+    hp_set "np_rule_ads=routing_rule"
+    hp_set "np_rule_ads.enabled=1"
+    hp_add_list "np_rule_ads.rule_set=np_rs_ads"
+    hp_set "np_rule_ads.outbound=block-out"
+
+    # 3. AI services → proxy (inline domain list — no remote file needed)
+    hp_set "np_rule_ai=routing_rule"
+    hp_set "np_rule_ai.enabled=1"
+    for d in $AI_SUFFIX; do
+        hp_add_list "np_rule_ai.domain_suffix=$d"
+    done
+    for d in $AI_EXACT; do
+        hp_add_list "np_rule_ai.domain=$d"
+    done
+    hp_set "np_rule_ai.outbound=np_proxy"
+
+    # 4. Streaming → proxy
+    hp_set "np_rule_streaming=routing_rule"
+    hp_set "np_rule_streaming.enabled=1"
+    hp_add_list "np_rule_streaming.rule_set=np_rs_netflix"
+    hp_add_list "np_rule_streaming.rule_set=np_rs_youtube"
+    hp_add_list "np_rule_streaming.rule_set=np_rs_disney"
+    hp_set "np_rule_streaming.outbound=np_proxy"
+
+    # 5. China → direct
+    hp_set "np_rule_cn=routing_rule"
+    hp_set "np_rule_cn.enabled=1"
+    hp_add_list "np_rule_cn.rule_set=np_rs_cn_site"
+    hp_add_list "np_rule_cn.rule_set=np_rs_cn_ip"
+    hp_set "np_rule_cn.outbound=direct-out"
+
+    # ── Global HomeProxy settings ─────────────────────────────────────────────
+
+    # Switch to custom routing mode
+    hp_set "config.routing_mode=custom"
+
+    # Routing global: default outbound = our urltest proxy group
+    hp_set "routing.default_outbound=np_proxy"
+    hp_set "routing.sniff_override=1"
+
+    # DNS global: default server = proxy DNS (8.8.8.8 via proxy)
+    hp_set "dns.default_server=np_dns_proxy"
+
+    uci commit "${HP_CFG}"
+    log "UCI routing rules written (${node_count} nodes, 5 routing rules, 6 rule sets)"
+}
+
+# ─── Main sync ────────────────────────────────────────────────────────────────
 
 do_sync() {
-    local enabled
+    local enabled url
     enabled=$(get_cfg enabled)
-    local url
     url=$(get_cfg subscription_url)
 
     if [ "$1" != "force" ] && [ "$enabled" != "1" ]; then
@@ -55,58 +291,37 @@ do_sync() {
         return 1
     fi
 
-    log "Syncing nodes from: $url"
-
-    # Write our subscription URL into HomeProxy's subscription_url list.
-    # HomeProxy stores multiple URLs as a list; we own a single entry tagged
-    # with a comment marker so we can replace it on each sync without
-    # disturbing any other URLs the user may have added.
-    local hp_cfg="homeproxy"
-
-    # Ensure the subscription section exists
-    uci -q get "${hp_cfg}.subscription" > /dev/null 2>&1 || {
-        uci -q set "${hp_cfg}.subscription=homeproxy"
-    }
-
-    # Remove any previous NextPanel-managed URL (identified by our tag in the list)
-    local prev
-    prev=$(uci -q get "${hp_cfg}.subscription.subscription_url" 2>/dev/null)
-    uci -q delete "${hp_cfg}.subscription.subscription_url" 2>/dev/null || true
-
-    # Re-add non-NextPanel URLs (if user had others) then add ours
-    # For simplicity: replace the entire list with our URL.
-    # If users need multiple subscriptions they can add them in HomeProxy UI after sync.
-    uci -q add_list "${hp_cfg}.subscription.subscription_url=${url}"
-    uci -q commit "${hp_cfg}"
-
-    log "Updated homeproxy.subscription.subscription_url"
-
-    # Trigger HomeProxy's subscription update script
-    if [ -f "${HP_SCRIPTS}/update_subscriptions.uc" ]; then
-        log "Running HomeProxy subscription update..."
-        if ucode "${HP_SCRIPTS}/update_subscriptions.uc" >> "$LOGFILE" 2>&1; then
-            log "Subscription update complete"
-            set_cfg last_sync "$(date '+%Y-%m-%d %H:%M:%S')"
-            set_cfg last_status "success"
-            set_cfg last_error ""
-            # Reload HomeProxy to apply new nodes
-            if [ -f /etc/init.d/homeproxy ]; then
-                log "Reloading HomeProxy..."
-                /etc/init.d/homeproxy restart
-                log "HomeProxy reloaded"
-            fi
-        else
-            log "ERROR: HomeProxy subscription update failed"
-            set_cfg last_status "error"
-            set_cfg last_error "HomeProxy 节点导入失败，请查看日志"
-            return 1
-        fi
-    else
-        log "ERROR: HomeProxy scripts not found at ${HP_SCRIPTS}"
+    if [ ! -f "${HP_SCRIPTS}/update_subscriptions.uc" ]; then
+        log "ERROR: HomeProxy not found — please install HomeProxy first"
         set_cfg last_status "error"
-        set_cfg last_error "未找到 HomeProxy，请先安装 HomeProxy"
+        set_cfg last_error "未找到 HomeProxy，请先安装"
         return 1
     fi
+
+    log "Starting sync from: $url"
+
+    # Step 1: import nodes
+    if ! import_nodes "$url"; then
+        set_cfg last_status "error"
+        set_cfg last_error "节点导入失败，请查看日志"
+        return 1
+    fi
+
+    # Step 2: write routing rules
+    if ! setup_routing; then
+        set_cfg last_status "error"
+        set_cfg last_error "路由规则写入失败，请查看日志"
+        return 1
+    fi
+
+    # Step 3: reload HomeProxy to apply everything
+    log "Reloading HomeProxy..."
+    /etc/init.d/homeproxy restart
+    log "HomeProxy reloaded — sync complete"
+
+    set_cfg last_sync "$(date '+%Y-%m-%d %H:%M:%S')"
+    set_cfg last_status "success"
+    set_cfg last_error ""
 }
 
 # ─── Cron management ─────────────────────────────────────────────────────────
@@ -114,16 +329,13 @@ do_sync() {
 setup_cron() {
     local interval
     interval=$(get_cfg interval)
-
     sed -i "/${CRON_TAG}/d" "$CRON_FILE" 2>/dev/null
-
     case "$interval" in
         3600)  echo "0 * * * * /etc/init.d/nextpanel-sync sync # ${CRON_TAG}" >> "$CRON_FILE" ;;
         21600) echo "0 */6 * * * /etc/init.d/nextpanel-sync sync # ${CRON_TAG}" >> "$CRON_FILE" ;;
         86400) echo "0 3 * * * /etc/init.d/nextpanel-sync sync # ${CRON_TAG}" >> "$CRON_FILE" ;;
-        *)     log "Auto-refresh disabled (interval=$interval)" ;;
+        *)     log "Auto-refresh disabled" ;;
     esac
-
     if [ -f /var/run/crond.pid ]; then
         /etc/init.d/cron restart 2>/dev/null || true
     fi
@@ -157,10 +369,5 @@ restart() {
     start
 }
 
-sync() {
-    do_sync
-}
-
-force_sync() {
-    do_sync force
-}
+sync()       { do_sync; }
+force_sync() { do_sync force; }
