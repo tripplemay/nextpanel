@@ -54,8 +54,8 @@ return view.extend({
     o.rmempty = false;
 
     o = s.option(form.Value, 'subscription_url', '订阅链接',
-      '从 NextPanel 面板「订阅」页面复制 HomeProxy 专用链接。');
-    o.placeholder = 'https://your-panel.example.com/api/subscriptions/link/TOKEN/homeproxy';
+      '从 NextPanel 面板「订阅」页面复制 V2Ray 订阅链接（不要选 HomeProxy 专用链接）。');
+    o.placeholder = 'https://your-panel.example.com/api/subscriptions/link/TOKEN';
     o.rmempty = false;
     o.datatype = 'string';
 
@@ -124,16 +124,17 @@ return view.extend({
     o.cfgvalue = function () {
       return [
         '<div style="font-size:13px;line-height:1.8;color:rgba(0,0,0,0.75)">',
-        '<p><strong>保存设置并完成首次同步后，需在 HomeProxy 中做一次性配置：</strong></p>',
+        '<p><strong>首次同步后，在 HomeProxy 中完成一次性配置：</strong></p>',
         '<ol style="padding-left:20px;margin:0">',
-        '<li>进入 <b>服务 → HomeProxy</b></li>',
-        '<li>在「节点设置」中，将配置文件选择为 <code>/etc/homeproxy/singbox.json</code></li>',
-        '<li>在「代理设置」中，将模式设置为<b>透明代理</b></li>',
-        '<li>设置 LAN 接口（通常为 <code>br-lan</code>）</li>',
-        '<li>保存并应用</li>',
+        '<li>进入 <b>服务 → HomeProxy → 节点设置</b></li>',
+        '<li>确认节点已自动导入（同步时由 NextPanel 写入）</li>',
+        '<li>在「主节点」下拉框中选择要使用的节点</li>',
+        '<li>进入<b>代理设置</b>，将「路由模式」设为<b>绕过中国大陆</b>或<b>全局代理</b></li>',
+        '<li>将「代理模式」设为 <b>redirect + tproxy</b> 或 <b>TUN</b></li>',
+        '<li>保存并应用，然后点击右上角<b>启用</b>开关</li>',
         '</ol>',
         '<p style="margin-top:8px;color:#8c8c8c">',
-        '以上步骤只需配置一次，之后 NextPanel 会自动处理所有节点和规则的更新。',
+        '以上步骤只需配置一次。之后每次同步，NextPanel 会自动更新节点列表并重载 HomeProxy。',
         '</p>',
         '<p style="margin-top:4px"><strong>内置分流规则：</strong>',
         '广告屏蔽 · AI 服务代理 · 流媒体代理 · 中国大陆直连 · 局域网直连 · 其余流量走代理',

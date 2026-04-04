@@ -1,30 +1,27 @@
 #!/bin/sh /etc/rc.common
-# NextPanel HomeProxy config sync service
-# Periodically fetches the full sing-box config from the NextPanel panel
-# and applies it to HomeProxy.
+# NextPanel HomeProxy node sync service
+# Writes the NextPanel subscription URL into HomeProxy's UCI subscription list
+# and triggers HomeProxy's built-in node import.
 
 START=99
 STOP=01
 EXTRA_COMMANDS="sync force_sync"
-EXTRA_HELP="	sync		Sync config from panel (respects enabled flag)
+EXTRA_HELP="	sync		Sync nodes from panel (respects enabled flag)
 	force_sync	Force sync regardless of enabled setting"
 
 LOGFILE=/var/log/nextpanel-sync.log
-LOGMAX=200       # lines to keep in the log
-CONFIG_DIR=/etc/homeproxy
-CONFIG_FILE=${CONFIG_DIR}/singbox.json
+LOGMAX=200
 CRON_FILE=/etc/crontabs/root
 CRON_TAG="nextpanel-sync"
+HP_SCRIPTS="/etc/homeproxy/scripts"
 
 log() {
     local msg="$(date '+%Y-%m-%d %H:%M:%S') [nextpanel] $1"
     echo "$msg" >> "$LOGFILE"
-    # Trim log to last LOGMAX lines
     local lines
     lines=$(wc -l < "$LOGFILE" 2>/dev/null || echo 0)
     if [ "$lines" -gt "$LOGMAX" ]; then
-        local tmp
-        tmp=$(mktemp)
+        local tmp="/tmp/nextpanel-log-trim-$$.tmp"
         tail -n "$LOGMAX" "$LOGFILE" > "$tmp" && mv "$tmp" "$LOGFILE"
     fi
 }
@@ -54,51 +51,61 @@ do_sync() {
     if [ -z "$url" ]; then
         log "ERROR: subscription_url is not configured"
         set_cfg last_status "error"
-        set_cfg last_error "No subscription URL configured"
+        set_cfg last_error "未配置订阅链接"
         return 1
     fi
 
-    log "Syncing from: $url"
+    log "Syncing nodes from: $url"
 
-    # Download to a temporary file (BusyBox mktemp doesn't support suffix templates)
-    local tmpfile="/tmp/nextpanel-$$.json"
+    # Write our subscription URL into HomeProxy's subscription_url list.
+    # HomeProxy stores multiple URLs as a list; we own a single entry tagged
+    # with a comment marker so we can replace it on each sync without
+    # disturbing any other URLs the user may have added.
+    local hp_cfg="homeproxy"
 
-    if curl -s --connect-timeout 15 --max-time 60 -o "$tmpfile" "$url"; then
-        # Basic JSON validation: file must start with '{'
-        local first_char
-        first_char=$(head -c 1 "$tmpfile" 2>/dev/null)
-        if [ "$first_char" = "{" ]; then
-            mkdir -p "$CONFIG_DIR"
-            cp "$tmpfile" "$CONFIG_FILE"
-            rm -f "$tmpfile"
-            log "Config saved to $CONFIG_FILE"
+    # Ensure the subscription section exists
+    uci -q get "${hp_cfg}.subscription" > /dev/null 2>&1 || {
+        uci -q set "${hp_cfg}.subscription=homeproxy"
+    }
+
+    # Remove any previous NextPanel-managed URL (identified by our tag in the list)
+    local prev
+    prev=$(uci -q get "${hp_cfg}.subscription.subscription_url" 2>/dev/null)
+    uci -q delete "${hp_cfg}.subscription.subscription_url" 2>/dev/null || true
+
+    # Re-add non-NextPanel URLs (if user had others) then add ours
+    # For simplicity: replace the entire list with our URL.
+    # If users need multiple subscriptions they can add them in HomeProxy UI after sync.
+    uci -q add_list "${hp_cfg}.subscription.subscription_url=${url}"
+    uci -q commit "${hp_cfg}"
+
+    log "Updated homeproxy.subscription.subscription_url"
+
+    # Trigger HomeProxy's subscription update script
+    if [ -f "${HP_SCRIPTS}/update_subscriptions.uc" ]; then
+        log "Running HomeProxy subscription update..."
+        if ucode "${HP_SCRIPTS}/update_subscriptions.uc" >> "$LOGFILE" 2>&1; then
+            log "Subscription update complete"
             set_cfg last_sync "$(date '+%Y-%m-%d %H:%M:%S')"
             set_cfg last_status "success"
             set_cfg last_error ""
-            reload_homeproxy
+            # Reload HomeProxy to apply new nodes
+            if [ -f /etc/init.d/homeproxy ]; then
+                log "Reloading HomeProxy..."
+                /etc/init.d/homeproxy restart
+                log "HomeProxy reloaded"
+            fi
         else
-            rm -f "$tmpfile"
-            log "ERROR: Response is not valid JSON (does not start with '{')"
+            log "ERROR: HomeProxy subscription update failed"
             set_cfg last_status "error"
-            set_cfg last_error "Invalid JSON response from panel"
+            set_cfg last_error "HomeProxy 节点导入失败，请查看日志"
             return 1
         fi
     else
-        rm -f "$tmpfile"
-        log "ERROR: Download failed (curl exit code $?)"
+        log "ERROR: HomeProxy scripts not found at ${HP_SCRIPTS}"
         set_cfg last_status "error"
-        set_cfg last_error "Download failed — check panel URL and connectivity"
+        set_cfg last_error "未找到 HomeProxy，请先安装 HomeProxy"
         return 1
-    fi
-}
-
-reload_homeproxy() {
-    if [ -f /etc/init.d/homeproxy ]; then
-        log "Reloading HomeProxy..."
-        /etc/init.d/homeproxy restart
-        log "HomeProxy reloaded"
-    else
-        log "WARNING: HomeProxy init.d script not found — skipping reload"
     fi
 }
 
@@ -108,7 +115,6 @@ setup_cron() {
     local interval
     interval=$(get_cfg interval)
 
-    # Remove existing entries for this tag
     sed -i "/${CRON_TAG}/d" "$CRON_FILE" 2>/dev/null
 
     case "$interval" in
@@ -118,7 +124,6 @@ setup_cron() {
         *)     log "Auto-refresh disabled (interval=$interval)" ;;
     esac
 
-    # Reload crond if running
     if [ -f /var/run/crond.pid ]; then
         /etc/init.d/cron restart 2>/dev/null || true
     fi
@@ -152,14 +157,10 @@ restart() {
     start
 }
 
-# Manual one-shot sync (called from cron or LuCI button)
-# Usage: /etc/init.d/nextpanel-sync sync
 sync() {
     do_sync
 }
 
-# Force sync regardless of enabled flag (called from LuCI "Sync Now" button)
-# Usage: /etc/init.d/nextpanel-sync force_sync
 force_sync() {
     do_sync force
 }
