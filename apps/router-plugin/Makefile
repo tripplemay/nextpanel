@@ -15,7 +15,7 @@ PKG_MAINTAINER:=NextPanel
 
 LUCI_TITLE:=NextPanel HomeProxy Sync
 LUCI_DESCRIPTION:=Automatically syncs proxy configuration from the NextPanel panel to HomeProxy on OpenWrt routers. Includes complete routing rules for ads, AI services, streaming, and China bypass.
-LUCI_DEPENDS:=+luci-base +homeproxy +curl
+LUCI_DEPENDS:=+luci-base +curl
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)
 
