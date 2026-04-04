@@ -1,0 +1,163 @@
+#!/bin/sh /etc/rc.common
+# NextPanel HomeProxy config sync service
+# Periodically fetches the full sing-box config from the NextPanel panel
+# and applies it to HomeProxy.
+
+START=99
+STOP=01
+
+LOGFILE=/var/log/nextpanel-sync.log
+LOGMAX=200       # lines to keep in the log
+CONFIG_DIR=/etc/homeproxy
+CONFIG_FILE=${CONFIG_DIR}/singbox.json
+CRON_FILE=/etc/crontabs/root
+CRON_TAG="nextpanel-sync"
+
+log() {
+    local msg="$(date '+%Y-%m-%d %H:%M:%S') [nextpanel] $1"
+    echo "$msg" >> "$LOGFILE"
+    # Trim log to last LOGMAX lines
+    local lines
+    lines=$(wc -l < "$LOGFILE" 2>/dev/null || echo 0)
+    if [ "$lines" -gt "$LOGMAX" ]; then
+        local tmp
+        tmp=$(mktemp)
+        tail -n "$LOGMAX" "$LOGFILE" > "$tmp" && mv "$tmp" "$LOGFILE"
+    fi
+}
+
+get_cfg() {
+    uci -q get "nextpanel.config.$1"
+}
+
+set_cfg() {
+    uci -q set "nextpanel.config.$1=$2"
+    uci -q commit nextpanel
+}
+
+# ─── Core sync logic ──────────────────────────────────────────────────────────
+
+do_sync() {
+    local enabled
+    enabled=$(get_cfg enabled)
+    local url
+    url=$(get_cfg subscription_url)
+
+    if [ "$1" != "force" ] && [ "$enabled" != "1" ]; then
+        log "Sync is disabled — skipping"
+        return 0
+    fi
+
+    if [ -z "$url" ]; then
+        log "ERROR: subscription_url is not configured"
+        set_cfg last_status "error"
+        set_cfg last_error "No subscription URL configured"
+        return 1
+    fi
+
+    log "Syncing from: $url"
+
+    # Download to a temporary file
+    local tmpfile
+    tmpfile=$(mktemp /tmp/nextpanel-XXXXXX.json)
+
+    if curl -s --connect-timeout 15 --max-time 60 -o "$tmpfile" "$url"; then
+        # Basic JSON validation: file must start with '{'
+        local first_char
+        first_char=$(head -c 1 "$tmpfile" 2>/dev/null)
+        if [ "$first_char" = "{" ]; then
+            mkdir -p "$CONFIG_DIR"
+            cp "$tmpfile" "$CONFIG_FILE"
+            rm -f "$tmpfile"
+            log "Config saved to $CONFIG_FILE"
+            set_cfg last_sync "$(date '+%Y-%m-%d %H:%M:%S')"
+            set_cfg last_status "success"
+            set_cfg last_error ""
+            reload_homeproxy
+        else
+            rm -f "$tmpfile"
+            log "ERROR: Response is not valid JSON (does not start with '{')"
+            set_cfg last_status "error"
+            set_cfg last_error "Invalid JSON response from panel"
+            return 1
+        fi
+    else
+        rm -f "$tmpfile"
+        log "ERROR: Download failed (curl exit code $?)"
+        set_cfg last_status "error"
+        set_cfg last_error "Download failed — check panel URL and connectivity"
+        return 1
+    fi
+}
+
+reload_homeproxy() {
+    if [ -f /etc/init.d/homeproxy ]; then
+        log "Reloading HomeProxy..."
+        /etc/init.d/homeproxy restart
+        log "HomeProxy reloaded"
+    else
+        log "WARNING: HomeProxy init.d script not found — skipping reload"
+    fi
+}
+
+# ─── Cron management ─────────────────────────────────────────────────────────
+
+setup_cron() {
+    local interval
+    interval=$(get_cfg interval)
+
+    # Remove existing entries for this tag
+    sed -i "/${CRON_TAG}/d" "$CRON_FILE" 2>/dev/null
+
+    case "$interval" in
+        3600)  echo "0 * * * * /etc/init.d/nextpanel-sync sync # ${CRON_TAG}" >> "$CRON_FILE" ;;
+        21600) echo "0 */6 * * * /etc/init.d/nextpanel-sync sync # ${CRON_TAG}" >> "$CRON_FILE" ;;
+        86400) echo "0 3 * * * /etc/init.d/nextpanel-sync sync # ${CRON_TAG}" >> "$CRON_FILE" ;;
+        *)     log "Auto-refresh disabled (interval=$interval)" ;;
+    esac
+
+    # Reload crond if running
+    if [ -f /var/run/crond.pid ]; then
+        /etc/init.d/cron restart 2>/dev/null || true
+    fi
+}
+
+remove_cron() {
+    sed -i "/${CRON_TAG}/d" "$CRON_FILE" 2>/dev/null
+    if [ -f /var/run/crond.pid ]; then
+        /etc/init.d/cron restart 2>/dev/null || true
+    fi
+}
+
+# ─── rc.common entry points ───────────────────────────────────────────────────
+
+start() {
+    local enabled
+    enabled=$(get_cfg enabled)
+    [ "$enabled" != "1" ] && { log "Service disabled — not starting"; return 0; }
+    log "Service starting"
+    setup_cron
+    do_sync
+}
+
+stop() {
+    log "Service stopping"
+    remove_cron
+}
+
+restart() {
+    stop
+    start
+}
+
+# Manual one-shot sync (called from cron or LuCI button)
+# Usage: /etc/init.d/nextpanel-sync sync
+sync() {
+    do_sync
+}
+
+# Force sync regardless of enabled flag (called from LuCI "Sync Now" button)
+# Usage: /etc/init.d/nextpanel-sync force_sync
+force_sync() {
+    do_sync force
+}

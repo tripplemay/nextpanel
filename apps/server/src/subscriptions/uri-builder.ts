@@ -457,6 +457,235 @@ export function buildFullSingboxConfig(nodes: NodeExportInfo[]): string {
   return JSON.stringify(config, null, 2);
 }
 
+// ─── AI Service Domains (inline routing rules) ───────────────────────────────
+
+/**
+ * Domain suffix patterns — one entry covers ALL subdomains of a vendor's
+ * dedicated domain (e.g. "openai.com" matches api.openai.com, sora.openai.com …).
+ * Update this list when new major AI services or domains emerge.
+ */
+const AI_DOMAIN_SUFFIX: string[] = [
+  // OpenAI ecosystem
+  'openai.com', 'chatgpt.com', 'oaiusercontent.com', 'oaistatic.com', 'sora.com',
+  // Anthropic / Claude
+  'anthropic.com', 'claude.ai', 'claudeusercontent.com',
+  // Perplexity
+  'perplexity.ai',
+  // Midjourney
+  'midjourney.com',
+  // Hugging Face
+  'huggingface.co', 'hf.co',
+  // Groq
+  'groq.com',
+  // Together AI
+  'together.ai',
+  // xAI / Grok
+  'x.ai',
+  // Mistral AI
+  'mistral.ai',
+  // Cohere
+  'cohere.com', 'cohere.ai',
+  // Stability AI
+  'stability.ai',
+  // ElevenLabs
+  'elevenlabs.io',
+  // Replicate
+  'replicate.com', 'replicate.delivery',
+  // Character.AI
+  'character.ai', 'c.ai',
+  // Poe
+  'poe.com',
+  // Runway ML
+  'runwayml.com',
+  // Fireworks AI
+  'fireworks.ai',
+  // DeepSeek (international API)
+  'deepseek.com',
+  // Inflection AI (Pi)
+  'inflection.ai', 'pi.ai',
+  // AI21 Labs
+  'ai21.com',
+  // Aleph Alpha
+  'aleph-alpha.com',
+  // Modal
+  'modal.com',
+  // Moonshot AI / Kimi (international access)
+  'moonshot.ai', 'kimi.ai',
+];
+
+/**
+ * Exact domain matches — for AI services that share infrastructure domains
+ * with non-AI products (e.g. googleapis.com, microsoft.com).
+ * Must be precise to avoid unintentionally proxying unrelated traffic.
+ */
+const AI_DOMAIN_EXACT: string[] = [
+  // Google Gemini API (shares googleapis.com with all Google services)
+  'generativelanguage.googleapis.com',
+  'aistudio.google.com',
+  'makersuite.google.com',
+  // Microsoft Copilot (shares microsoft.com / bing.com)
+  'copilot.microsoft.com',
+  'sydney.bing.com',
+  'edgeservices.bing.com',
+  'copilot.bing.com',
+];
+
+// ─── Remote rule_set definitions (jsDelivr CDN — accessible in China) ────────
+
+const CDN = 'https://cdn.jsdelivr.net/gh';
+
+const HOMEPROXY_RULE_SETS = [
+  { tag: 'geosite-cn',               url: `${CDN}/SagerNet/sing-geosite@rule-set/geosite-cn.srs` },
+  { tag: 'geoip-cn',                 url: `${CDN}/SagerNet/sing-geoip@rule-set/geoip-cn.srs` },
+  { tag: 'geosite-category-ads-all', url: `${CDN}/SagerNet/sing-geosite@rule-set/geosite-category-ads-all.srs` },
+  { tag: 'geosite-netflix',          url: `${CDN}/SagerNet/sing-geosite@rule-set/geosite-netflix.srs` },
+  { tag: 'geosite-youtube',          url: `${CDN}/SagerNet/sing-geosite@rule-set/geosite-youtube.srs` },
+  { tag: 'geosite-disneyplus',       url: `${CDN}/SagerNet/sing-geosite@rule-set/geosite-disneyplus.srs` },
+] as const;
+
+// ─── HomeProxy / OpenWrt router sing-box config ───────────────────────────────
+
+/**
+ * Generates a complete sing-box JSON configuration for router-level transparent
+ * proxy via HomeProxy on OpenWrt. Includes:
+ *   - tproxy inbound (port 7895) for iptables-based traffic interception
+ *   - mixed inbound (port 7890) for HTTP/SOCKS5
+ *   - Full routing: ads block → AI services → streaming → CN direct → proxy
+ *   - Split DNS: CN domains → 223.5.5.5 direct, others → 1.1.1.1 via proxy
+ *   - Remote rule_sets via jsDelivr CDN (auto-update daily)
+ *   - Inline AI service rules (domain_suffix + exact domain)
+ */
+export function buildHomeProxyConfig(nodes: NodeExportInfo[]): string {
+  const outbounds = nodes
+    .map((n) => buildSingboxOutbound(n))
+    .filter((o): o is Record<string, unknown> => o !== null);
+
+  const proxyTags = outbounds.map((o) => o.tag as string);
+  const hasNodes = proxyTags.length > 0;
+  const fallback = hasNodes ? proxyTags : ['direct'];
+
+  const config = {
+    log: { level: 'warn', timestamp: true },
+
+    dns: {
+      servers: [
+        // Resolver for bootstrap (no detour — prevents circular dependency)
+        { tag: 'dns-local', address: '223.5.5.5', detour: 'direct' },
+        // CN domains: DoH via Alibaba, always direct
+        {
+          tag: 'dns-direct',
+          address: 'https://223.5.5.5/dns-query',
+          address_resolver: 'dns-local',
+          detour: 'direct',
+        },
+        // Foreign domains: DNS over TLS via 1.1.1.1, routed through proxy
+        { tag: 'dns-proxy', address: 'tls://1.1.1.1', detour: '🚀 节点选择' },
+        // Ad domains: refused
+        { tag: 'dns-block', address: 'rcode://refused' },
+      ],
+      rules: [
+        // Bootstrap: proxy server address resolution must bypass the proxy itself
+        { outbound: 'any', server: 'dns-local' },
+        // Block ads at DNS level
+        { rule_set: ['geosite-category-ads-all'], server: 'dns-block' },
+        // CN domains use domestic DNS
+        { rule_set: ['geosite-cn'], server: 'dns-direct' },
+      ],
+      final: 'dns-proxy',
+      strategy: 'prefer_ipv4',
+      independent_cache: true,
+    },
+
+    inbounds: [
+      {
+        // Transparent proxy — receives traffic redirected by iptables/nftables
+        type: 'tproxy',
+        tag: 'tproxy-in',
+        listen: '::',
+        listen_port: 7895,
+        sniff: true,
+        sniff_override_destination: true,
+        domain_strategy: 'prefer_ipv4',
+      },
+      {
+        // HTTP/SOCKS5 proxy for devices that don't support tproxy
+        type: 'mixed',
+        tag: 'mixed-in',
+        listen: '::',
+        listen_port: 7890,
+        sniff: true,
+        domain_strategy: 'prefer_ipv4',
+      },
+    ],
+
+    outbounds: [
+      ...outbounds,
+      {
+        type: 'urltest',
+        tag: '⚡ 自动选择',
+        outbounds: fallback,
+        url: 'https://www.gstatic.com/generate_204',
+        interval: '5m',
+        tolerance: 50,
+      },
+      {
+        type: 'selector',
+        tag: '🚀 节点选择',
+        outbounds: hasNodes ? ['⚡ 自动选择', ...proxyTags] : ['direct'],
+        default: '⚡ 自动选择',
+      },
+      {
+        type: 'selector',
+        tag: '🎬 流媒体',
+        outbounds: hasNodes ? ['🚀 节点选择', '⚡ 自动选择', ...proxyTags] : ['direct'],
+        default: '🚀 节点选择',
+      },
+      {
+        type: 'selector',
+        tag: '🤖 AI 服务',
+        outbounds: hasNodes ? ['🚀 节点选择', '⚡ 自动选择', ...proxyTags] : ['direct'],
+        default: '🚀 节点选择',
+      },
+      { type: 'direct', tag: 'direct' },
+      { type: 'block', tag: 'block' },
+      { type: 'dns', tag: 'dns-out' },
+    ],
+
+    route: {
+      rules: [
+        // DNS traffic must go through the DNS outbound
+        { protocol: 'dns', outbound: 'dns-out' },
+        // LAN / private IPs always go direct
+        { ip_is_private: true, outbound: 'direct' },
+        // Block ads
+        { rule_set: ['geosite-category-ads-all'], outbound: 'block' },
+        // AI services — inline domain rules (no external rule_set file needed)
+        {
+          domain_suffix: AI_DOMAIN_SUFFIX,
+          domain: AI_DOMAIN_EXACT,
+          outbound: '🤖 AI 服务',
+        },
+        // Streaming services
+        { rule_set: ['geosite-netflix', 'geosite-youtube', 'geosite-disneyplus'], outbound: '🎬 流媒体' },
+        // China domains and IPs — direct
+        { rule_set: ['geosite-cn', 'geoip-cn'], outbound: 'direct' },
+      ],
+      rule_set: HOMEPROXY_RULE_SETS.map((rs) => ({
+        tag: rs.tag,
+        type: 'remote',
+        format: 'binary',
+        url: rs.url,
+        download_detour: 'direct',
+        update_interval: '1d',
+      })),
+      final: '🚀 节点选择',
+      auto_detect_interface: true,
+    },
+  };
+
+  return JSON.stringify(config, null, 2);
+}
+
 // ─── Hiddify deep link ──────────────────────────────────────────────────────
 
 /** Build Hiddify deep link from a subscription URL */

@@ -1,0 +1,7 @@
+config nextpanel 'config'
+	option enabled '0'
+	option subscription_url ''
+	option interval '86400'
+	option last_sync ''
+	option last_status ''
+	option last_error ''

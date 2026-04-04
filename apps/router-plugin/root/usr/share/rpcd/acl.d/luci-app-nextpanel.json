@@ -1,0 +1,17 @@
+{
+  "luci-app-nextpanel": {
+    "description": "Grant access to NextPanel sync configuration",
+    "read": {
+      "uci": [ "nextpanel" ],
+      "file": {
+        "/var/log/nextpanel-sync.log": [ "read" ]
+      }
+    },
+    "write": {
+      "uci": [ "nextpanel" ],
+      "file": {
+        "/etc/init.d/nextpanel-sync": [ "exec" ]
+      }
+    }
+  }
+}

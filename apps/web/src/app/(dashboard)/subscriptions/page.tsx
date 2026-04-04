@@ -28,6 +28,7 @@ function getFormats(token: string): SubFormat[] {
   return [
     { key: 'hiddify', label: 'Hiddify（推荐）', url: `hiddify://import/${base}#NextPanel`, extra: base },
     { key: 'clash', label: 'Clash', url: `${base}/clash` },
+    { key: 'homeproxy', label: 'HomeProxy (OpenWrt)', url: `${base}/homeproxy` },
     { key: 'v2ray', label: '通用', url: base },
   ];
 }
@@ -37,6 +38,7 @@ function getShareFormats(shareToken: string): SubFormat[] {
   return [
     { key: 'hiddify', label: 'Hiddify（推荐）', url: `hiddify://import/${base}#NextPanel`, extra: base },
     { key: 'clash', label: 'Clash', url: `${base}/clash` },
+    { key: 'homeproxy', label: 'HomeProxy (OpenWrt)', url: `${base}/homeproxy` },
     { key: 'v2ray', label: '通用', url: base },
   ];
 }
@@ -452,6 +454,7 @@ export default function SubscriptionsPage() {
 const FORMAT_DESCRIPTIONS: Record<string, string> = {
   clash: '适合 Clash Verge、Stash 等需要精细分流规则的客户端',
   v2ray: '适合 v2rayN、Shadowrocket 等客户端',
+  homeproxy: '适合 OpenWrt 路由器上的 HomeProxy 插件，包含完整分流规则（广告屏蔽、AI 服务、流媒体、国内直连）',
 };
 
 function LinkTabs({ formats, onCopy }: { formats: SubFormat[]; onCopy: (url: string) => void }) {
@@ -510,6 +513,8 @@ function LinkTabs({ formats, onCopy }: { formats: SubFormat[]; onCopy: (url: str
               </Typography.Text>
             </div>
           </Space>
+        ) : f.key === 'homeproxy' ? (
+          <HomeProxyTab url={f.url} onCopy={onCopy} />
         ) : (
           <Space direction="vertical" style={{ width: '100%' }} size={16}>
             {FORMAT_DESCRIPTIONS[f.key] && (
@@ -542,5 +547,93 @@ function LinkTabs({ formats, onCopy }: { formats: SubFormat[]; onCopy: (url: str
         ),
       }))}
     />
+  );
+}
+
+const HOMEPROXY_PLUGIN_URL = 'https://github.com/tripplemay/nextpanel/releases/latest/download/luci-app-nextpanel_all.ipk';
+
+const HOMEPROXY_STEPS = [
+  '从上方下载 .ipk 文件',
+  '进入路由器 LuCI → 系统 → 软件包 → 上传软件包，安装 .ipk',
+  '安装完成后进入 LuCI → 服务 → NextPanel，填入下方配置 URL',
+  '设置刷新间隔（推荐 24 小时），保存并启用',
+  '按插件内向导完成 HomeProxy 初次配置（透明代理模式、LAN 接口等）',
+];
+
+function HomeProxyTab({ url, onCopy }: { url: string; onCopy: (url: string) => void }) {
+  return (
+    <Space direction="vertical" style={{ width: '100%' }} size={20}>
+      <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+        {FORMAT_DESCRIPTIONS['homeproxy']}
+      </Typography.Text>
+
+      {/* Download plugin */}
+      <div>
+        <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+          第一步：下载路由器插件
+        </Typography.Text>
+        <Space wrap>
+          <Button
+            type="primary"
+            href={HOMEPROXY_PLUGIN_URL}
+            target="_blank"
+          >
+            下载 luci-app-nextpanel.ipk
+          </Button>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            适用于 OpenWrt 21.02+ / immortalwrt 23.05+，架构无关
+          </Typography.Text>
+        </Space>
+      </div>
+
+      {/* Config URL */}
+      <div>
+        <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+          第二步：在插件中填入配置 URL
+        </Typography.Text>
+        <Space.Compact style={{ width: '100%' }}>
+          <Input value={url} readOnly />
+          <Button onClick={() => onCopy(url)}>复制</Button>
+        </Space.Compact>
+        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+          包含完整分流规则，插件将自动定期拉取最新节点和规则
+        </Typography.Text>
+      </div>
+
+      {/* Setup guide */}
+      <div>
+        <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+          安装步骤
+        </Typography.Text>
+        <ol style={{ paddingLeft: 20, margin: 0 }}>
+          {HOMEPROXY_STEPS.map((step, i) => (
+            <li key={i} style={{ marginBottom: 6, fontSize: 13, color: 'rgba(0,0,0,0.65)' }}>
+              {step}
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      {/* Routing rules info */}
+      <div style={{ background: '#f5f5f5', borderRadius: 8, padding: '12px 16px' }}>
+        <Typography.Text strong style={{ fontSize: 13, display: 'block', marginBottom: 6 }}>
+          内置分流规则
+        </Typography.Text>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {[
+            { label: '🚫 广告屏蔽', color: 'red' },
+            { label: '🤖 AI 服务代理', color: 'purple' },
+            { label: '🎬 流媒体代理', color: 'blue' },
+            { label: '🇨🇳 国内直连', color: 'green' },
+            { label: '🌐 其余走代理', color: 'default' },
+          ].map((tag) => (
+            <Tag key={tag.label} color={tag.color}>{tag.label}</Tag>
+          ))}
+        </div>
+        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+          规则集每日自动更新（geosite-cn、geoip-cn、Netflix、YouTube 等）；AI 服务规则随订阅刷新更新
+        </Typography.Text>
+      </div>
+    </Space>
   );
 }

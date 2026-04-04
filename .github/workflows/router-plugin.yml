@@ -1,0 +1,136 @@
+name: Build Router Plugin
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-ipk:
+    name: Build luci-app-nextpanel.ipk
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build .ipk package
+        run: |
+          cd apps/router-plugin
+
+          VERSION="${GITHUB_REF_NAME:-dev}"
+
+          # ── Prepare staging directory ──────────────────────────────────────
+          STAGING=$(mktemp -d)
+          DATA_DIR="${STAGING}/data"
+          CTRL_DIR="${STAGING}/control"
+          mkdir -p "${DATA_DIR}" "${CTRL_DIR}"
+
+          # ── Install files into data/ ───────────────────────────────────────
+          # init.d script
+          install -Dm755 root/etc/init.d/nextpanel-sync \
+            "${DATA_DIR}/etc/init.d/nextpanel-sync"
+
+          # UCI config (only installed if not already present)
+          install -Dm644 root/etc/config/nextpanel \
+            "${DATA_DIR}/etc/config/nextpanel"
+
+          # LuCI menu entry
+          install -Dm644 root/usr/share/luci/menu.d/luci-app-nextpanel.json \
+            "${DATA_DIR}/usr/share/luci/menu.d/luci-app-nextpanel.json"
+
+          # rpcd ACL
+          install -Dm644 root/usr/share/rpcd/acl.d/luci-app-nextpanel.json \
+            "${DATA_DIR}/usr/share/rpcd/acl.d/luci-app-nextpanel.json"
+
+          # LuCI JS view
+          install -Dm644 htdocs/luci-static/resources/view/nextpanel/config.js \
+            "${DATA_DIR}/www/luci-static/resources/view/nextpanel/config.js"
+
+          # ── control file ───────────────────────────────────────────────────
+          cat > "${CTRL_DIR}/control" <<EOF
+          Package: luci-app-nextpanel
+          Version: ${VERSION}
+          Architecture: all
+          Maintainer: NextPanel <https://github.com/tripplemay/nextpanel>
+          Description: NextPanel HomeProxy Sync — automatically syncs proxy
+           configuration from the NextPanel panel to HomeProxy on OpenWrt.
+           Includes complete routing rules for ads, AI services, streaming,
+           and China bypass.
+          Depends: luci-base, homeproxy, curl
+          EOF
+
+          # postinst script
+          cat > "${CTRL_DIR}/postinst" <<'EOF'
+          #!/bin/sh
+          [ -n "${IPKG_INSTROOT}" ] || {
+            chmod +x /etc/init.d/nextpanel-sync
+            /etc/init.d/nextpanel-sync enable 2>/dev/null || true
+            /etc/init.d/rpcd reload 2>/dev/null || true
+          }
+          exit 0
+          EOF
+          chmod +x "${CTRL_DIR}/postinst"
+
+          # prerm script
+          cat > "${CTRL_DIR}/prerm" <<'EOF'
+          #!/bin/sh
+          [ -n "${IPKG_INSTROOT}" ] || {
+            /etc/init.d/nextpanel-sync stop 2>/dev/null || true
+            /etc/init.d/nextpanel-sync disable 2>/dev/null || true
+          }
+          exit 0
+          EOF
+          chmod +x "${CTRL_DIR}/prerm"
+
+          # ── Build archives ─────────────────────────────────────────────────
+          echo "2.0" > "${STAGING}/debian-binary"
+
+          tar -czf "${STAGING}/data.tar.gz"    -C "${DATA_DIR}" .
+          tar -czf "${STAGING}/control.tar.gz" -C "${CTRL_DIR}" .
+
+          # ── Assemble .ipk (ar archive) ─────────────────────────────────────
+          IPK_NAME="luci-app-nextpanel_${VERSION}_all.ipk"
+          ar r "${IPK_NAME}" \
+            "${STAGING}/debian-binary" \
+            "${STAGING}/control.tar.gz" \
+            "${STAGING}/data.tar.gz"
+
+          echo "Built: ${IPK_NAME}"
+          ls -lh "${IPK_NAME}"
+
+          # Also create a stable-name symlink for the download URL in the panel
+          cp "${IPK_NAME}" luci-app-nextpanel_all.ipk
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: luci-app-nextpanel-ipk
+          path: apps/router-plugin/luci-app-nextpanel_*.ipk
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            apps/router-plugin/luci-app-nextpanel_*_all.ipk
+            apps/router-plugin/luci-app-nextpanel_all.ipk
+          body: |
+            ## luci-app-nextpanel — OpenWrt HomeProxy Sync Plugin
+
+            **Compatibility:** OpenWrt 21.02+ / immortalwrt 23.05+
+            **Architecture:** `all` (works on x86, ARM, MIPS, etc.)
+
+            ### Installation
+            1. Download `luci-app-nextpanel_all.ipk`
+            2. In LuCI → System → Software → Upload Package, install the file
+            3. Go to **Services → NextPanel**, enter your subscription URL
+            4. Save and follow the setup guide
+
+            ### Built-in routing rules
+            - 🚫 Ads blocked (geosite-category-ads-all)
+            - 🤖 AI services proxied (OpenAI, Claude, Gemini, Copilot, and more)
+            - 🎬 Streaming proxied (Netflix, YouTube, Disney+)
+            - 🇨🇳 China direct (geosite-cn + geoip-cn)
+            - 🌐 Everything else via proxy

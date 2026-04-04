@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException, ConflictException } 
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service';
 import { NodesService } from '../nodes/nodes.service';
-import { buildShareUri, buildClashSubscription, buildSingboxOutbound, buildFullSingboxConfig } from './uri-builder';
+import { buildShareUri, buildClashSubscription, buildSingboxOutbound, buildFullSingboxConfig, buildHomeProxyConfig } from './uri-builder';
 import type { NodeExportInfo } from './uri-builder';
 
 type SubscriptionNode = {
@@ -263,6 +263,12 @@ export class SubscriptionsService {
   async generateSingboxContentByShareToken(shareToken: string): Promise<string> {
     const nodes = await this.fetchActiveNodes({ shareToken });
     return buildFullSingboxConfig(nodes);
+  }
+
+  /** HomeProxy (OpenWrt router) full sing-box JSON */
+  async generateHomeProxyContent(token: string): Promise<string> {
+    const nodes = await this.fetchActiveNodes({ token });
+    return buildHomeProxyConfig(nodes);
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────

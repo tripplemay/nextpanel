@@ -160,6 +160,16 @@ export class SubscriptionsController {
     res.send(content);
   }
 
+  /** Public — HomeProxy (OpenWrt router) full sing-box config */
+  @Get('link/:token/homeproxy')
+  @ApiOperation({ summary: 'HomeProxy (OpenWrt) full sing-box JSON — router transparent proxy' })
+  async getHomeProxyContent(@Param('token') token: string, @Res() res: Response) {
+    const content = await this.subscriptionsService.generateHomeProxyContent(token);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', 'inline; filename="homeproxy-singbox.json"');
+    res.send(content);
+  }
+
   // ─── Public links (shareToken — VIEWER) ───────────────────────────────────
 
   /** Public — VIEWER shareToken Base64 */
