@@ -5,6 +5,9 @@
 
 START=99
 STOP=01
+EXTRA_COMMANDS="sync force_sync"
+EXTRA_HELP="	sync		Sync config from panel (respects enabled flag)
+	force_sync	Force sync regardless of enabled setting"
 
 LOGFILE=/var/log/nextpanel-sync.log
 LOGMAX=200       # lines to keep in the log
@@ -57,9 +60,8 @@ do_sync() {
 
     log "Syncing from: $url"
 
-    # Download to a temporary file
-    local tmpfile
-    tmpfile=$(mktemp /tmp/nextpanel-XXXXXX.json)
+    # Download to a temporary file (BusyBox mktemp doesn't support suffix templates)
+    local tmpfile="/tmp/nextpanel-$$.json"
 
     if curl -s --connect-timeout 15 --max-time 60 -o "$tmpfile" "$url"; then
         # Basic JSON validation: file must start with '{'
