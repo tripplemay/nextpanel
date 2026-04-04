@@ -1,0 +1,6 @@
+#!/bin/sh
+[ -n "${IPKG_INSTROOT}" ] || {
+  /etc/init.d/nextpanel-sync stop 2>/dev/null || true
+  /etc/init.d/nextpanel-sync disable 2>/dev/null || true
+}
+exit 0
