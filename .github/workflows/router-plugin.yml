@@ -50,38 +50,37 @@ jobs:
           install -Dm644 htdocs/luci-static/resources/view/nextpanel/config.js \
             "${DATA_DIR}/www/luci-static/resources/view/nextpanel/config.js"
 
-          # ── control file ───────────────────────────────────────────────────
+          # ── control file (no leading whitespace — opkg is strict) ────────────
           cat > "${CTRL_DIR}/control" <<EOF
-          Package: luci-app-nextpanel
-          Version: ${VERSION}
-          Architecture: all
-          Maintainer: NextPanel <https://github.com/tripplemay/nextpanel>
-          Description: NextPanel HomeProxy Sync — automatically syncs proxy
-           configuration from the NextPanel panel to HomeProxy on OpenWrt.
-           Includes complete routing rules for ads, AI services, streaming,
-           and China bypass.
-          Depends: luci-base, homeproxy, curl
-          EOF
+Package: luci-app-nextpanel
+Version: ${VERSION}
+Architecture: all
+Maintainer: NextPanel <https://github.com/tripplemay/nextpanel>
+Description: NextPanel HomeProxy Sync — automatically syncs proxy
+ configuration from the NextPanel panel to HomeProxy on OpenWrt.
+ Includes routing rules for ads, AI services, streaming, and China bypass.
+Depends: luci-base, homeproxy, curl
+EOF
 
           cat > "${CTRL_DIR}/postinst" <<'EOF'
-          #!/bin/sh
-          [ -n "${IPKG_INSTROOT}" ] || {
-            chmod +x /etc/init.d/nextpanel-sync
-            /etc/init.d/nextpanel-sync enable 2>/dev/null || true
-            /etc/init.d/rpcd reload 2>/dev/null || true
-          }
-          exit 0
-          EOF
+#!/bin/sh
+[ -n "${IPKG_INSTROOT}" ] || {
+  chmod +x /etc/init.d/nextpanel-sync
+  /etc/init.d/nextpanel-sync enable 2>/dev/null || true
+  /etc/init.d/rpcd reload 2>/dev/null || true
+}
+exit 0
+EOF
           chmod +x "${CTRL_DIR}/postinst"
 
           cat > "${CTRL_DIR}/prerm" <<'EOF'
-          #!/bin/sh
-          [ -n "${IPKG_INSTROOT}" ] || {
-            /etc/init.d/nextpanel-sync stop 2>/dev/null || true
-            /etc/init.d/nextpanel-sync disable 2>/dev/null || true
-          }
-          exit 0
-          EOF
+#!/bin/sh
+[ -n "${IPKG_INSTROOT}" ] || {
+  /etc/init.d/nextpanel-sync stop 2>/dev/null || true
+  /etc/init.d/nextpanel-sync disable 2>/dev/null || true
+}
+exit 0
+EOF
           chmod +x "${CTRL_DIR}/prerm"
 
           # ── Build archives ─────────────────────────────────────────────────
@@ -90,11 +89,13 @@ jobs:
           tar -czf "${STAGING}/control.tar.gz" -C "${CTRL_DIR}" .
 
           # ── Assemble .ipk ─────────────────────────────────────────────────
+          # OpenWrt .ipk is a gzipped tar (NOT ar like Debian .deb)
           IPK_NAME="luci-app-nextpanel_${VERSION}_all.ipk"
-          ar r "${IPK_NAME}" \
-            "${STAGING}/debian-binary" \
-            "${STAGING}/control.tar.gz" \
-            "${STAGING}/data.tar.gz"
+          tar -czf "${IPK_NAME}" \
+            -C "${STAGING}" \
+            "./debian-binary" \
+            "./control.tar.gz" \
+            "./data.tar.gz"
 
           # Stable-name copy — this is the URL the panel frontend links to
           cp "${IPK_NAME}" luci-app-nextpanel_all.ipk
