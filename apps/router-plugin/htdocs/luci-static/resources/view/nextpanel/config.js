@@ -32,56 +32,55 @@ return view.extend({
 
   render: function (data) {
     var logContent = (data[1] && data[1].data) ? data[1].data : '';
-    // Show last 30 lines
     var logLines = logContent.split('\n').filter(function (l) { return l.trim().length > 0; });
     var recentLog = logLines.slice(-30).join('\n');
 
-    var lastSync   = uci.get('nextpanel', 'config', 'last_sync')   || '—';
-    var lastStatus = uci.get('nextpanel', 'config', 'last_status') || '—';
+    var lastSync   = uci.get('nextpanel', 'config', 'last_sync')   || '从未同步';
+    var lastStatus = uci.get('nextpanel', 'config', 'last_status') || '';
     var lastError  = uci.get('nextpanel', 'config', 'last_error')  || '';
 
     var m, s, o;
 
-    m = new form.Map('nextpanel', _('NextPanel Sync'),
-      _('Automatically syncs proxy configuration from your NextPanel panel to HomeProxy.'));
+    m = new form.Map('nextpanel', 'NextPanel 同步',
+      '自动将 NextPanel 面板的节点配置同步到路由器 HomeProxy，无需手动维护。');
 
-    // ── Settings section ──────────────────────────────────────────────────────
-    s = m.section(form.TypedSection, 'nextpanel', _('Settings'));
+    // ── 设置 ──────────────────────────────────────────────────────────────────
+    s = m.section(form.TypedSection, 'nextpanel', '设置');
     s.anonymous = true;
     s.addremove = false;
 
-    o = s.option(form.Flag, 'enabled', _('Enable'),
-      _('When enabled, the plugin will sync at the configured interval. Manual sync is always available regardless of this setting.'));
+    o = s.option(form.Flag, 'enabled', '启用自动同步',
+      '开启后按设定间隔自动拉取最新配置；关闭后仍可手动同步。');
     o.rmempty = false;
 
-    o = s.option(form.Value, 'subscription_url', _('Subscription URL'),
-      _('Copy the HomeProxy URL from your NextPanel panel (Subscriptions → HomeProxy tab).'));
+    o = s.option(form.Value, 'subscription_url', '订阅链接',
+      '从 NextPanel 面板「订阅」页面复制 HomeProxy 专用链接。');
     o.placeholder = 'https://your-panel.example.com/api/subscriptions/link/TOKEN/homeproxy';
     o.rmempty = false;
     o.datatype = 'string';
 
-    o = s.option(form.ListValue, 'interval', _('Auto Refresh Interval'));
-    o.value('0',     _('Disabled'));
-    o.value('3600',  _('Every 1 hour'));
-    o.value('21600', _('Every 6 hours'));
-    o.value('86400', _('Every 24 hours (recommended)'));
+    o = s.option(form.ListValue, 'interval', '自动同步间隔');
+    o.value('0',     '关闭');
+    o.value('3600',  '每 1 小时');
+    o.value('21600', '每 6 小时');
+    o.value('86400', '每 24 小时（推荐）');
     o.default = '86400';
     o.rmempty = false;
 
-    // ── Status section ────────────────────────────────────────────────────────
-    s = m.section(form.TypedSection, 'nextpanel', _('Sync Status'));
+    // ── 同步状态 ──────────────────────────────────────────────────────────────
+    s = m.section(form.TypedSection, 'nextpanel', '同步状态');
     s.anonymous = true;
     s.addremove = false;
 
-    o = s.option(form.DummyValue, '_status', _('Last sync'));
+    o = s.option(form.DummyValue, '_status', '上次同步');
     o.rawhtml = true;
     o.cfgvalue = function () {
       var statusColor = lastStatus === 'success' ? '#52c41a'
                       : lastStatus === 'error'   ? '#ff4d4f'
                       : '#8c8c8c';
-      var statusText  = lastStatus === 'success' ? '✓ ' + _('Success')
-                      : lastStatus === 'error'   ? '✗ ' + _('Failed')
-                      : _('Never synced');
+      var statusText  = lastStatus === 'success' ? '✓ 成功'
+                      : lastStatus === 'error'   ? '✗ 失败'
+                      : '尚未同步';
       var html = '<span style="color:' + statusColor + ';font-weight:500">' + statusText + '</span>';
       html += '&nbsp;&nbsp;<span style="color:#8c8c8c;font-size:12px">' + lastSync + '</span>';
       if (lastStatus === 'error' && lastError) {
@@ -90,21 +89,20 @@ return view.extend({
       return html;
     };
 
-    // ── Sync Now button ───────────────────────────────────────────────────────
-    o = s.option(form.DummyValue, '_actions', _('Actions'));
+    o = s.option(form.DummyValue, '_actions', '操作');
     o.rawhtml = true;
     o.cfgvalue = function () {
       return '<button class="btn cbi-button cbi-button-action" id="nextpanel-sync-btn">' +
-             _('Sync Now') + '</button>' +
+             '立即同步</button>' +
              '<span id="nextpanel-sync-status" style="margin-left:12px;font-size:13px"></span>';
     };
 
-    // ── Log section ───────────────────────────────────────────────────────────
-    s = m.section(form.TypedSection, 'nextpanel', _('Sync Log'));
+    // ── 同步日志 ──────────────────────────────────────────────────────────────
+    s = m.section(form.TypedSection, 'nextpanel', '同步日志');
     s.anonymous = true;
     s.addremove = false;
 
-    o = s.option(form.DummyValue, '_log', _('Recent log'));
+    o = s.option(form.DummyValue, '_log', '最近日志');
     o.rawhtml = true;
     o.cfgvalue = function () {
       var escaped = recentLog
@@ -113,11 +111,11 @@ return view.extend({
         .replace(/>/g, '&gt;');
       return '<pre style="background:#1a1a1a;color:#d4d4d4;padding:12px;border-radius:6px;' +
              'font-size:12px;max-height:240px;overflow-y:auto;white-space:pre-wrap;word-break:break-all">' +
-             (escaped || _('No log entries yet.')) + '</pre>';
+             (escaped || '暂无日志。') + '</pre>';
     };
 
-    // ── HomeProxy setup guide ─────────────────────────────────────────────────
-    s = m.section(form.TypedSection, 'nextpanel', _('HomeProxy Setup Guide'));
+    // ── HomeProxy 配置指引 ────────────────────────────────────────────────────
+    s = m.section(form.TypedSection, 'nextpanel', 'HomeProxy 配置指引');
     s.anonymous = true;
     s.addremove = false;
 
@@ -126,50 +124,49 @@ return view.extend({
     o.cfgvalue = function () {
       return [
         '<div style="font-size:13px;line-height:1.8;color:rgba(0,0,0,0.75)">',
-        '<p><strong>' + _('After saving settings and running a sync, complete the one-time HomeProxy setup:') + '</strong></p>',
+        '<p><strong>保存设置并完成首次同步后，需在 HomeProxy 中做一次性配置：</strong></p>',
         '<ol style="padding-left:20px;margin:0">',
-        '<li>' + _('Go to <b>Services → HomeProxy</b>') + '</li>',
-        '<li>' + _('Under <b>Node Settings</b>, select the config file: <code>/etc/homeproxy/singbox.json</code>') + '</li>',
-        '<li>' + _('Under <b>Proxy Settings</b>, set Mode to <b>Transparent Proxy</b>') + '</li>',
-        '<li>' + _('Set the LAN interface (usually <code>br-lan</code>)') + '</li>',
-        '<li>' + _('Save &amp; Apply') + '</li>',
+        '<li>进入 <b>服务 → HomeProxy</b></li>',
+        '<li>在「节点设置」中，将配置文件选择为 <code>/etc/homeproxy/singbox.json</code></li>',
+        '<li>在「代理设置」中，将模式设置为<b>透明代理</b></li>',
+        '<li>设置 LAN 接口（通常为 <code>br-lan</code>）</li>',
+        '<li>保存并应用</li>',
         '</ol>',
-        '<p style="margin-top:8px;color:#8c8c8c">' +
-          _('This setup is only needed once. After that, NextPanel handles all node and rule updates automatically.') +
+        '<p style="margin-top:8px;color:#8c8c8c">',
+        '以上步骤只需配置一次，之后 NextPanel 会自动处理所有节点和规则的更新。',
         '</p>',
-        '<p style="margin-top:4px"><strong>' + _('Built-in routing rules:') + '</strong> ' +
-          _('Ads blocked · AI services proxied · Streaming proxied · China direct · LAN direct · Others proxied') +
+        '<p style="margin-top:4px"><strong>内置分流规则：</strong>',
+        '广告屏蔽 · AI 服务代理 · 流媒体代理 · 中国大陆直连 · 局域网直连 · 其余流量走代理',
         '</p>',
         '</div>',
       ].join('');
     };
 
     return m.render().then(function (node) {
-      // Wire up the Sync Now button after DOM is ready
       var btn = node.querySelector('#nextpanel-sync-btn');
       var statusEl = node.querySelector('#nextpanel-sync-status');
       if (btn) {
         btn.addEventListener('click', function () {
           btn.disabled = true;
-          btn.textContent = _('Syncing…');
+          btn.textContent = '同步中…';
           if (statusEl) statusEl.textContent = '';
 
           callExec('/etc/init.d/nextpanel-sync', ['force_sync'])
             .then(function () {
               if (statusEl) {
                 statusEl.style.color = '#52c41a';
-                statusEl.textContent = _('✓ Sync complete — reload page to see updated status');
+                statusEl.textContent = '✓ 同步完成，刷新页面查看最新状态';
               }
             })
             .catch(function (err) {
               if (statusEl) {
                 statusEl.style.color = '#ff4d4f';
-                statusEl.textContent = _('✗ Sync failed: ') + (err.message || String(err));
+                statusEl.textContent = '✗ 同步失败：' + (err.message || String(err));
               }
             })
             .finally(function () {
               btn.disabled = false;
-              btn.textContent = _('Sync Now');
+              btn.textContent = '立即同步';
             });
         });
       }
@@ -179,7 +176,6 @@ return view.extend({
 
   handleSave: function (ev) {
     return this.super('handleSave', [ev]).then(function () {
-      // After saving, restart the service to apply new interval/enabled setting
       return callExec('/etc/init.d/nextpanel-sync', ['restart']).catch(function () {});
     });
   },
