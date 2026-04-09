@@ -17,7 +17,8 @@ type SubscriptionNode = {
     domain: string | null;
     enabled: boolean;
     status: string;
-    server: { ip: string };
+    server: { ip: string; countryCode: string | null };
+    exitServer?: { countryCode: string | null } | null;
   };
 };
 
@@ -277,7 +278,12 @@ export class SubscriptionsService {
     const include = {
       nodes: {
         include: {
-          node: { include: { server: { select: { ip: true } } } },
+          node: {
+            include: {
+              server: { select: { ip: true, countryCode: true } },
+              exitServer: { select: { countryCode: true } },
+            },
+          },
         },
       },
       externalNodes: { include: { externalNode: true } },
@@ -303,6 +309,8 @@ export class SubscriptionsService {
     for (const { node } of sub.nodes as SubscriptionNode[]) {
       if (!node.enabled || node.status !== 'RUNNING') continue;
       const credentials = await this.nodesService.getCredentials(node.id, sub.ownerId);
+      // Chain nodes: use exit server's countryCode (actual egress point)
+      const countryCode = node.exitServer?.countryCode ?? node.server.countryCode;
       result.push({
         name: node.name,
         protocol: node.protocol,
@@ -312,6 +320,7 @@ export class SubscriptionsService {
         tls: node.tls,
         domain: node.domain,
         credentials,
+        countryCode,
       });
     }
 

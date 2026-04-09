@@ -452,7 +452,7 @@ export default function SubscriptionsPage() {
 }
 
 const FORMAT_DESCRIPTIONS: Record<string, string> = {
-  clash: '适合 Clash Verge、Stash 等需要精细分流规则的客户端',
+  clash: '适合 Clash Verge / mihomo Party 等基于 mihomo 内核的客户端，支持多端口分流',
   v2ray: '适合 v2rayN、Shadowrocket 等客户端',
   homeproxy: '适合 OpenWrt 路由器上的 HomeProxy 插件，包含完整分流规则（广告屏蔽、AI 服务、流媒体、国内直连）',
 };
@@ -513,6 +513,8 @@ function LinkTabs({ formats, onCopy }: { formats: SubFormat[]; onCopy: (url: str
               </Typography.Text>
             </div>
           </Space>
+        ) : f.key === 'clash' ? (
+          <ClashTab url={f.url} onCopy={onCopy} />
         ) : f.key === 'homeproxy' ? (
           <HomeProxyTab url={f.url} onCopy={onCopy} />
         ) : (
@@ -547,6 +549,67 @@ function LinkTabs({ formats, onCopy }: { formats: SubFormat[]; onCopy: (url: str
         ),
       }))}
     />
+  );
+}
+
+function ClashTab({ url, onCopy }: { url: string; onCopy: (url: string) => void }) {
+  return (
+    <Space direction="vertical" style={{ width: '100%' }} size={16}>
+      <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+        {FORMAT_DESCRIPTIONS['clash']}
+      </Typography.Text>
+      <Space.Compact style={{ width: '100%' }}>
+        <Input value={url} readOnly />
+        <Button onClick={() => onCopy(url)}>复制</Button>
+      </Space.Compact>
+
+      {/* Multi-terminal routing guide */}
+      <div style={{ background: '#f5f5f5', borderRadius: 8, padding: '12px 16px' }}>
+        <Typography.Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>
+          多终端分流
+        </Typography.Text>
+        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 10 }}>
+          订阅包含多个监听端口，不同终端设置不同端口即可走不同的代理策略组，在 Clash 面板中可独立选择每个组走哪个节点。
+        </Typography.Text>
+        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid #e8e8e8' }}>
+              <th style={{ textAlign: 'left', padding: '4px 8px', color: 'rgba(0,0,0,0.45)' }}>端口</th>
+              <th style={{ textAlign: 'left', padding: '4px 8px', color: 'rgba(0,0,0,0.45)' }}>策略组</th>
+              <th style={{ textAlign: 'left', padding: '4px 8px', color: 'rgba(0,0,0,0.45)' }}>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+              <td style={{ padding: '4px 8px' }}><Tag color="blue" style={{ margin: 0 }}>7890</Tag></td>
+              <td style={{ padding: '4px 8px' }}>🚀 节点选择</td>
+              <td style={{ padding: '4px 8px', color: 'rgba(0,0,0,0.45)' }}>默认端口，走规则分流</td>
+            </tr>
+            <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+              <td style={{ padding: '4px 8px' }}><Tag color="green" style={{ margin: 0 }}>7891+</Tag></td>
+              <td style={{ padding: '4px 8px' }}>按地区分组</td>
+              <td style={{ padding: '4px 8px', color: 'rgba(0,0,0,0.45)' }}>每个地区一个端口，按节点数量排序</td>
+            </tr>
+            <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+              <td style={{ padding: '4px 8px' }}><Tag color="purple" style={{ margin: 0 }}>7901</Tag></td>
+              <td style={{ padding: '4px 8px' }}>🎬 流媒体</td>
+              <td style={{ padding: '4px 8px', color: 'rgba(0,0,0,0.45)' }}>Netflix / YouTube 等</td>
+            </tr>
+            <tr>
+              <td style={{ padding: '4px 8px' }}><Tag color="purple" style={{ margin: 0 }}>7902</Tag></td>
+              <td style={{ padding: '4px 8px' }}>🤖 AI 服务</td>
+              <td style={{ padding: '4px 8px', color: 'rgba(0,0,0,0.45)' }}>OpenAI / Claude / Gemini 等</td>
+            </tr>
+          </tbody>
+        </table>
+        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 10 }}>
+          终端使用示例：
+        </Typography.Text>
+        <Typography.Text code style={{ fontSize: 11, display: 'block', marginTop: 4, whiteSpace: 'pre-wrap' }}>
+          {`# 终端 1 — 走默认规则分流\nexport https_proxy=http://127.0.0.1:7890\n\n# 终端 2 — 走指定地区（如日本 7891）\nexport https_proxy=http://127.0.0.1:7891\n\n# 终端 3 — 专走 AI 服务节点\nexport https_proxy=http://127.0.0.1:7902`}
+        </Typography.Text>
+      </div>
+    </Space>
   );
 }
 
