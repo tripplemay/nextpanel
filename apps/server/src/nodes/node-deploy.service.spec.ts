@@ -253,7 +253,7 @@ describe('NodeDeployService', () => {
       mockExecCommand
         .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })                      // uname -m
         .mockResolvedValueOnce({ stdout: '{"tag_name":"v26.2.6"}', stderr: '' })      // github API
-        .mockResolvedValueOnce({ stderr: '' })                                         // ensure unzip
+        .mockResolvedValueOnce({ code: 0, stderr: '' })                               // ensureUnzip: command -v unzip → present
         .mockResolvedValueOnce({ stderr: '' })                                         // download + extract + install
         .mockResolvedValueOnce({ code: 0 })                                            // test -x xray
         .mockResolvedValueOnce({ stderr: '' })                                         // daemon-reload
@@ -637,7 +637,7 @@ describe('NodeDeployService', () => {
       mockExecCommand
         .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })                 // uname -m
         .mockResolvedValueOnce({ stdout: '{"tag_name":"v26.2.6"}', stderr: '' }) // github API
-        .mockResolvedValueOnce({ stderr: '' })                                    // ensure unzip
+        .mockResolvedValueOnce({ code: 0, stderr: '' })                           // ensureUnzip: command -v unzip → present
         .mockResolvedValueOnce({ stderr: '' })                                    // download + extract + install
         .mockResolvedValueOnce({ code: 0 });                                      // test -x xray succeeds → installXray returns true
 
@@ -933,7 +933,7 @@ describe('NodeDeployService', () => {
         .mockResolvedValueOnce(true);  // re-verify: installed
       mockExecCommand.mockReset();
       mockExecCommand
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })  // apt-get install unzip
+        .mockResolvedValueOnce({ code: 0, stderr: '' })  // ensureUnzip: command -v unzip → present
         .mockResolvedValueOnce({ stdout: 'v2ray output', stderr: '' }) // curl install script
         .mockResolvedValueOnce({ code: 0 })                // test -x /usr/local/bin/v2ray
         .mockResolvedValueOnce({ stderr: '' })             // daemon-reload
@@ -963,7 +963,7 @@ describe('NodeDeployService', () => {
       mockBinaryExists.mockResolvedValue(false); // always missing
       mockExecCommand.mockReset();
       mockExecCommand
-        .mockResolvedValueOnce({ stdout: '', stderr: '' })  // apt-get install unzip
+        .mockResolvedValueOnce({ code: 0, stderr: '' })  // ensureUnzip: command -v unzip → present
         .mockResolvedValueOnce({ stdout: '', stderr: '' })  // install script
         .mockResolvedValueOnce({ code: 1 });                // test -x v2ray fails
 
@@ -1175,7 +1175,7 @@ describe('NodeDeployService', () => {
       mockExecCommand
         .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })          // uname -m
         .mockResolvedValueOnce({ stdout: '{"tag_name":"v1.0"}', stderr: '' }) // github API
-        .mockResolvedValueOnce({ stderr: '' })                             // ensure unzip
+        .mockResolvedValueOnce({ code: 0, stderr: '' })                    // ensureUnzip: command -v unzip → present
         .mockResolvedValueOnce({ stderr: 'download failed', stdout: '' }) // download with error
         .mockResolvedValueOnce({ code: 1 }); // test -x xray fails
 
@@ -1187,6 +1187,39 @@ describe('NodeDeployService', () => {
       expect(result.success).toBe(false);
       expect(result.log).toContain('Auto-install failed');
       expect(logs.some((l) => l.includes('Xray install failed'))).toBe(true);
+    });
+  });
+
+  describe('deploy — Xray install aborts when unzip cannot be installed', () => {
+    it('fails fast with diagnostic when ensureUnzip cannot install unzip', async () => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      (mockPrisma.configSnapshot.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.configSnapshot.create as jest.Mock).mockResolvedValue({});
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
+      mockConnectSsh.mockResolvedValue(mockSsh);
+      mockBinaryExists.mockResolvedValue(false); // always missing
+      mockExecCommand.mockReset();
+      mockExecCommand
+        .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })                  // uname -m
+        .mockResolvedValueOnce({ stdout: '{"tag_name":"v1.0"}', stderr: '' })     // github API
+        .mockResolvedValueOnce({ code: 1, stderr: '' })                            // ensureUnzip probe: missing
+        .mockResolvedValueOnce({ code: 100, stderr: 'E: Could not get lock /var/lib/dpkg/lock-frontend' }) // install attempt fails (dpkg locked)
+        .mockResolvedValueOnce({ code: 1, stderr: '' });                           // verify: still missing
+
+      const logs: string[] = [];
+      const promise = svc.deploy('node-1', (l) => logs.push(l));
+      jest.runAllTimersAsync();
+      const result = await promise;
+
+      expect(result.success).toBe(false);
+      // Original misleading "unzip: command not found" must NOT appear — we
+      // should bail before invoking unzip, with a diagnostic that points at
+      // the real cause (dpkg lock).
+      expect(logs.some((l) => l.includes('unzip install error') && l.includes('dpkg/lock'))).toBe(true);
+      expect(logs.some((l) => l.includes('unzip is still unavailable'))).toBe(true);
+      expect(logs.some((l) => l.includes('Xray install failed: unzip unavailable'))).toBe(true);
+      // The download/extract command must NOT have run (only 5 mocks consumed).
+      expect(mockExecCommand).toHaveBeenCalledTimes(5);
     });
   });
 

@@ -752,6 +752,43 @@ export class NodeDeployService {
     }
   }
 
+  /**
+   * Ensure `unzip` is available on the remote host. Detects the host's package
+   * manager and installs unzip if missing, then verifies. Returns false (with
+   * diagnostic logs) when installation cannot succeed — callers MUST short-circuit
+   * rather than letting downstream `unzip` invocations fail with a misleading
+   * "command not found".
+   */
+  private async ensureUnzip(ssh: NodeSSH, log: (msg: string) => void): Promise<boolean> {
+    const probe = await ssh.execCommand(`command -v unzip`);
+    if (probe.code === 0) return true;
+
+    log(`unzip not present, attempting install...`);
+    // Try package managers in order. apt-get uses DPkg::Lock::Timeout to wait
+    // for unattended-upgrades to release the lock instead of failing immediately.
+    const installCmd =
+      `if command -v apt-get >/dev/null 2>&1; then ` +
+      `  DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y -qq unzip; ` +
+      `elif command -v dnf >/dev/null 2>&1; then dnf install -y -q unzip; ` +
+      `elif command -v yum >/dev/null 2>&1; then yum install -y -q unzip; ` +
+      `elif command -v apk >/dev/null 2>&1; then apk add --no-cache unzip; ` +
+      `elif command -v zypper >/dev/null 2>&1; then zypper -n install unzip; ` +
+      `else echo "no supported package manager" 1>&2; exit 127; fi`;
+    const { code, stderr } = await ssh.execCommand(installCmd);
+    if (code !== 0 && stderr.trim()) {
+      const tail = stderr.trim().split('\n').slice(-3).join(' | ');
+      log(`unzip install error: ${tail}`);
+    }
+
+    const verify = await ssh.execCommand(`command -v unzip`);
+    if (verify.code !== 0) {
+      log(`unzip is still unavailable after install attempt — aborting.`);
+      return false;
+    }
+    log(`unzip installed.`);
+    return true;
+  }
+
   private async installXray(ssh: NodeSSH, log: (msg: string) => void): Promise<boolean> {
     log(`Installing Xray...`);
 
@@ -769,10 +806,10 @@ export class NodeDeployService {
     const tag = tagMatch[1];
     log(`Latest Xray version: ${tag}, arch: ${arch}`);
 
-    // Ensure unzip is available
-    await ssh.execCommand(
-      `command -v unzip >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq unzip) || (yum install -y unzip)`,
-    );
+    if (!(await this.ensureUnzip(ssh, log))) {
+      log(`Xray install failed: unzip unavailable.`);
+      return false;
+    }
 
     // Download zip and extract
     const zipName = `Xray-linux-${arch}.zip`;
@@ -794,10 +831,10 @@ export class NodeDeployService {
 
   private async installV2Ray(ssh: NodeSSH, log: (msg: string) => void): Promise<boolean> {
     log(`Installing V2Ray via official script...`);
-    // Ensure unzip is available — required by the V2Ray install script
-    await ssh.execCommand(
-      `DEBIAN_FRONTEND=noninteractive apt-get install -y unzip 2>/dev/null || yum install -y unzip 2>/dev/null; true`,
-    );
+    if (!(await this.ensureUnzip(ssh, log))) {
+      log(`V2Ray install failed: unzip unavailable.`);
+      return false;
+    }
     const { stdout, stderr } = await ssh.execCommand(
       `curl -sL https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh -o /tmp/install-v2ray.sh && ` +
       `bash /tmp/install-v2ray.sh 2>&1; rm -f /tmp/install-v2ray.sh`,
