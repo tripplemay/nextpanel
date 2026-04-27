@@ -129,6 +129,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
         lines.push(`      public-key: ${creds.realityPublicKey ?? ''}`);
         lines.push(`      short-id: ""`);
       }
+      add('udp', true);
       break;
     }
 
@@ -154,6 +155,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
         lines.push(`      public-key: ${creds.realityPublicKey ?? ''}`);
         lines.push(`      short-id: ""`);
       }
+      add('udp', true);
       break;
     }
 
@@ -172,6 +174,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
         lines.push(`    grpc-opts:`);
         lines.push(`      grpc-service-name: grpc`);
       }
+      add('udp', true);
       break;
     }
 
@@ -181,6 +184,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       add('port', port);
       add('cipher', creds.method ?? 'aes-256-gcm');
       add('password', creds.password ?? '');
+      add('udp', true);
       break;
     }
 
