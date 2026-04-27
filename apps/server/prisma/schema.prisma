@@ -74,7 +74,7 @@ model Server {
   /// AES-GCM encrypted ssh key or password
   sshAuthEnc   String
   tags         String[]
-  autoTags     String[]
+  autoTags     String[] @default([])
   notes        String?
   status       ServerStatus @default(UNKNOWN)
   cpuUsage     Float?
