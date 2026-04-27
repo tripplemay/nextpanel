@@ -196,3 +196,71 @@ describe('buildSingboxOutbound – HYSTERIA2', () => {
     expect(tls.server_name).toBeUndefined();
   });
 });
+
+describe('buildClashProxy – UDP support', () => {
+  // VLESS+REALITY (matches the production node fixture pattern)
+  const vlessReality = {
+    id: 'n1',
+    name: 'VLESS-Test',
+    protocol: 'VLESS',
+    host: '1.2.3.4',
+    port: 443,
+    transport: 'TCP',
+    tls: 'REALITY',
+    domain: 'addons.mozilla.org',
+    credentials: { uuid: 'aaaa-bbbb', realityPublicKey: 'pubk' },
+  };
+  const vmessTcp = {
+    id: 'n2',
+    name: 'VMESS-Test',
+    protocol: 'VMESS',
+    host: '1.2.3.4',
+    port: 443,
+    transport: 'TCP',
+    tls: 'NONE',
+    domain: null,
+    credentials: { uuid: 'cccc-dddd' },
+  };
+  const trojanWs = {
+    id: 'n3',
+    name: 'TROJAN-Test',
+    protocol: 'TROJAN',
+    host: '1.2.3.4',
+    port: 443,
+    transport: 'WS',
+    tls: 'TLS',
+    domain: 'example.com',
+    credentials: { password: 'pw' },
+  };
+  const shadowsocks = {
+    id: 'n4',
+    name: 'SS-Test',
+    protocol: 'SHADOWSOCKS',
+    host: '1.2.3.4',
+    port: 443,
+    transport: 'TCP',
+    tls: 'NONE',
+    domain: null,
+    credentials: { method: 'aes-256-gcm', password: 'pw' },
+  };
+
+  it('VLESS proxy includes udp: true', () => {
+    const yaml = buildClashProxy(vlessReality as never)!;
+    expect(yaml).toContain('udp: true');
+  });
+
+  it('VMESS proxy includes udp: true', () => {
+    const yaml = buildClashProxy(vmessTcp as never)!;
+    expect(yaml).toContain('udp: true');
+  });
+
+  it('TROJAN proxy includes udp: true', () => {
+    const yaml = buildClashProxy(trojanWs as never)!;
+    expect(yaml).toContain('udp: true');
+  });
+
+  it('SHADOWSOCKS proxy includes udp: true', () => {
+    const yaml = buildClashProxy(shadowsocks as never)!;
+    expect(yaml).toContain('udp: true');
+  });
+});
