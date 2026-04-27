@@ -285,6 +285,7 @@ export interface SubscriptionShare {
 
 export interface OpenRouterSetting {
   id: string;
+  baseURL: string;
   model: string;
   createdAt: string;
   updatedAt: string;
@@ -292,9 +293,9 @@ export interface OpenRouterSetting {
 
 export interface UpsertOpenRouterSettingDto {
   apiKey: string;
+  baseURL?: string;
   model?: string;
 }
-
 export interface ServerRecommendCategory {
   id: string;
   name: string;

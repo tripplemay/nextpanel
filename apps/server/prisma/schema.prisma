@@ -449,6 +449,7 @@ model WxWorkSetting {
 model OpenRouterSetting {
   id         String   @id @default(cuid())
   apiKeyEnc  String
+  baseURL    String   @default("https://openrouter.ai/api/v1")
   model      String   @default("anthropic/claude-sonnet-4")
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
