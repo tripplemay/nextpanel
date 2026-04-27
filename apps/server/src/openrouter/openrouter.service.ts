@@ -18,7 +18,7 @@ export class OpenRouterService {
     const config = await this.settings.getDecrypted();
     if (!config) throw new BadRequestException('OpenRouter 未配置');
 
-    const res = await fetch('https://openrouter.ai/api/v1/models', {
+    const res = await fetch(`${config.baseURL}/models`, {
       headers: { Authorization: `Bearer ${config.apiKey}` },
       signal: AbortSignal.timeout(15_000),
     });
@@ -47,7 +47,7 @@ export class OpenRouterService {
     const targetModel = model ?? config.model;
 
     try {
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      const res = await fetch(`${config.baseURL}/chat/completions`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
@@ -121,7 +121,7 @@ export class OpenRouterService {
 
     let responseText: string;
     try {
-      const apiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      const apiRes = await fetch(`${config.baseURL}/chat/completions`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${config.apiKey}`,

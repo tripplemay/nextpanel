@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { App, Alert, Button, Card, Form, Input, Select, Space, Tag, Typography } from 'antd';
+import { App, Alert, AutoComplete, Button, Card, Form, Input, Select, Space, Tag, Typography } from 'antd';
 import { CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, ApiOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { openRouterApi } from '@/lib/api';
 import PageHeader from '@/components/common/PageHeader';
+import { AI_PROVIDER_PRESETS, detectPreset } from '@/lib/ai-providers';
 import type { UpsertOpenRouterSettingDto } from '@/types/api';
 
 const { Text } = Typography;
@@ -17,38 +18,65 @@ function formatPrice(prompt: string, completion: string): string {
   return `$${p.toFixed(2)} / $${c.toFixed(2)} per 1M tokens`;
 }
 
+interface FormValues extends UpsertOpenRouterSettingDto {
+  providerId: string;
+}
+
 export default function OpenRouterSettingsPage() {
   const { message, modal } = App.useApp();
   const qc = useQueryClient();
-  const [form] = Form.useForm<UpsertOpenRouterSettingDto>();
+  const [form] = Form.useForm<FormValues>();
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [providerId, setProviderId] = useState<string>(AI_PROVIDER_PRESETS[0].id);
 
   const { data: setting } = useQuery({
     queryKey: ['openrouter-settings'],
     queryFn: () => openRouterApi.getSettings().then((r) => r.data),
   });
 
-  const { data: models, isLoading: modelsLoading } = useQuery({
-    queryKey: ['openrouter-models'],
+  const { data: models, isLoading: modelsLoading, isError: modelsError } = useQuery({
+    queryKey: ['openrouter-models', setting?.baseURL],
     queryFn: () => openRouterApi.listModels().then((r) => r.data),
     enabled: !!setting,
     staleTime: 10 * 60 * 1000,
+    retry: false,
   });
 
+  // Restore form state from saved setting
   useEffect(() => {
     if (setting) {
+      const preset = detectPreset(setting.baseURL);
+      setProviderId(preset.id);
       form.setFieldsValue({
+        providerId: preset.id,
+        baseURL: setting.baseURL,
         model: setting.model,
         apiKey: '',
       });
     }
   }, [setting, form]);
 
+  function handleProviderChange(newId: string) {
+    setProviderId(newId);
+    const preset = AI_PROVIDER_PRESETS.find((p) => p.id === newId);
+    if (!preset) return;
+    // Update baseURL & model unless 自定义 (empty values)
+    form.setFieldsValue({
+      providerId: newId,
+      baseURL: preset.baseURL,
+      model: preset.defaultModel,
+    });
+    setTestResult(null);
+  }
+
   const saveMutation = useMutation({
-    mutationFn: (values: UpsertOpenRouterSettingDto) => openRouterApi.upsertSettings(values),
+    mutationFn: (values: FormValues) => {
+      const { providerId: _ignored, ...payload } = values;
+      return openRouterApi.upsertSettings(payload);
+    },
     onSuccess: () => {
-      message.success('OpenRouter 配置已保存');
+      message.success('AI Provider 配置已保存');
       setTestResult(null);
       qc.invalidateQueries({ queryKey: ['openrouter-settings'] });
       qc.invalidateQueries({ queryKey: ['openrouter-models'] });
@@ -62,8 +90,9 @@ export default function OpenRouterSettingsPage() {
   const removeMutation = useMutation({
     mutationFn: () => openRouterApi.removeSettings(),
     onSuccess: () => {
-      message.success('OpenRouter 配置已删除');
+      message.success('AI Provider 配置已删除');
       form.resetFields();
+      setProviderId(AI_PROVIDER_PRESETS[0].id);
       setTestResult(null);
       qc.invalidateQueries({ queryKey: ['openrouter-settings'] });
       qc.invalidateQueries({ queryKey: ['openrouter-models'] });
@@ -103,7 +132,7 @@ export default function OpenRouterSettingsPage() {
 
   function handleRemove() {
     modal.confirm({
-      title: '确认删除 OpenRouter 配置？',
+      title: '确认删除 AI Provider 配置？',
       content: '删除后将无法使用 AI 自动识别服务商信息。',
       okText: '删除',
       okType: 'danger',
@@ -111,6 +140,7 @@ export default function OpenRouterSettingsPage() {
     });
   }
 
+  const isCustom = providerId === 'custom';
   const modelOptions = (models ?? []).map((m) => ({
     value: m.id,
     label: (
@@ -119,19 +149,19 @@ export default function OpenRouterSettingsPage() {
         <Text type="secondary" style={{ fontSize: 11 }}>{formatPrice(m.promptPrice, m.completionPrice)}</Text>
       </div>
     ),
-    searchText: `${m.name} ${m.id}`,
   }));
 
   return (
     <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
-      <PageHeader title="OpenRouter" />
+      <PageHeader title="AI Provider" />
 
       {/* 配置状态 */}
       <div style={{ marginBottom: 16 }}>
         {setting ? (
           <Space>
             <Tag color="green" icon={<CheckCircleOutlined />}>已配置</Tag>
-            <Text type="secondary">当前模型：{setting.model}</Text>
+            <Text type="secondary">当前提供商:{detectPreset(setting.baseURL).label}</Text>
+            <Text type="secondary">模型:{setting.model}</Text>
           </Space>
         ) : (
           <Tag color="default">未配置</Tag>
@@ -154,52 +184,69 @@ export default function OpenRouterSettingsPage() {
         message="配置说明"
         description={
           <div>
-            <div>OpenRouter 用于服务器推荐功能中的 AI 自动识别。</div>
-            <div>配置 API Key 后，添加服务商时可通过 URL 自动提取名称、价格和地区信息。</div>
-            <div style={{ marginTop: 8 }}>
-              <Text type="secondary">
-                前往{' '}
-                <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">
-                  openrouter.ai/keys
-                </a>{' '}
-                获取 API Key
-              </Text>
-            </div>
+            <div>用于服务器推荐功能中的 AI 自动识别(从 URL 提取服务商名称、价格、地区)。</div>
+            <div>支持任意 OpenAI 兼容的 API 端点(OpenRouter、OpenAI、DeepSeek、MiniMax、Kimi、智谱、通义,或自托管 LLM)。</div>
           </div>
         }
       />
 
-      <Form form={form} layout="vertical" style={{ maxWidth: 560 }}>
+      <Form
+        form={form}
+        layout="vertical"
+        style={{ maxWidth: 640 }}
+        initialValues={{
+          providerId: AI_PROVIDER_PRESETS[0].id,
+          baseURL: AI_PROVIDER_PRESETS[0].baseURL,
+          model: AI_PROVIDER_PRESETS[0].defaultModel,
+        }}
+      >
+        <Form.Item name="providerId" label="提供商" rules={[{ required: true }]}>
+          <Select
+            options={AI_PROVIDER_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
+            onChange={handleProviderChange}
+          />
+        </Form.Item>
+
+        <Form.Item
+          name="baseURL"
+          label="Base URL"
+          rules={[
+            { required: true, message: '请输入 Base URL' },
+            {
+              pattern: /^https?:\/\/.+/i,
+              message: 'URL 必须以 http:// 或 https:// 开头',
+            },
+          ]}
+          extra={isCustom ? '可填写任意 OpenAI 兼容端点,例如 http://localhost:11434/v1' : '由提供商预设填充'}
+        >
+          <Input readOnly={!isCustom} placeholder="https://..." />
+        </Form.Item>
+
         <Form.Item
           name="apiKey"
           label="API Key"
           rules={setting ? [] : [{ required: true, message: '请输入 API Key' }]}
           extra={setting ? '留空保持不变' : ''}
         >
-          <Input.Password placeholder="sk-or-..." />
+          <Input.Password placeholder="sk-..." />
         </Form.Item>
 
         <Form.Item
           name="model"
           label="模型"
-          initialValue="anthropic/claude-sonnet-4"
+          rules={[{ required: true, message: '请输入模型名称' }]}
+          extra={modelsError ? '该提供商不支持自动列出模型,请手填模型名' : undefined}
         >
-          {setting && models ? (
-            <Select
-              showSearch
-              placeholder="选择模型"
-              loading={modelsLoading}
-              options={modelOptions}
-              filterOption={(input, option) => {
-                const text = (option?.searchText as string) ?? '';
-                return text.toLowerCase().includes(input.toLowerCase());
-              }}
-              optionLabelProp="value"
-              style={{ width: '100%' }}
-            />
-          ) : (
-            <Input placeholder="anthropic/claude-sonnet-4（保存 API Key 后可选择模型）" />
-          )}
+          <AutoComplete
+            options={modelOptions}
+            placeholder="例如:MiniMax-Text-01 / deepseek-chat / gpt-4o-mini"
+            filterOption={(input, option) => {
+              const v = (option?.value as string) ?? '';
+              return v.toLowerCase().includes(input.toLowerCase());
+            }}
+            disabled={modelsLoading}
+            allowClear
+          />
         </Form.Item>
 
         <Form.Item>
