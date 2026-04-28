@@ -196,3 +196,37 @@ describe('buildSingboxOutbound – HYSTERIA2', () => {
     expect(tls.server_name).toBeUndefined();
   });
 });
+
+// ── UDP forwarding (Clash) ────────────────────────────────────────────────────
+// Clash/Mihomo defaults proxy `udp` to false. Without this flag, QUIC/HTTP3
+// traffic to AI services (which Chrome enables via Alt-Svc) silently drops.
+
+describe('buildClashProxy – udp 转发开关', () => {
+  const ssNode: NodeExportInfo = {
+    name: 'SS', protocol: 'SHADOWSOCKS', host: '1.1.1.1', port: 8388,
+    transport: null, tls: 'NONE', domain: null,
+    credentials: { password: 'pw', method: 'aes-256-gcm' },
+  };
+  const trojanNode: NodeExportInfo = {
+    name: 'TR', protocol: 'TROJAN', host: '1.1.1.1', port: 443,
+    transport: 'WS', tls: 'TLS', domain: 'tr.example.com',
+    credentials: { password: 'pw' },
+  };
+  const vmessNode: NodeExportInfo = {
+    name: 'VM', protocol: 'VMESS', host: '1.1.1.1', port: 443,
+    transport: 'WS', tls: 'TLS', domain: 'vm.example.com',
+    credentials: { uuid: 'uuid' },
+  };
+
+  it.each([
+    ['VLESS+REALITY', realityVless],
+    ['VLESS+TLS', tlsVless],
+    ['VMESS+WS+TLS', vmessNode],
+    ['TROJAN+WS+TLS', trojanNode],
+    ['SHADOWSOCKS', ssNode],
+    ['HYSTERIA2', hy2Node],
+  ])('%s 输出 udp: true', (_name, node) => {
+    const yaml = buildClashProxy(node)!;
+    expect(yaml).toContain('udp: true');
+  });
+});

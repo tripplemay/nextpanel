@@ -110,6 +110,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       add('uuid', creds.uuid ?? '');
       add('alterId', 0);
       add('cipher', 'auto');
+      add('udp', true);
       add('network', net);
       if (tls === 'REALITY') add('flow', REALITY_FLOW);
       if (tlsEnabled) add('tls', true);
@@ -137,6 +138,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       add('server', host);
       add('port', port);
       add('uuid', creds.uuid ?? '');
+      add('udp', true);
       add('network', net);
       if (tls === 'REALITY') add('flow', REALITY_FLOW);
       if (tlsEnabled) add('tls', true);
@@ -162,6 +164,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       add('server', host);
       add('port', port);
       add('password', creds.password ?? '');
+      add('udp', true);
       add('tls', true);
       if (sni) add('sni', sni);
       add('network', net);
@@ -181,6 +184,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       add('port', port);
       add('cipher', creds.method ?? 'aes-256-gcm');
       add('password', creds.password ?? '');
+      add('udp', true);
       break;
     }
 
@@ -189,6 +193,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       add('server', host);
       add('port', port);
       add('password', creds.password ?? '');
+      add('udp', true);
       if (domain) add('sni', domain);
       add('skip-cert-verify', true);
       break;
