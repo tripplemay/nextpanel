@@ -12,8 +12,6 @@ export interface NodeExportInfo {
   tls: string;
   domain: string | null;
   credentials: Record<string, string>;
-  /** ISO 3166-1 alpha-2 country code of the actual exit server (chain nodes use exit server's country) */
-  countryCode?: string | null;
 }
 
 import { REALITY_DEFAULT_SNI, REALITY_FLOW } from '../nodes/protocols/reality';
@@ -717,41 +715,16 @@ const RULE_BEHAVIOR: Record<typeof RULE_NAMES[number], string> = {
   openai: 'classical',
 };
 
-// ─── Country code → flag emoji + display name ──────────────────────────────
-const COUNTRY_NAMES: Record<string, string> = {
-  US: '🇺🇸 美国', JP: '🇯🇵 日本', HK: '🇭🇰 香港', SG: '🇸🇬 新加坡', TW: '🇹🇼 台湾',
-  KR: '🇰🇷 韩国', DE: '🇩🇪 德国', GB: '🇬🇧 英国', FR: '🇫🇷 法国', NL: '🇳🇱 荷兰',
-  CA: '🇨🇦 加拿大', AU: '🇦🇺 澳大利亚', IN: '🇮🇳 印度', RU: '🇷🇺 俄罗斯', BR: '🇧🇷 巴西',
-  TR: '🇹🇷 土耳其', TH: '🇹🇭 泰国', PH: '🇵🇭 菲律宾', MY: '🇲🇾 马来西亚', ID: '🇮🇩 印尼',
-  VN: '🇻🇳 越南', AR: '🇦🇷 阿根廷', CL: '🇨🇱 智利', MX: '🇲🇽 墨西哥', ZA: '🇿🇦 南非',
-  AE: '🇦🇪 阿联酋', IT: '🇮🇹 意大利', ES: '🇪🇸 西班牙', SE: '🇸🇪 瑞典', CH: '🇨🇭 瑞士',
-  FI: '🇫🇮 芬兰', PL: '🇵🇱 波兰', IE: '🇮🇪 爱尔兰', NO: '🇳🇴 挪威', DK: '🇩🇰 丹麦',
-};
-
-function countryDisplayName(code: string): string {
-  return COUNTRY_NAMES[code.toUpperCase()] ?? `🌐 ${code.toUpperCase()}`;
-}
-
 export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string): string {
-  // Build proxy entries; keep only successful ones
-  const proxyEntries: { name: string; yaml: string; countryCode?: string | null }[] = [];
+  const proxyEntries: { name: string; yaml: string }[] = [];
   for (const node of nodes) {
     const yaml = buildClashProxy(node);
-    if (yaml !== null) proxyEntries.push({ name: node.name, yaml, countryCode: node.countryCode });
+    if (yaml !== null) proxyEntries.push({ name: node.name, yaml });
   }
 
   const nodeNames = proxyEntries.map((e) => e.name);
-
-  // ── Group nodes by country code ──────────────────────────────────────────
-  const regionMap = new Map<string, string[]>(); // countryCode → node names
-  for (const entry of proxyEntries) {
-    const cc = entry.countryCode?.toUpperCase();
-    if (!cc) continue;
-    if (!regionMap.has(cc)) regionMap.set(cc, []);
-    regionMap.get(cc)!.push(entry.name);
-  }
-  // Sort regions by node count (descending) for stable port assignment
-  const regionEntries = [...regionMap.entries()].sort((a, b) => b[1].length - a[1].length);
+  // url-test 至少需要 1 个 proxy；无可用节点时回退到 DIRECT，避免 YAML 解析失败
+  const fallbackNames = nodeNames.length > 0 ? nodeNames : ['DIRECT'];
 
   // ── rule-providers ────────────────────────────────────────────────────────
   const base = panelUrl.replace(/\/$/, '');
@@ -773,12 +746,11 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
       : ['proxies:', ...proxyEntries.map((e) => e.yaml)].join('\n');
 
   // ── proxy-groups ──────────────────────────────────────────────────────────
-  function nodeList(prefix: string[] = [], names: string[] = nodeNames): string {
+  function nodeList(prefix: string[] = [], names: string[] = fallbackNames): string {
     return [...prefix, ...names].map((n) => `      - ${yamlScalar(n)}`).join('\n');
   }
 
   const groups: string[] = [
-    // ── Core groups (existing) ──
     [
       '  - name: 🚀 节点选择',
       '    type: select',
@@ -793,7 +765,6 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
       '    proxies:',
       nodeList(),
     ].join('\n'),
-    // ── Use-case groups ──
     ...([
       ['🎬 流媒体', '🚀 节点选择'],
       ['🤖 AI 服务', '🚀 节点选择'],
@@ -825,60 +796,7 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
     ].join('\n'),
   ];
 
-  // ── Region groups (dynamic, only for countries with nodes) ──
-  for (const [cc, names] of regionEntries) {
-    const displayName = countryDisplayName(cc);
-    groups.push(
-      [
-        `  - name: ${displayName}`,
-        '    type: select',
-        '    proxies:',
-        nodeList([], names),
-      ].join('\n'),
-    );
-  }
-
   const proxyGroupsSection = ['proxy-groups:', ...groups].join('\n');
-
-  // ── listeners (multi-port for per-terminal routing) ───────────────────────
-  const listeners: string[] = [];
-
-  // Port 7890: main entry with rule-based routing (implicit via mixed-port, but
-  // we use explicit listener so all ports appear together in the config)
-  listeners.push(
-    '  - name: mixed-main',
-    '    type: mixed',
-    '    port: 7890',
-  );
-
-  // Ports 7891+: one per region
-  let regionPort = 7891;
-  for (const [cc] of regionEntries) {
-    const displayName = countryDisplayName(cc);
-    listeners.push(
-      `  - name: mixed-${cc.toLowerCase()}`,
-      `    type: mixed`,
-      `    port: ${regionPort}`,
-      `    proxy: ${yamlScalar(displayName)}`,
-    );
-    regionPort++;
-  }
-
-  // Ports 7901+: use-case groups
-  const useCaseListeners: [number, string][] = [
-    [7901, '🎬 流媒体'],
-    [7902, '🤖 AI 服务'],
-  ];
-  for (const [port, groupName] of useCaseListeners) {
-    listeners.push(
-      `  - name: mixed-${port}`,
-      `    type: mixed`,
-      `    port: ${port}`,
-      `    proxy: ${yamlScalar(groupName)}`,
-    );
-  }
-
-  const listenersSection = ['listeners:', ...listeners].join('\n');
 
   // ── rules ─────────────────────────────────────────────────────────────────
   const rulesSection = [
@@ -900,14 +818,16 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
 
   // ── top-level config ──────────────────────────────────────────────────────
   const topLevel = [
+    'mixed-port: 7890',
+    'allow-lan: false',
     'mode: rule',
     'log-level: info',
+    'ipv6: false',
+    'external-controller: 127.0.0.1:9090',
   ].join('\n');
 
   return [
     topLevel,
-    '',
-    listenersSection,
     '',
     ruleProviderLines.join('\n'),
     '',
