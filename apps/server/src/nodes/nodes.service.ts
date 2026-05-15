@@ -203,11 +203,27 @@ export class NodesService {
   async toggle(id: string, userId: string) {
     const node = await this.prisma.node.findFirst({
       where: { id, userId },
-      select: { id: true, enabled: true },
+      select: { id: true, serverId: true, exitServerId: true, enabled: true },
     });
     if (!node) throw new NotFoundException(`Node ${id} not found`);
 
     const nowEnabled = !node.enabled;
+    if (!nowEnabled && !node.exitServerId) {
+      const activeClientConnections = await this.prisma.node.count({
+        where: {
+          userId,
+          enabled: true,
+          exitServerId: node.serverId,
+        },
+      });
+
+      if (activeClientConnections > 0) {
+        throw new BadRequestException(
+          `该服务端入口正在被 ${activeClientConnections} 条系统内客户端连接使用，不能关闭`,
+        );
+      }
+    }
+
     await this.nodeDeploy.toggleService(id, nowEnabled);
 
     return this.prisma.node.update({

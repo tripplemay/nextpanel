@@ -24,7 +24,7 @@ export default function PageHeader({ title, addLabel, onAdd, extra }: PageHeader
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {extra}
           {onAdd && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={onAdd}>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => onAdd()}>
               {addLabel ?? '新增'}
             </Button>
           )}

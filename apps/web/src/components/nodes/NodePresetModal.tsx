@@ -13,12 +13,31 @@ type DeployMode = 'direct' | 'chain';
 
 interface Props {
   open: boolean;
+  title?: string;
   onClose: () => void;
   onSuccess: (node: Node) => void;
   defaultServerId?: string;
+  defaultDeployMode?: DeployMode;
+  defaultEntryServerId?: string;
+  defaultExitServerId?: string;
+  lockDeployMode?: boolean;
+  lockServerId?: boolean;
+  lockEntryServerId?: boolean;
 }
 
-export default function NodePresetModal({ open, onClose, onSuccess, defaultServerId }: Props) {
+export default function NodePresetModal({
+  open,
+  title = '新增节点',
+  onClose,
+  onSuccess,
+  defaultServerId,
+  defaultDeployMode = 'direct',
+  defaultEntryServerId,
+  defaultExitServerId,
+  lockDeployMode = false,
+  lockServerId = false,
+  lockEntryServerId = false,
+}: Props) {
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const [deployMode, setDeployMode] = useState<DeployMode>('direct');
@@ -67,15 +86,27 @@ export default function NodePresetModal({ open, onClose, onSuccess, defaultServe
   useEffect(() => {
     if (open) {
       form.resetFields();
-      setDeployMode('direct');
-      if (defaultServerId) {
-        form.setFieldValue('serverId', defaultServerId);
-        setServerId(defaultServerId);
+      setDeployMode(defaultDeployMode);
+      const safeDefaultServerId = typeof defaultServerId === 'string' ? defaultServerId : undefined;
+      const safeDefaultEntryServerId = typeof defaultEntryServerId === 'string' ? defaultEntryServerId : undefined;
+      const safeDefaultExitServerId = typeof defaultExitServerId === 'string' ? defaultExitServerId : undefined;
+
+      if (defaultDeployMode === 'chain') {
+        form.setFieldsValue({
+          entryServerId: safeDefaultEntryServerId,
+          exitServerId: safeDefaultExitServerId,
+        });
+        setServerId(safeDefaultEntryServerId);
+      } else if (safeDefaultServerId) {
+        form.setFieldsValue({
+          serverId: safeDefaultServerId,
+        });
+        setServerId(safeDefaultServerId);
       } else {
         setServerId(undefined);
       }
     }
-  }, [open, form, defaultServerId]);
+  }, [open, form, defaultDeployMode, defaultServerId, defaultEntryServerId, defaultExitServerId]);
 
   const directMutation = useMutation({
     mutationFn: (values: { serverId: string; preset: string; name: string }) =>
@@ -125,7 +156,7 @@ export default function NodePresetModal({ open, onClose, onSuccess, defaultServe
   return (
     <Modal
       open={open}
-      title="新增节点"
+      title={title}
       onCancel={onClose}
       onOk={() => form.submit()}
       confirmLoading={isPending}
@@ -144,6 +175,7 @@ export default function NodePresetModal({ open, onClose, onSuccess, defaultServe
         <Form.Item label="部署模式">
           <Radio.Group
             value={deployMode}
+            disabled={lockDeployMode}
             onChange={(e) => {
               setDeployMode(e.target.value as DeployMode);
               form.resetFields(['serverId', 'entryServerId', 'exitServerId', 'name']);
@@ -160,7 +192,7 @@ export default function NodePresetModal({ open, onClose, onSuccess, defaultServe
 
         {deployMode === 'direct' ? (
           <Form.Item name="serverId" label="服务器" rules={[{ required: true, message: '请选择服务器' }]}>
-            <Select placeholder="选择服务器">
+            <Select placeholder="选择服务器" disabled={lockServerId}>
               {servers?.map((s) => <Option key={s.id} value={s.id}>{s.name}</Option>)}
             </Select>
           </Form.Item>
@@ -169,7 +201,7 @@ export default function NodePresetModal({ open, onClose, onSuccess, defaultServe
             <Form.Item name="entryServerId" label="入口服务器" rules={[{ required: true, message: '请选择入口服务器' }]}
               extra="用户连接到此服务器"
             >
-              <Select placeholder="选择入口服务器">
+              <Select placeholder="选择入口服务器" disabled={lockEntryServerId}>
                 {servers?.map((s) => <Option key={s.id} value={s.id}>{s.name}</Option>)}
               </Select>
             </Form.Item>
@@ -177,7 +209,9 @@ export default function NodePresetModal({ open, onClose, onSuccess, defaultServe
               extra="流量从此服务器出站"
             >
               <Select placeholder="选择出口服务器">
-                {servers?.map((s) => <Option key={s.id} value={s.id}>{s.name}</Option>)}
+                {servers
+                  ?.filter((s) => s.id !== form.getFieldValue('entryServerId'))
+                  .map((s) => <Option key={s.id} value={s.id}>{s.name}</Option>)}
               </Select>
             </Form.Item>
           </>

@@ -35,6 +35,7 @@ const { Text } = Typography;
 const baseMenuItems: ItemType[] = [
   { key: '/servers', icon: <CloudServerOutlined />, label: '服务器' },
   { key: '/nodes', icon: <NodeIndexOutlined />, label: '节点管理' },
+  { key: '/nodes-v2', icon: <NodeIndexOutlined />, label: '节点拓扑' },
   { key: '/external-nodes', icon: <ImportOutlined />, label: '外部节点' },
   { key: '/subscriptions', icon: <LinkOutlined />, label: '订阅管理' },
   { key: '/recommends', icon: <StarOutlined />, label: '服务器推荐' },
@@ -110,7 +111,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     },
   ];
 
-  const menuItems = user?.role === 'ADMIN' ? [...baseMenuItems, ...adminMenuItems] : baseMenuItems;
+  const visibleBaseMenuItems = isMobile
+    ? baseMenuItems.filter((item) => item?.key !== '/nodes-v2')
+    : baseMenuItems;
+  const menuItems = user?.role === 'ADMIN' ? [...visibleBaseMenuItems, ...adminMenuItems] : visibleBaseMenuItems;
 
   const sidebarContent = (
     <>
