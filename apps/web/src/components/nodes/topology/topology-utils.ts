@@ -45,7 +45,6 @@ export function buildTopology(servers: Server[], nodes: Node[]) {
   const serversById = new Map(servers.map((server) => [server.id, server]));
   const directByServer = new Map<string, Node[]>();
   const chainByEntryServer = new Map<string, Node[]>();
-  const incomingChainByExitServer = new Map<string, Node[]>();
   const orphanChainByEntryServer = new Map<string, Node[]>();
   const chainGroups = new Map<string, Node[]>();
 
@@ -70,12 +69,6 @@ export function buildTopology(servers: Server[], nodes: Node[]) {
       continue;
     }
 
-    if (node.enabled) {
-      const incomingGroup = incomingChainByExitServer.get(node.exitServerId) ?? [];
-      incomingGroup.push(node);
-      incomingChainByExitServer.set(node.exitServerId, incomingGroup);
-    }
-
     const key = `${node.serverId}->${node.exitServerId}`;
     const group = chainGroups.get(key) ?? [];
     group.push(node);
@@ -93,7 +86,6 @@ export function buildTopology(servers: Server[], nodes: Node[]) {
         server,
         directNodes: directByServer.get(server.id) ?? [],
         chainNodes: chainByEntryServer.get(server.id) ?? [],
-        incomingChainNodes: incomingChainByExitServer.get(server.id) ?? [],
         orphanChainNodes: orphanChainByEntryServer.get(server.id) ?? [],
         selected: false,
       },

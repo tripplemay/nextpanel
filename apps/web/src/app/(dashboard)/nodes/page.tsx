@@ -92,20 +92,6 @@ export default function NodesPage() {
       nodes: nodesByServer.get(server.id) ?? [],
     }));
   }, [servers, nodes]);
-  const protectedExitServerIds = useMemo(
-    () => new Set(nodes
-      .filter((node) => node.enabled && !!node.exitServerId)
-      .map((node) => node.exitServerId as string)),
-    [nodes],
-  );
-
-  function getToggleDisabledReason(node: Node): string | undefined {
-    if (node.enabled && !node.exitServerId && protectedExitServerIds.has(node.serverId)) {
-      return '该服务端入口正在被系统内客户端连接使用，不能关闭';
-    }
-    return undefined;
-  }
-
   // All servers expanded by default; track collapsed ones
   const activeKeys = useMemo(
     () => groups.map((g) => g.server.id).filter((id) => !collapsedIds.includes(id)),
@@ -148,24 +134,14 @@ export default function NodesPage() {
     {
       title: '启用',
       width: 70,
-      render: (_: unknown, r) => {
-        const disabledReason = getToggleDisabledReason(r);
-        const switchControl = (
-          <Switch
-            size="small"
-            checked={r.enabled}
-            disabled={!!disabledReason}
-            loading={togglingId === r.id}
-            onChange={() => toggleMutation.mutate(r.id)}
-          />
-        );
-
-        return disabledReason ? (
-          <Tooltip title={disabledReason}>
-            <span>{switchControl}</span>
-          </Tooltip>
-        ) : switchControl;
-      },
+      render: (_: unknown, r) => (
+        <Switch
+          size="small"
+          checked={r.enabled}
+          loading={togglingId === r.id}
+          onChange={() => toggleMutation.mutate(r.id)}
+        />
+      ),
     },
     {
       title: <Tooltip title="自上次部署/重启起累计上传流量">↑上传</Tooltip>,
@@ -373,7 +349,6 @@ export default function NodesPage() {
         {serverNodes.map((node) => {
           const sessionResult = testResults[node.id];
           const isTestingThis = testingId === node.id || (batchTesting && !sessionResult);
-          const disabledReason = getToggleDisabledReason(node);
           const connectivityEl = isTestingThis ? (
             <Spin size="small" />
           ) : sessionResult ? (
@@ -426,26 +401,12 @@ export default function NodesPage() {
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Space size={8}>
-                  {disabledReason ? (
-                    <Tooltip title={disabledReason}>
-                      <span>
-                        <Switch
-                          size="small"
-                          checked={node.enabled}
-                          disabled
-                          loading={togglingId === node.id}
-                          onChange={() => toggleMutation.mutate(node.id)}
-                        />
-                      </span>
-                    </Tooltip>
-                  ) : (
-                    <Switch
-                      size="small"
-                      checked={node.enabled}
-                      loading={togglingId === node.id}
-                      onChange={() => toggleMutation.mutate(node.id)}
-                    />
-                  )}
+                  <Switch
+                    size="small"
+                    checked={node.enabled}
+                    loading={togglingId === node.id}
+                    onChange={() => toggleMutation.mutate(node.id)}
+                  />
                   {connectivityEl}
                 </Space>
                 <Space size={4}>

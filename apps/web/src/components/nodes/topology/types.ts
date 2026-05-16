@@ -5,7 +5,6 @@ export interface ServerTopologyData extends Record<string, unknown> {
   server: Server;
   directNodes: Node[];
   chainNodes: Node[];
-  incomingChainNodes: Node[];
   orphanChainNodes: Node[];
   selected: boolean;
 }

@@ -60,24 +60,11 @@ function NodeRow({
   node,
   nodeActions,
   missingExit,
-  disableToggleReason,
 }: {
   node: Node;
   nodeActions: UseNodeActionsResult;
   missingExit?: boolean;
-  disableToggleReason?: string;
 }) {
-  const toggleDisabled = node.enabled && !!disableToggleReason;
-  const switchControl = (
-    <Switch
-      size="small"
-      checked={node.enabled}
-      disabled={toggleDisabled}
-      loading={nodeActions.togglingId === node.id}
-      onChange={() => nodeActions.toggleNode(node)}
-    />
-  );
-
   return (
     <div className={styles.panelNodeRow}>
       <div className={styles.panelNodeMain}>
@@ -107,11 +94,12 @@ function NodeRow({
         </Space>
       </div>
       <div className={styles.panelNodeActions}>
-        {toggleDisabled ? (
-          <Tooltip title={disableToggleReason}>
-            <span>{switchControl}</span>
-          </Tooltip>
-        ) : switchControl}
+        <Switch
+          size="small"
+          checked={node.enabled}
+          loading={nodeActions.togglingId === node.id}
+          onChange={() => nodeActions.toggleNode(node)}
+        />
         <Button size="small" icon={<ShareAltOutlined />} onClick={() => nodeActions.openShare(node)} />
         <Button
           size="small"
@@ -135,7 +123,6 @@ function NodeSection({
   nodeActions,
   emptyText,
   missingExitIds,
-  disableToggleReason,
   action,
 }: {
   title: string;
@@ -144,7 +131,6 @@ function NodeSection({
   nodeActions: UseNodeActionsResult;
   emptyText: string;
   missingExitIds?: Set<string>;
-  disableToggleReason?: string;
   action?: ReactNode;
 }) {
   return (
@@ -169,7 +155,6 @@ function NodeSection({
               node={node}
               nodeActions={nodeActions}
               missingExit={missingExitIds?.has(node.id)}
-              disableToggleReason={disableToggleReason}
             />
           ))}
         </div>
@@ -222,13 +207,9 @@ export default function TopologyInspectorPanel({
     server,
     directNodes,
     chainNodes,
-    incomingChainNodes,
     orphanChainNodes,
   } = flowNode.data;
   const missingExitIds = new Set(orphanChainNodes.map((node) => node.id));
-  const directToggleDisableReason = incomingChainNodes.length > 0
-    ? `该服务端入口正在被 ${incomingChainNodes.length} 条系统内客户端连接使用，不能关闭`
-    : undefined;
 
   return (
     <aside className={styles.inspectorPanel}>
@@ -247,7 +228,6 @@ export default function TopologyInspectorPanel({
         nodes={directNodes}
         nodeActions={nodeActions}
         emptyText="暂无普通入口"
-        disableToggleReason={directToggleDisableReason}
         action={(
           <Button size="small" icon={<PlusOutlined />} onClick={() => onAddDirectNode(server.id)}>
             新增入口
