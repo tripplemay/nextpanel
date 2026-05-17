@@ -23,7 +23,7 @@ export default function NodeShareModal({ node, onClose }: Props) {
   return (
     <Modal
       open={!!node}
-      destroyOnClose
+      destroyOnHidden
       title={`分享节点 — ${node?.name ?? ''}`}
       onCancel={onClose}
       footer={null}

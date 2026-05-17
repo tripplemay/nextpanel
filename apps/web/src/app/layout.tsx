@@ -3,6 +3,7 @@ import { AntdRegistry } from '@ant-design/nextjs-registry';
 import Providers from './providers';
 import './globals.css';
 import 'flag-icons/css/flag-icons.min.css';
+import '@xyflow/react/dist/style.css';
 
 export const metadata: Metadata = {
   title: 'NextPanel',

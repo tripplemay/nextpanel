@@ -1,21 +1,17 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { useAuthStore } from '@/store/auth';
-import { App, Button, Table, Tag, Space, Card, Spin, Modal, Input, Switch, Dropdown, Typography, Collapse, Empty, Tooltip } from 'antd';
+import { useMemo, useState } from 'react';
+import { App, Button, Table, Tag, Space, Card, Spin, Switch, Dropdown, Typography, Collapse, Empty, Tooltip } from 'antd';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { ApiOutlined, ShareAltOutlined, FileTextOutlined, EditOutlined, CloudUploadOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import ServerTagList from '@/components/servers/ServerTagList';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { nodesApi, serversApi } from '@/lib/api';
 import NodePresetModal from '@/components/nodes/NodePresetModal';
-import DeployDrawer from '@/components/nodes/DeployDrawer';
-import NodeShareModal from '@/components/nodes/NodeShareModal';
-import DeployLogModal from '@/components/nodes/DeployLogModal';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
-import { useDeployStream } from '@/hooks/useDeployStream';
-import type { Node, Server, ConnectivityResult } from '@/types/api';
+import { useNodeActions } from '@/hooks/useNodeActions';
+import type { Node, Server } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
 
@@ -46,41 +42,10 @@ export default function NodesPage() {
   const [presetModalOpen, setPresetModalOpen] = useState(false);
   const [presetServerId, setPresetServerId] = useState<string | undefined>(undefined);
 
-  // Rename modal
-  const [renameNode, setRenameNode] = useState<Node | null>(null);
-  const [renameValue, setRenameValue] = useState('');
-
-  // Deploy / delete drawers
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [deployingNode, setDeployingNode] = useState<Node | null>(null);
-  const [deleteDrawerOpen, setDeleteDrawerOpen] = useState(false);
-  const [deletingNode, setDeletingNode] = useState<Node | null>(null);
-
-  // Test state
-  const [testingId, setTestingId] = useState<string | null>(null);
-  const [shareNode, setShareNode] = useState<Node | null>(null);
-  const [logNode, setLogNode] = useState<Node | null>(null);
-  const [togglingId, setTogglingId] = useState<string | null>(null);
-
-  // Connectivity test results keyed by node id (in-session overrides persisted data)
-  const [testResults, setTestResults] = useState<Record<string, ConnectivityResult>>({});
-  const [batchTesting, setBatchTesting] = useState(false);
-  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
-  const abortBatchRef = useRef<AbortController | null>(null);
-
   // Collapse state: track collapsed server IDs
   const [collapsedIds, setCollapsedIds] = useState<string[]>([]);
 
   const { isMobile, isTablet } = useIsMobile();
-
-  const { logLines, deployStatus, startStream, abort, reset } = useDeployStream();
-  const {
-    logLines: deleteLogLines,
-    deployStatus: deleteStatus,
-    startStream: startDeleteStream,
-    abort: abortDelete,
-    reset: resetDelete,
-  } = useDeployStream();
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['nodes'],
@@ -96,11 +61,28 @@ export default function NodesPage() {
 
   if (isError) message.error('加载节点失败');
 
+  const nodes = data ?? [];
+  const nodeActions = useNodeActions({ nodes });
+  const {
+    testResults,
+    testingId,
+    batchTesting,
+    batchProgress,
+    togglingId,
+    openDeploy,
+    openDelete,
+    openRename,
+  } = nodeActions;
+  const testMutation = { mutate: nodeActions.testNode };
+  const toggleMutation = { mutate: nodeActions.toggleNode };
+  const setShareNode = nodeActions.openShare;
+  const setLogNode = nodeActions.openLogs;
+
   // Group nodes by server
   const groups = useMemo(() => {
     if (!servers) return [];
     const nodesByServer = new Map<string, Node[]>();
-    for (const node of (data ?? [])) {
+    for (const node of nodes) {
       const arr = nodesByServer.get(node.serverId) ?? [];
       arr.push(node);
       nodesByServer.set(node.serverId, arr);
@@ -109,160 +91,12 @@ export default function NodesPage() {
       server,
       nodes: nodesByServer.get(server.id) ?? [],
     }));
-  }, [servers, data]);
-
+  }, [servers, nodes]);
   // All servers expanded by default; track collapsed ones
   const activeKeys = useMemo(
     () => groups.map((g) => g.server.id).filter((id) => !collapsedIds.includes(id)),
     [groups, collapsedIds],
   );
-
-  const testMutation = useMutation({
-    mutationFn: (id: string) => {
-      setTestingId(id);
-      return nodesApi.test(id).then((r) => r.data);
-    },
-    onSuccess: (res, id) => {
-      setTestResults((prev) => ({ ...prev, [id]: res }));
-      if (res.reachable) message.success(res.message);
-      else message.error(res.message);
-      // Refresh to pick up persisted lastTestedAt
-      qc.invalidateQueries({ queryKey: ['nodes'] });
-    },
-    onError: () => message.error('测试请求失败'),
-    onSettled: () => setTestingId(null),
-  });
-
-  const renameMutation = useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) =>
-      nodesApi.rename(id, name).then((r) => r.data),
-    onSuccess: () => {
-      message.success('节点已重命名');
-      setRenameNode(null);
-      qc.invalidateQueries({ queryKey: ['nodes'] });
-    },
-    onError: () => message.error('重命名失败'),
-  });
-
-  const toggleMutation = useMutation({
-    mutationFn: (id: string) => {
-      setTogglingId(id);
-      return nodesApi.toggle(id).then((r) => r.data);
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['nodes'] });
-    },
-    onError: () => message.error('切换节点状态失败'),
-    onSettled: () => setTogglingId(null),
-  });
-
-  async function startBatchTest() {
-    if (batchTesting) {
-      abortBatchRef.current?.abort();
-      return;
-    }
-
-    const nodes = data ?? [];
-    if (nodes.length === 0) return;
-
-    setBatchTesting(true);
-    setBatchProgress({ done: 0, total: nodes.length });
-    setTestResults({});
-    abortBatchRef.current = new AbortController();
-
-    const token = useAuthStore.getState().token ?? '';
-
-    try {
-      const res = await fetch('/api/nodes/test-all', {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: abortBatchRef.current.signal,
-      });
-
-      if (!res.ok || !res.body) {
-        void message.error('批量测试请求失败');
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const chunks = buffer.split('\n\n');
-        buffer = chunks.pop() ?? '';
-
-        for (const chunk of chunks) {
-          const dataLine = chunk.split('\n').find((l) => l.startsWith('data:'));
-          if (!dataLine) continue;
-          try {
-            const event = JSON.parse(dataLine.slice(5).trim()) as Record<string, unknown>;
-            if (event.type === 'result') {
-              const nodeId = event.nodeId as string;
-              setTestResults((prev) => ({
-                ...prev,
-                [nodeId]: {
-                  reachable: event.reachable as boolean,
-                  latency: event.latency as number,
-                  message: event.message as string,
-                  testedAt: event.testedAt as string,
-                },
-              }));
-              setBatchProgress((prev) => prev ? { ...prev, done: prev.done + 1 } : null);
-            } else if (event.type === 'done') {
-              void message.success(`批量测试完成，共 ${event.total as number} 个节点`);
-              qc.invalidateQueries({ queryKey: ['nodes'] });
-            }
-          } catch {
-            // ignore parse errors
-          }
-        }
-      }
-    } catch (err: unknown) {
-      if ((err as Error).name !== 'AbortError') {
-        void message.error('批量测试连接中断');
-      }
-    } finally {
-      setBatchTesting(false);
-      setBatchProgress(null);
-    }
-  }
-
-  const openDeploy = useCallback((node: Node) => {
-    reset();
-    setDeployingNode(node);
-    setDrawerOpen(true);
-    void startStream(`/api/nodes/${node.id}/deploy-stream`, (success) => {
-      if (success) qc.invalidateQueries({ queryKey: ['nodes'] });
-    });
-  }, [reset, startStream, qc]);
-
-  function closeDrawer() {
-    abort();
-    setDrawerOpen(false);
-  }
-
-  const openDelete = useCallback((node: Node) => {
-    resetDelete();
-    setDeletingNode(node);
-    setDeleteDrawerOpen(true);
-    void startDeleteStream(`/api/nodes/${node.id}/delete-stream`, (success) => {
-      if (success) qc.invalidateQueries({ queryKey: ['nodes'] });
-    });
-  }, [resetDelete, startDeleteStream, qc]);
-
-  function closeDeleteDrawer() {
-    abortDelete();
-    setDeleteDrawerOpen(false);
-  }
-
-  const openRename = useCallback((node: Node) => {
-    setRenameNode(node);
-    setRenameValue(node.name);
-  }, []);
 
   function openPresetForServer(serverId: string) {
     setPresetServerId(serverId);
@@ -456,7 +290,7 @@ export default function NodesPage() {
     <Button
       icon={<ApiOutlined />}
       loading={batchTesting}
-      onClick={() => void startBatchTest()}
+      onClick={() => void nodeActions.startBatchTest()}
     >
       {!isMobile && (batchTesting && batchProgress
         ? `测试中 ${batchProgress.done}/${batchProgress.total}`
@@ -641,57 +475,12 @@ export default function NodesPage() {
           setPresetModalOpen(false);
           setPresetServerId(undefined);
           qc.invalidateQueries({ queryKey: ['nodes'] });
-          openDeploy(node);
+          nodeActions.openDeploy(node);
         }}
         defaultServerId={presetServerId}
       />
 
-      <Modal
-        open={!!renameNode}
-        destroyOnClose
-        style={{ maxWidth: '95vw' }}
-        title="重命名节点"
-        onCancel={() => setRenameNode(null)}
-        onOk={() => {
-          if (renameNode && renameValue.trim()) {
-            renameMutation.mutate({ id: renameNode.id, name: renameValue.trim() });
-          }
-        }}
-        confirmLoading={renameMutation.isPending}
-      >
-        <Input
-          value={renameValue}
-          onChange={(e) => setRenameValue(e.target.value)}
-          onPressEnter={() => {
-            if (renameNode && renameValue.trim()) {
-              renameMutation.mutate({ id: renameNode.id, name: renameValue.trim() });
-            }
-          }}
-          placeholder="节点名称"
-          style={{ marginTop: 8 }}
-        />
-      </Modal>
-
-      <DeployDrawer
-        open={drawerOpen}
-        nodeName={deployingNode?.name ?? null}
-        logLines={logLines}
-        deployStatus={deployStatus}
-        onClose={closeDrawer}
-      />
-
-      <DeployDrawer
-        open={deleteDrawerOpen}
-        nodeName={deletingNode?.name ?? null}
-        logLines={deleteLogLines}
-        deployStatus={deleteStatus}
-        onClose={closeDeleteDrawer}
-        actionLabel="删除"
-      />
-
-      <NodeShareModal node={shareNode} onClose={() => setShareNode(null)} />
-
-      <DeployLogModal node={logNode} onClose={() => setLogNode(null)} />
+      {nodeActions.modals}
     </Card>
   );
 }

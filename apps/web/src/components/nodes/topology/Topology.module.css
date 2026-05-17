@@ -1,0 +1,333 @@
+.topologyShell {
+  height: calc(100vh - 190px);
+  min-height: 640px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #dbe5f4;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 10% 10%, rgba(37, 99, 235, 0.12), transparent 30%),
+    radial-gradient(circle at 85% 15%, rgba(20, 184, 166, 0.12), transparent 28%),
+    linear-gradient(135deg, #f8fbff 0%, #eef5ff 46%, #f9fbf6 100%);
+}
+
+.flowCanvas {
+  width: 100%;
+  height: 100%;
+}
+
+.serverNode {
+  width: 380px;
+  overflow: hidden;
+  border: 1px solid rgba(30, 64, 175, 0.16);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 18px 48px rgba(30, 58, 138, 0.14);
+  backdrop-filter: blur(10px);
+}
+
+.serverNodeSelected {
+  border-color: #2563eb;
+  box-shadow: 0 20px 54px rgba(37, 99, 235, 0.25);
+}
+
+.flowHandle {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #fff;
+  background: #2563eb;
+}
+
+.serverHeader {
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid #edf2f7;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.04), rgba(37, 99, 235, 0.06));
+}
+
+.serverTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.serverName {
+  flex: 1;
+  min-width: 0;
+  max-width: 170px;
+}
+
+.serverMeta {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.serverMeta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tagLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.nodeZones {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+}
+
+.nodeZone {
+  min-width: 0;
+  min-height: 160px;
+  overflow: hidden;
+  padding: 10px;
+  border: 1px solid #e5edf7;
+  border-radius: 14px;
+  background: #fbfdff;
+}
+
+.zoneHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.zoneHeader span:first-child {
+  flex: 0 0 auto;
+}
+
+.zoneHeader span:last-child {
+  overflow: hidden;
+  flex: 1;
+  color: #64748b;
+  font-weight: 400;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.protocolDots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.emptyText,
+.emptyLine {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.emptyLine {
+  padding-top: 14px;
+}
+
+.previewList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.previewItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: #0f172a;
+  font-size: 12px;
+}
+
+.previewName {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.previewMeta {
+  flex: 0 0 auto;
+  color: #64748b;
+}
+
+.disabledDot {
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #fed7aa;
+  color: #9a3412;
+  font-size: 10px;
+}
+
+.previewMore {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.warningLine {
+  margin-top: 8px;
+  color: #dc2626;
+  font-size: 12px;
+}
+
+.edgeHitArea {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 24px;
+  pointer-events: stroke;
+}
+
+.edgeLabel {
+  position: absolute;
+  padding: 4px 8px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+  color: #1e3a8a;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.edgeLabelSelected {
+  border-color: #2563eb;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.inspectorPanel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.2);
+  backdrop-filter: blur(14px);
+}
+
+.panelTopbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panelSection {
+  padding: 12px;
+  border: 1px solid #e5edf7;
+  border-radius: 14px;
+  background: #fbfdff;
+}
+
+.panelSectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.panelSectionDescription {
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.panelNodeList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panelNodeRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.panelNodeMain {
+  min-width: 0;
+  flex: 1;
+}
+
+.panelNodeTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 8px;
+}
+
+.panelNodeName {
+  max-width: 210px;
+}
+
+.chainColorDot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border-radius: 999px;
+}
+
+.panelNodeActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 190px;
+}
+
+@media (max-width: 900px) {
+  .topologyShell {
+    height: calc(100vh - 160px);
+    min-height: 560px;
+  }
+
+  .inspectorPanel {
+    left: 16px;
+    width: auto;
+  }
+
+  .panelNodeRow {
+    flex-direction: column;
+  }
+
+  .panelNodeActions {
+    justify-content: flex-start;
+    max-width: none;
+  }
+}
