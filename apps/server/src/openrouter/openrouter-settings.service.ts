@@ -3,6 +3,9 @@ import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { UpsertOpenRouterSettingDto } from './dto/upsert-openrouter-setting.dto';
 
+const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
+const DEFAULT_MODEL = 'anthropic/claude-sonnet-4';
+
 @Injectable()
 export class OpenRouterSettingsService {
   constructor(
@@ -15,6 +18,7 @@ export class OpenRouterSettingsService {
     if (!setting) return null;
     return {
       id: setting.id,
+      baseURL: setting.baseURL,
       model: setting.model,
       createdAt: setting.createdAt,
       updatedAt: setting.updatedAt,
@@ -26,6 +30,7 @@ export class OpenRouterSettingsService {
     if (!setting) return null;
     return {
       apiKey: this.crypto.decrypt(setting.apiKeyEnc),
+      baseURL: setting.baseURL,
       model: setting.model,
     };
   }
@@ -39,18 +44,20 @@ export class OpenRouterSettingsService {
         where: { id: existing.id },
         data: {
           apiKeyEnc,
+          baseURL: dto.baseURL ?? existing.baseURL,
           model: dto.model ?? existing.model,
         },
-        select: { id: true, model: true, createdAt: true, updatedAt: true },
+        select: { id: true, baseURL: true, model: true, createdAt: true, updatedAt: true },
       });
     }
 
     return this.prisma.openRouterSetting.create({
       data: {
         apiKeyEnc,
-        model: dto.model ?? 'anthropic/claude-sonnet-4',
+        baseURL: dto.baseURL ?? DEFAULT_BASE_URL,
+        model: dto.model ?? DEFAULT_MODEL,
       },
-      select: { id: true, model: true, createdAt: true, updatedAt: true },
+      select: { id: true, baseURL: true, model: true, createdAt: true, updatedAt: true },
     });
   }
 

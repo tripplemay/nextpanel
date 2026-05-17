@@ -74,7 +74,7 @@ model Server {
   /// AES-GCM encrypted ssh key or password
   sshAuthEnc   String
   tags         String[]
-  autoTags     String[]
+  autoTags     String[] @default([])
   notes        String?
   status       ServerStatus @default(UNKNOWN)
   cpuUsage     Float?
@@ -449,6 +449,7 @@ model WxWorkSetting {
 model OpenRouterSetting {
   id         String   @id @default(cuid())
   apiKeyEnc  String
+  baseURL    String   @default("https://openrouter.ai/api/v1")
   model      String   @default("anthropic/claude-sonnet-4")
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
