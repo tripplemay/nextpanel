@@ -118,19 +118,15 @@ describe('MetricsService', () => {
       });
     });
 
-    it('updates server status to ONLINE with latest metrics', async () => {
+    it('does not write server status (the agent heartbeat owns that write)', async () => {
       (mockPrisma.serverMetric.create as jest.Mock).mockResolvedValue({});
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue({});
 
       await svc.record('srv-1', 55, 80, 40, 500, 1000);
 
-      const updateCall = (mockPrisma.server.update as jest.Mock).mock.calls[0][0];
-      expect(updateCall.where).toEqual({ id: 'srv-1' });
-      expect(updateCall.data.status).toBe('ONLINE');
-      expect(updateCall.data.cpuUsage).toBe(55);
-      expect(updateCall.data.memUsage).toBe(80);
-      expect(updateCall.data.diskUsage).toBe(40);
-      expect(updateCall.data.lastSeenAt).toBeInstanceOf(Date);
+      // record() only inserts a time-series data point. Server status/lastSeenAt/usage
+      // is written by AgentService.handleHeartbeat — doing it here too was a duplicate
+      // write and was removed.
+      expect(mockPrisma.server.update).not.toHaveBeenCalled();
     });
   });
 });

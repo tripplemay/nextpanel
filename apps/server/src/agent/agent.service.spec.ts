@@ -111,12 +111,14 @@ describe('AgentService', () => {
       });
 
       expect(mockPrisma.node.updateMany).toHaveBeenCalledTimes(2);
+      // A node's status can be reported by its own server OR by the exit server
+      // hosting its chain exit service, so the query matches serverId OR exitServerId.
       expect(mockPrisma.node.updateMany).toHaveBeenCalledWith({
-        where: { id: 'n1', serverId: 'srv-1' },
+        where: { id: 'n1', OR: [{ serverId: 'srv-1' }, { exitServerId: 'srv-1' }] },
         data: { status: 'RUNNING' },
       });
       expect(mockPrisma.node.updateMany).toHaveBeenCalledWith({
-        where: { id: 'n2', serverId: 'srv-1' },
+        where: { id: 'n2', OR: [{ serverId: 'srv-1' }, { exitServerId: 'srv-1' }] },
         data: { status: 'STOPPED' },
       });
     });
