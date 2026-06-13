@@ -435,7 +435,9 @@ export function buildFullSingboxConfig(nodes: NodeExportInfo[]): string {
         type: 'selector',
         tag: '🚀 节点选择',
         outbounds: proxyTags.length > 0 ? ['⚡ 自动选择', ...proxyTags] : ['direct'],
-        default: '⚡ 自动选择',
+        // default must be one of the listed outbounds; with no nodes the only
+        // option is 'direct', otherwise sing-box rejects the config.
+        default: proxyTags.length > 0 ? '⚡ 自动选择' : 'direct',
       },
       { type: 'direct', tag: 'direct' },
       { type: 'block', tag: 'block' },
