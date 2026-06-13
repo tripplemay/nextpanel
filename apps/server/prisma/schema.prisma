@@ -21,14 +21,14 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  auditLogs              AuditLog[]
-  subscriptions          Subscription[]
-  subscriptionShares     SubscriptionShare[]
-  servers                Server[]
-  nodes                  Node[]
-  externalNodes          ExternalNode[]
-  cloudflareSetting      CloudflareSetting?
-  inviteCodes            InviteCode[]
+  auditLogs          AuditLog[]
+  subscriptions      Subscription[]
+  subscriptionShares SubscriptionShare[]
+  servers            Server[]
+  nodes              Node[]
+  externalNodes      ExternalNode[]
+  cloudflareSetting  CloudflareSetting?
+  inviteCodes        InviteCode[]
 }
 
 model RevokedToken {
@@ -60,41 +60,41 @@ enum UserRole {
 // ──────────────────────────── Server ────────────────────────────
 
 model Server {
-  id           String       @id @default(cuid())
-  owner        User         @relation(fields: [userId], references: [id])
-  userId       String
-  name         String
-  region       String
-  countryCode  String?
-  provider     String
-  ip           String
-  sshPort      Int          @default(22)
-  sshUser      String       @default("root")
-  sshAuthType  SshAuthType  @default(KEY)
+  id                 String       @id @default(cuid())
+  owner              User         @relation(fields: [userId], references: [id])
+  userId             String
+  name               String
+  region             String
+  countryCode        String?
+  provider           String
+  ip                 String
+  sshPort            Int          @default(22)
+  sshUser            String       @default("root")
+  sshAuthType        SshAuthType  @default(KEY)
   /// AES-GCM encrypted ssh key or password
-  sshAuthEnc   String
-  tags         String[]
-  autoTags     String[]
-  notes        String?
-  status       ServerStatus @default(UNKNOWN)
-  cpuUsage     Float?
-  memUsage     Float?
-  diskUsage    Float?
-  networkIn    Float?
-  networkOut   Float?
-  pingMs       Int?
-  lastSeenAt          DateTime?
-  agentVersion        String?
-  agentToken          String       @unique @default(cuid())
-  pendingAgentUpdate  Boolean      @default(false)
-  deleteError         String?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  sshAuthEnc         String
+  tags               String[]
+  autoTags           String[]
+  notes              String?
+  status             ServerStatus @default(UNKNOWN)
+  cpuUsage           Float?
+  memUsage           Float?
+  diskUsage          Float?
+  networkIn          Float?
+  networkOut         Float?
+  pingMs             Int?
+  lastSeenAt         DateTime?
+  agentVersion       String?
+  agentToken         String       @unique @default(cuid())
+  pendingAgentUpdate Boolean      @default(false)
+  deleteError        String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
-  nodes            Node[]
-  chainExitNodes   Node[]         @relation("chainExitServer")
-  metrics          ServerMetric[]
-  ipCheck          ServerIpCheck?
+  nodes          Node[]
+  chainExitNodes Node[]         @relation("chainExitServer")
+  metrics        ServerMetric[]
+  ipCheck        ServerIpCheck?
 
   @@index([userId])
 }
@@ -115,25 +115,25 @@ enum ServerStatus {
 // ──────────────────────────── Node ────────────────────────────
 
 model Node {
-  id             String          @id @default(cuid())
-  server         Server          @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  serverId       String
-  owner          User            @relation(fields: [userId], references: [id])
-  userId         String
-  name           String
-  protocol       Protocol
-  implementation Implementation?
-  transport      Transport?
-  tls            TlsMode         @default(NONE)
-  listenPort     Int
-  domain         String?
+  id               String          @id @default(cuid())
+  server           Server          @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  serverId         String
+  owner            User            @relation(fields: [userId], references: [id])
+  userId           String
+  name             String
+  protocol         Protocol
+  implementation   Implementation?
+  transport        Transport?
+  tls              TlsMode         @default(NONE)
+  listenPort       Int
+  domain           String?
   /// AES-GCM encrypted JSON credentials
-  credentialsEnc String
+  credentialsEnc   String
   /// Cloudflare DNS record ID — set for VLESS+WS+TLS nodes, used for cleanup on delete
-  cfDnsRecordId  String?
-  source         NodeSource      @default(MANUAL)
-  status         NodeStatus      @default(INACTIVE)
-  enabled        Boolean         @default(true)
+  cfDnsRecordId    String?
+  source           NodeSource      @default(MANUAL)
+  status           NodeStatus      @default(INACTIVE)
+  enabled          Boolean         @default(true)
   /// Last connectivity test: true = reachable, false = unreachable, null = never tested
   lastReachable    Boolean?
   /// Last measured latency in ms
@@ -146,8 +146,10 @@ model Node {
   trafficUpBytes   Float           @default(0)
   /// Cumulative download bytes since last deploy (xray nodes only) — reset on redeploy
   trafficDownBytes Float           @default(0)
-  /// Chain proxy: exit server (when set, this is a chain node — entry on this server, exit on exitServer)
-  exitServer       Server?         @relation("chainExitServer", fields: [exitServerId], references: [id])
+  /// Chain proxy: exit server (when set, this is a chain node — entry on this server, exit on exitServer).
+  /// onDelete: Cascade — a chain node is meaningless once its exit server is gone, so deleting the
+  /// exit server removes the chain node too (entry-side deployment is torn down in NodeDeployService).
+  exitServer       Server?         @relation("chainExitServer", fields: [exitServerId], references: [id], onDelete: Cascade)
   exitServerId     String?
   /// Chain proxy: port on exit server for dokodemo-door / internal VLESS
   exitPort         Int?
@@ -277,27 +279,27 @@ model SubscriptionNode {
 // ──────────────────────────── ExternalNode ────────────────────────────
 
 model ExternalNode {
-  id            String   @id @default(cuid())
-  owner         User     @relation(fields: [userId], references: [id])
-  userId        String
-  name          String
-  protocol      String
-  address       String
-  port          Int
-  uuid          String?
-  password      String?
-  method        String?
-  transport     String?
-  tls              String   @default("NONE")
+  id               String    @id @default(cuid())
+  owner            User      @relation(fields: [userId], references: [id])
+  userId           String
+  name             String
+  protocol         String
+  address          String
+  port             Int
+  uuid             String?
+  password         String?
+  method           String?
+  transport        String?
+  tls              String    @default("NONE")
   realityPublicKey String?
   sni              String?
   path             String?
   rawUri           String?
-  lastTestedAt  DateTime?
-  lastReachable Boolean?
-  lastLatency   Int?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  lastTestedAt     DateTime?
+  lastReachable    Boolean?
+  lastLatency      Int?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   subscriptionNodes ExternalSubscriptionNode[]
 
@@ -401,17 +403,17 @@ model ServerIpCheck {
   city    String?
 
   /// Streaming / AI checks — executed by Agent on the server
-  netflix        String? /// UNLOCKED | ORIGINALS_ONLY | BLOCKED
-  netflixRegion  String?
-  disney         String? /// AVAILABLE | BLOCKED
-  disneyRegion   String?
-  youtube        String? /// AVAILABLE | BLOCKED
-  youtubeRegion  String?
-  hulu           String? /// AVAILABLE | BLOCKED
-  bilibili       String? /// AVAILABLE | BLOCKED
-  openai         String? /// AVAILABLE | BLOCKED
-  claude         String? /// AVAILABLE | BLOCKED
-  gemini         String? /// AVAILABLE | BLOCKED
+  netflix       String? /// UNLOCKED | ORIGINALS_ONLY | BLOCKED
+  netflixRegion String?
+  disney        String? /// AVAILABLE | BLOCKED
+  disneyRegion  String?
+  youtube       String? /// AVAILABLE | BLOCKED
+  youtubeRegion String?
+  hulu          String? /// AVAILABLE | BLOCKED
+  bilibili      String? /// AVAILABLE | BLOCKED
+  openai        String? /// AVAILABLE | BLOCKED
+  claude        String? /// AVAILABLE | BLOCKED
+  gemini        String? /// AVAILABLE | BLOCKED
 
   /// GFW check — executed via Serverless function inside China
   gfwBlocked   Boolean?
@@ -435,23 +437,23 @@ enum IpCheckStatus {
 // ──────────────────────────── WxWorkSetting ────────────────────────────
 
 model WxWorkSetting {
-  id         String   @id @default(cuid())
-  corpId     String
-  agentId    String
-  secretEnc  String
-  proxyUrl   String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(cuid())
+  corpId    String
+  agentId   String
+  secretEnc String
+  proxyUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ──────────────────────────── OpenRouterSetting ────────────────────────────
 
 model OpenRouterSetting {
-  id         String   @id @default(cuid())
-  apiKeyEnc  String
-  model      String   @default("anthropic/claude-sonnet-4")
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(cuid())
+  apiKeyEnc String
+  model     String   @default("anthropic/claude-sonnet-4")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ──────────────────────────── ServerRecommend ────────────────────────────
@@ -466,18 +468,18 @@ model ServerRecommendCategory {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  recommends  ServerRecommendOnCategory[]
+  recommends ServerRecommendOnCategory[]
 }
 
 model ServerRecommend {
-  id         String   @id @default(cuid())
-  name       String
-  price      String
-  regions    String[]
-  link       String
-  sortOrder  Int      @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(cuid())
+  name      String
+  price     String
+  regions   String[]
+  link      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   categories ServerRecommendOnCategory[]
 }
@@ -485,7 +487,7 @@ model ServerRecommend {
 model ServerRecommendOnCategory {
   category    ServerRecommendCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   categoryId  String
-  recommend   ServerRecommend @relation(fields: [recommendId], references: [id], onDelete: Cascade)
+  recommend   ServerRecommend         @relation(fields: [recommendId], references: [id], onDelete: Cascade)
   recommendId String
 
   @@id([categoryId, recommendId])

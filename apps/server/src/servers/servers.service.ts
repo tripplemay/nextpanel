@@ -110,6 +110,10 @@ export class ServersService {
   /**
    * Force-delete: skip SSH cleanup, delete DB records directly.
    * Use when the server is permanently unreachable and cleanup is impossible.
+   *
+   * The FK cascade removes both the server's own nodes (serverId) and any chain
+   * nodes that exit through it (exitServerId) — the latter would otherwise be
+   * orphaned with a dangling exit reference.
    */
   async forceRemove(id: string, userId: string) {
     await this.findOne(id, userId);
@@ -119,6 +123,14 @@ export class ServersService {
   private async runDelete(id: string, userId: string): Promise<void> {
     const nodes = await this.prisma.node.findMany({
       where: { serverId: id },
+      select: { id: true, name: true, userId: true, cfDnsRecordId: true },
+    });
+
+    // Chain nodes whose EXIT is this server. They physically live on a different
+    // (still-alive) entry server, so the FK cascade alone would leave their
+    // entry-side deployment running but broken. We tear them down explicitly.
+    const chainExitNodes = await this.prisma.node.findMany({
+      where: { exitServerId: id },
       select: { id: true, name: true, userId: true, cfDnsRecordId: true },
     });
 
@@ -149,9 +161,25 @@ export class ServersService {
       return;
     }
 
-    // All SSH cleanups succeeded — clean up Cloudflare DNS (best-effort)
+    // Best-effort: tear down chain nodes that exit through this server from their
+    // entry servers. These live on OTHER servers, so a failure here must NOT block
+    // this server's deletion — the DB records are removed by the FK cascade regardless.
     await Promise.allSettled(
-      nodes
+      chainExitNodes.map(async (node) => {
+        try {
+          await this.nodeDeploy.undeploy(node.id);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`Server ${id}: chain-exit node ${node.id} undeploy failed (non-fatal): ${msg}`);
+        }
+      }),
+    );
+
+    // All SSH cleanups succeeded — clean up Cloudflare DNS (best-effort).
+    // Includes chain-exit nodes: the FK cascade will delete their records, so we
+    // must release their CF DNS records here before they vanish.
+    await Promise.allSettled(
+      [...nodes, ...chainExitNodes]
         .filter((n) => n.cfDnsRecordId && n.userId)
         .map(async (node) => {
           const settings = await this.cfSettings.getDecryptedToken(node.userId!).catch(() => null);
@@ -165,7 +193,8 @@ export class ServersService {
         }),
     );
 
-    // DB cascade delete
+    // DB cascade delete — removes this server's own nodes (serverId cascade) and any
+    // chain nodes that exit through it (exitServerId cascade).
     await this.prisma.server.delete({ where: { id } }).catch((err) => {
       this.logger.error(`Server ${id}: DB delete failed: ${err instanceof Error ? err.message : String(err)}`);
     });
