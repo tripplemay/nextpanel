@@ -147,6 +147,7 @@ Swagger UI：http://localhost:3001/api/docs（后端运行时可访问）
 | `PANEL_URL` | 面板公网 URL（Agent 安装脚本使用），如 `https://your-panel-domain.com` |
 | `PANEL_DIRECT_URL` | Agent 直连 URL（绕过 CF），如 `http://面板IP:3003`。可选，设置后 Agent 心跳走 IP 直连 |
 | `GITHUB_REPO` | Agent 发布的 GitHub 仓库路径，如 `your-username/nextpanel` |
+| `METRIC_RETENTION_DAYS` | `ServerMetric` 时序数据保留天数，默认 `14`。后端每日 04:00 自动删除超期数据（`MetricsRetentionScheduler`），防止指标表无限增长 |
 
 前端（`apps/web/.env.local`）：
 

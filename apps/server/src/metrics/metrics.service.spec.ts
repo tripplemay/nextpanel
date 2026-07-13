@@ -13,6 +13,7 @@ const mockPrisma = {
   serverMetric: {
     create: jest.fn(),
     findMany: jest.fn(),
+    deleteMany: jest.fn(),
   },
 } as unknown as PrismaService;
 
@@ -127,6 +128,40 @@ describe('MetricsService', () => {
       // is written by AgentService.handleHeartbeat — doing it here too was a duplicate
       // write and was removed.
       expect(mockPrisma.server.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('pruneOldMetrics', () => {
+    it('deletes ServerMetric rows older than the retention window', async () => {
+      (mockPrisma.serverMetric.deleteMany as jest.Mock).mockResolvedValue({ count: 42 });
+      const now = new Date('2026-07-13T00:00:00.000Z');
+
+      const deleted = await svc.pruneOldMetrics(14, now);
+
+      expect(deleted).toBe(42);
+      expect(mockPrisma.serverMetric.deleteMany).toHaveBeenCalledWith({
+        where: { timestamp: { lt: new Date('2026-06-29T00:00:00.000Z') } },
+      });
+    });
+
+    it('honours a custom retention window', async () => {
+      (mockPrisma.serverMetric.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+      const now = new Date('2026-07-13T00:00:00.000Z');
+
+      await svc.pruneOldMetrics(30, now);
+
+      const call = (mockPrisma.serverMetric.deleteMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.timestamp.lt).toEqual(new Date('2026-06-13T00:00:00.000Z'));
+    });
+
+    it('falls back to 14 days when retentionDays is invalid (guards against wiping all data)', async () => {
+      (mockPrisma.serverMetric.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+      const now = new Date('2026-07-13T00:00:00.000Z');
+
+      await svc.pruneOldMetrics(0, now);
+
+      const call = (mockPrisma.serverMetric.deleteMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.timestamp.lt).toEqual(new Date('2026-06-29T00:00:00.000Z'));
     });
   });
 });

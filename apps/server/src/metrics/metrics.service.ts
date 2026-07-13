@@ -28,6 +28,22 @@ export class MetricsService {
     });
   }
 
+  /**
+   * Delete ServerMetric rows older than the retention window.
+   * Guards against non-positive `retentionDays` (falls back to 14) so a
+   * misconfiguration can never wipe the entire time-series table.
+   * Returns the number of rows deleted.
+   */
+  async pruneOldMetrics(retentionDays: number, now: Date = new Date()): Promise<number> {
+    const days =
+      Number.isFinite(retentionDays) && retentionDays > 0 ? Math.floor(retentionDays) : 14;
+    const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    const { count } = await this.prisma.serverMetric.deleteMany({
+      where: { timestamp: { lt: cutoff } },
+    });
+    return count;
+  }
+
   /** Called by Agent heartbeat to record metrics */
   async record(
     serverId: string,
