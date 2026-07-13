@@ -1,5 +1,12 @@
 name: Deploy — 项目自动部署
 
+# 目标机：deploysvr (194.238.26.173)，全 Docker 共享机。
+# 本 workflow 只更新代码 + 重建 + 重启 PM2，绝不生成 .env、绝不装原生 PostgreSQL/nginx、绝不动证书。
+#   - .env 已在服务器上（含 ENCRYPTION_KEY 等），永不覆盖
+#   - 数据库：独立 Docker 容器 nextpanel-postgres @ 127.0.0.1:5433（由 /opt/apps/nextpanel-db 管理，与本 workflow 无关）
+#   - 端口：server 3201 / web 3200（由 ecosystem.config.cjs 注入）；agent 直连 nginx :3205
+#   - 证书：certbot DNS-01(Cloudflare) 自动续期，独立于本 workflow
+
 on:
   push:
     branches: [main]
@@ -18,188 +25,82 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Copy files to VPS
-        env:
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
-          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+      - name: Setup SSH key
         run: |
-          sudo apt-get install -y sshpass
-          # 清空 src 目录，确保已从 git 删除的文件不残留在 VPS
-          sshpass -p "$SSH_PASSWORD" \
-            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=60 -p "$SSH_PORT" \
-            "$SSH_USER@$SSH_HOST" \
-            "rm -rf /opt/apps/nextpanel/apps/server/src /opt/apps/nextpanel/apps/web/src /opt/apps/nextpanel/apps/web/app /opt/apps/nextpanel/packages"
-          tar czf - --exclude='.git' --exclude='node_modules' --exclude='.next' --exclude='dist' . | \
-            sshpass -p "$SSH_PASSWORD" \
-            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=60 -p "$SSH_PORT" \
-            "$SSH_USER@$SSH_HOST" \
-            "mkdir -p /opt/apps/nextpanel && tar xzf - -C /opt/apps/nextpanel"
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
 
-      - name: Setup and deploy on VPS
+      - name: Copy files to VPS
+        run: |
+          SSH="ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=no -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}"
+          # 清空 src/app/packages，确保已从 git 删除的文件不残留（保留 .env / node_modules / .next / dist）
+          $SSH "rm -rf /opt/apps/nextpanel/apps/server/src /opt/apps/nextpanel/apps/web/src /opt/apps/nextpanel/apps/web/app /opt/apps/nextpanel/packages"
+          tar czf - --exclude='.git' --exclude='node_modules' --exclude='.next' --exclude='dist' --exclude='*.tsbuildinfo' . | \
+            $SSH "mkdir -p /opt/apps/nextpanel && tar xzf - -C /opt/apps/nextpanel"
+
+      - name: Build and restart on VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           port: ${{ secrets.SSH_PORT }}
-          password: ${{ secrets.SSH_PASSWORD }}
+          key: ${{ secrets.SSH_KEY }}
           command_timeout: 30m
-          envs: CERTBOT_EMAIL,DOMAIN
           script: |
             set -e
             trap 'echo ">>> DEPLOY FAILED at line $LINENO (exit $?)" >&2' ERR
-            DOMAIN="${DOMAIN}"
             APP_DIR="/opt/apps/nextpanel"
-            SETUP_DONE="/opt/.nextpanel_setup_done"
             export DEBIAN_FRONTEND=noninteractive
 
-            # ── 首次安装：环境初始化（幂等，后续跳过）──────────────────────
-            if [ ! -f "$SETUP_DONE" ]; then
-              echo ">>> 首次运行，初始化服务器环境..."
-              apt-get update -qq
-              apt-get install -y curl git openssl build-essential python3
+            # 工具链兜底（幂等）
+            command -v pnpm >/dev/null 2>&1 || npm install -g pnpm@10
+            command -v pm2  >/dev/null 2>&1 || npm install -g pm2
 
-              if ! command -v node &>/dev/null; then
-                curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-                apt-get install -y nodejs
-              fi
-
-              npm install -g pnpm pm2
-
-              if ! command -v psql &>/dev/null; then
-                apt-get install -y postgresql postgresql-contrib
-                systemctl enable postgresql
-                systemctl start postgresql
-              fi
-
-              if ! command -v nginx &>/dev/null; then
-                apt-get install -y nginx
-                systemctl enable nginx
-                systemctl start nginx
-              fi
-
-              if ! command -v certbot &>/dev/null; then
-                apt-get install -y certbot python3-certbot-nginx
-              fi
-
-              DB_PASS=$(openssl rand -hex 16)
-              JWT_SECRET=$(openssl rand -hex 32)
-              ENC_KEY=$(openssl rand -hex 32)
-
-              sudo -u postgres psql -c "CREATE USER nextpanel WITH PASSWORD '$DB_PASS';" 2>/dev/null || true
-              sudo -u postgres psql -c "CREATE DATABASE nextpanel OWNER nextpanel;" 2>/dev/null || true
-
-              mkdir -p $APP_DIR/apps/server
-              printf 'DATABASE_URL=postgresql://nextpanel:%s@localhost:5432/nextpanel\nJWT_SECRET=%s\nJWT_EXPIRES_IN=7d\nENCRYPTION_KEY=%s\nPORT=3001\nALLOWED_ORIGIN=https://%s\n' "$DB_PASS" "$JWT_SECRET" "$ENC_KEY" "$DOMAIN" > $APP_DIR/apps/server/.env
-
-              echo 'c2VydmVyIHsKICBsaXN0ZW4gODA7CiAgc2VydmVyX25hbWUgRE9NQUlOX1BMQUNFSE9MREVSOwoKICBsb2NhdGlvbiAvYXBpLyB7CiAgICBwcm94eV9wYXNzIGh0dHA6Ly8xMjcuMC4wLjE6MzAwMTsKICAgIHByb3h5X2h0dHBfdmVyc2lvbiAxLjE7CiAgICBwcm94eV9zZXRfaGVhZGVyIFVwZ3JhZGUgJGh0dHBfdXBncmFkZTsKICAgIHByb3h5X3NldF9oZWFkZXIgQ29ubmVjdGlvbiB1cGdyYWRlOwogICAgcHJveHlfc2V0X2hlYWRlciBIb3N0ICRob3N0OwogICAgcHJveHlfc2V0X2hlYWRlciBYLVJlYWwtSVAgJHJlbW90ZV9hZGRyOwogICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Gb3IgJHByb3h5X2FkZF94X2ZvcndhcmRlZF9mb3I7CiAgICBwcm94eV9zZXRfaGVhZGVyIFgtRm9yd2FyZGVkLVByb3RvICRzY2hlbWU7CiAgICBwcm94eV9jYWNoZV9ieXBhc3MgJGh0dHBfdXBncmFkZTsKICB9CgogIGxvY2F0aW9uIC8gewogICAgcHJveHlfcGFzcyBodHRwOi8vMTI3LjAuMC4xOjMwMDA7CiAgICBwcm94eV9odHRwX3ZlcnNpb24gMS4xOwogICAgcHJveHlfc2V0X2hlYWRlciBVcGdyYWRlICRodHRwX3VwZ3JhZGU7CiAgICBwcm94eV9zZXRfaGVhZGVyIENvbm5lY3Rpb24gdXBncmFkZTsKICAgIHByb3h5X3NldF9oZWFkZXIgSG9zdCAkaG9zdDsKICAgIHByb3h5X3NldF9oZWFkZXIgWC1SZWFsLUlQICRyZW1vdGVfYWRkcjsKICAgIHByb3h5X3NldF9oZWFkZXIgWC1Gb3J3YXJkZWQtRm9yICRwcm94eV9hZGRfeF9mb3J3YXJkZWRfZm9yOwogICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Qcm90byAkc2NoZW1lOwogICAgcHJveHlfY2FjaGVfYnlwYXNzICRodHRwX3VwZ3JhZGU7CiAgfQp9Cg==' \
-                | base64 -d | sed "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" > /etc/nginx/sites-available/nextpanel
-
-              # Disable conflicting configs for this domain (preserve other sites)
-              grep -rl "server_name.*$DOMAIN" /etc/nginx/sites-enabled/ 2>/dev/null | grep -v nextpanel | xargs rm -f 2>/dev/null || true
-              ln -sf /etc/nginx/sites-available/nextpanel /etc/nginx/sites-enabled/
-              nginx -t && systemctl reload nginx
-
-              certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m $CERTBOT_EMAIL
-
-              systemctl enable certbot.timer 2>/dev/null || (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'") | crontab -
-
-              pm2 startup systemd -u root --hp /root 2>/dev/null | tail -n 1 | bash || true
-
-              touch "$SETUP_DONE"
-              echo ">>> 环境初始化完成"
-            fi
-
-            # ── Swap（幂等，低内存 VPS 防 OOM）────────────────────────────
-            if [ ! -f /swapfile ]; then
-              echo ">>> 创建 2G Swap..."
-              fallocate -l 2G /swapfile
-              chmod 600 /swapfile
-              mkswap /swapfile
-              swapon /swapfile
-              echo '/swapfile none swap sw 0 0' >> /etc/fstab
-              echo ">>> Swap 已启用"
-            fi
-
-            # ── 每次部署都执行 ─────────────────────────────────────────────
-            # 同步面板配置（PANEL_URL / GITHUB_REPO 可能随部署变更）
-            grep -q '^PANEL_URL=' $APP_DIR/apps/server/.env \
-              && sed -i "s|^PANEL_URL=.*|PANEL_URL=https://$DOMAIN|" $APP_DIR/apps/server/.env \
-              || echo "PANEL_URL=https://$DOMAIN" >> $APP_DIR/apps/server/.env
-            grep -q '^GITHUB_REPO=' $APP_DIR/apps/server/.env \
-              && sed -i 's|^GITHUB_REPO=.*|GITHUB_REPO=tripplemay/nextpanel-releases|' $APP_DIR/apps/server/.env \
-              || echo 'GITHUB_REPO=tripplemay/nextpanel-releases' >> $APP_DIR/apps/server/.env
-            grep -q '^GFW_CHECK_FUNCTION_URL=' $APP_DIR/apps/server/.env \
-              || echo 'GFW_CHECK_FUNCTION_URL=https://1259731148-dkqsal68t7.ap-guangzhou.tencentscf.com' >> $APP_DIR/apps/server/.env
-
-            # 先停 NextPanel 服务，释放内存供构建使用（不影响其他 PM2 进程）
-            pm2 stop nextpanel-server 2>/dev/null || true
-            pm2 stop nextpanel-web 2>/dev/null || true
-
-            # ── 安装/检测 Xray（节点连通性测试客户端，幂等）────────────────
+            # ── 连通性测试客户端 Xray（幂等）──────────────────────────────
             if ! command -v xray &>/dev/null; then
               echo ">>> 安装 Xray 测试客户端..."
               (
                 apt-get install -y unzip 2>/dev/null || true
                 ARCH=$(uname -m | sed 's/x86_64/64/;s/aarch64/arm64-v8a/')
-                curl -fL --max-time 60 "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${ARCH}.zip" \
-                  -o /tmp/xray.zip
-                unzip -o /tmp/xray.zip xray -d /usr/local/bin/
-                chmod +x /usr/local/bin/xray
-                rm /tmp/xray.zip
+                curl -fL --max-time 60 "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${ARCH}.zip" -o /tmp/xray.zip
+                unzip -o /tmp/xray.zip xray -d /usr/local/bin/ && chmod +x /usr/local/bin/xray && rm /tmp/xray.zip
                 echo ">>> Xray installed: $(xray version | head -1)"
-              ) || echo ">>> WARNING: Xray 安装失败，跳过。Xray 连通性测试功能将不可用。"
+              ) || echo ">>> WARNING: Xray 安装失败，跳过。"
             fi
-
-            # ── 安装/检测 sing-box（Hysteria2 连通性测试客户端，幂等）────────
+            # ── 连通性测试客户端 sing-box（幂等）─────────────────────────
             if ! command -v sing-box &>/dev/null; then
               echo ">>> 安装 sing-box 测试客户端..."
               (
                 apt-get install -y unzip 2>/dev/null || true
                 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
                 SB_TAG=$(curl -sf --max-time 15 "https://api.github.com/repos/SagerNet/sing-box/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-                curl -fL --max-time 120 "https://github.com/SagerNet/sing-box/releases/download/${SB_TAG}/sing-box-${SB_TAG#v}-linux-${ARCH}.tar.gz" \
-                  -o /tmp/sing-box.tar.gz
-                tar xzf /tmp/sing-box.tar.gz -C /tmp/
-                mv /tmp/sing-box-*/sing-box /usr/local/bin/sing-box
-                chmod +x /usr/local/bin/sing-box
+                curl -fL --max-time 120 "https://github.com/SagerNet/sing-box/releases/download/${SB_TAG}/sing-box-${SB_TAG#v}-linux-${ARCH}.tar.gz" -o /tmp/sing-box.tar.gz
+                tar xzf /tmp/sing-box.tar.gz -C /tmp/ && mv /tmp/sing-box-*/sing-box /usr/local/bin/sing-box && chmod +x /usr/local/bin/sing-box
                 rm -rf /tmp/sing-box.tar.gz /tmp/sing-box-*/
                 echo ">>> sing-box installed: $(sing-box version | head -1)"
-              ) || echo ">>> WARNING: sing-box 安装失败，跳过。Hysteria2 连通性测试功能将不可用。"
+              ) || echo ">>> WARNING: sing-box 安装失败，跳过。"
             fi
 
             cd $APP_DIR
+            export NODE_OPTIONS="--max-old-space-size=2048"
+            export NEXT_TELEMETRY_DISABLED=1
             pnpm install
             cd $APP_DIR/apps/server && pnpm exec prisma generate && cd $APP_DIR
             find $APP_DIR -name "*.tsbuildinfo" -delete
-
-            # 顺序构建（避免并行 OOM），限制 Node 堆内存
-            export NODE_OPTIONS="--max-old-space-size=1024"
-            export NEXT_TELEMETRY_DISABLED=1
             pnpm -r --workspace-concurrency=1 build
             unset NODE_OPTIONS NEXT_TELEMETRY_DISABLED
 
             cd $APP_DIR/apps/server
             pnpm exec prisma migrate deploy
 
-            pm2 delete nextpanel-server 2>/dev/null || true
-            pm2 start pnpm --name nextpanel-server --cwd $APP_DIR/apps/server -- run start
-
-            pm2 delete nextpanel-web 2>/dev/null || true
-            pm2 start pnpm --name nextpanel-web --cwd $APP_DIR/apps/web -- run start
-
+            # 重启（端口/环境来自 ecosystem.config.cjs：server 3201 / web 3200）
+            pm2 delete nextpanel-server nextpanel-web 2>/dev/null || true
+            pm2 start $APP_DIR/ecosystem.config.cjs
             pm2 save
 
             sleep 5
-            echo "=== PM2 进程状态 ==="
-            pm2 list
-            echo "=== nextpanel-server 日志（最后20行）==="
-            pm2 logs nextpanel-server --lines 20 --nostream
-            echo "=== nextpanel-web 日志（最后20行）==="
-            pm2 logs nextpanel-web --lines 20 --nostream
-
-            echo ">>> Deploy completed at $(date) — https://$DOMAIN"
-        env:
-          CERTBOT_EMAIL: ${{ secrets.CERTBOT_EMAIL }}
-          DOMAIN: ${{ vars.DOMAIN }}
+            echo "=== PM2 ==="; pm2 list
+            echo "=== server 日志 ==="; pm2 logs nextpanel-server --lines 15 --nostream
+            echo ">>> Deploy completed at $(date) — https://${{ vars.DOMAIN }}"

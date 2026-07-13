@@ -7,7 +7,7 @@ module.exports = {
       cwd: '/opt/apps/nextpanel/apps/server',
       env: {
         NODE_ENV: 'production',
-        PORT: 3001,
+        PORT: 3201,
       },
       watch: false,
       restart_delay: 10000,
@@ -28,7 +28,8 @@ module.exports = {
       cwd: '/opt/apps/nextpanel/apps/web',
       env: {
         NODE_ENV: 'production',
-        API_URL: 'http://127.0.0.1:3001',
+        PORT: 3200,
+        API_URL: 'http://127.0.0.1:3201',
       },
       watch: false,
       restart_delay: 10000,
