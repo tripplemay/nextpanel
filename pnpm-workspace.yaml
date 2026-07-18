@@ -1,3 +1,14 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+# pnpm 11+ 在此声明允许执行构建脚本的依赖（pnpm 10 仍读根 package.json 的 pnpm.onlyBuiltDependencies，两者保持一致）
+allowBuilds:
+  '@nestjs/core': true
+  '@prisma/client': true
+  '@prisma/engines': true
+  bcrypt: true
+  cpu-features: true
+  prisma: true
+  sharp: true
+  ssh2: true
+  unrs-resolver: true
