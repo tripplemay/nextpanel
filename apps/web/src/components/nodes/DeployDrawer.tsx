@@ -1,10 +1,10 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
 import { Drawer, Modal, Button, Space, Badge, Typography } from 'antd';
-import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-design/icons';
+import { CheckCircleFilled, CloseCircleFilled } from '@ant-design/icons';
 import type { DeployStatus } from '@/hooks/useDeployStream';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import LogTerminal from '@/components/common/LogTerminal';
 
 const { Text } = Typography;
 
@@ -25,14 +25,7 @@ export default function DeployDrawer({
   onClose,
   actionLabel = '部署',
 }: DeployDrawerProps) {
-  const logEndRef = useRef<HTMLDivElement>(null);
   const { isMobile } = useIsMobile();
-
-  useEffect(() => {
-    if (logLines.length > 0) {
-      logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [logLines]);
 
   const title = (
     <Space>
@@ -56,45 +49,14 @@ export default function DeployDrawer({
     : null;
 
   const logContent = (
-    <div
-      style={{
-        background: '#0d1117',
-        color: '#c9d1d9',
-        fontFamily: 'monospace',
-        fontSize: 13,
-        padding: 16,
-        borderRadius: 6,
-        minHeight: 200,
-        lineHeight: 1.7,
-      }}
-    >
-      {logLines.length === 0 && deployStatus === 'running' && (
-        <span style={{ color: '#8b949e' }}>
-          <LoadingOutlined style={{ marginRight: 8 }} />
-          正在连接服务器...
-        </span>
-      )}
-      {logLines.map((line, i) => (
-        <div
-          key={i}
-          style={{
-            color:
-              line.includes('error') || line.includes('Error') || line.includes('失败')
-                ? '#f85149'
-                : '#c9d1d9',
-          }}
-        >
-          {line}
-        </div>
-      ))}
-      {deployStatus === 'success' && (
-        <div style={{ color: '#3fb950', marginTop: 8 }}>✓ {actionLabel}完成</div>
-      )}
-      {deployStatus === 'failed' && (
-        <div style={{ color: '#f85149', marginTop: 8 }}>✗ {actionLabel}失败，请检查以上日志</div>
-      )}
-      <div ref={logEndRef} />
-    </div>
+    <LogTerminal
+      lines={logLines}
+      status={deployStatus}
+      successText={`${actionLabel}完成`}
+      failedText={`${actionLabel}失败，请检查以上日志`}
+      minHeight={200}
+      maxHeight={isMobile ? undefined : 'calc(100vh - 200px)'}
+    />
   );
 
   if (isMobile) {
@@ -125,9 +87,7 @@ export default function DeployDrawer({
       onClose={onClose}
       footer={footer}
     >
-      <div style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
-        {logContent}
-      </div>
+      {logContent}
     </Drawer>
   );
 }

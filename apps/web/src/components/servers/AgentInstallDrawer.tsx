@@ -5,11 +5,11 @@ import { Drawer, Button, Space, Badge, Typography, Alert } from 'antd';
 import {
   CheckCircleFilled,
   CloseCircleFilled,
-  LoadingOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import { useDeployStream } from '@/hooks/useDeployStream';
 import CopyButton from '@/components/common/CopyButton';
+import LogTerminal from '@/components/common/LogTerminal';
 import { useIsMobile } from '@/hooks/useIsMobile';
 
 const { Text } = Typography;
@@ -80,49 +80,15 @@ export default function AgentInstallDrawer({
         )
       }
     >
-      <div
-        style={{
-          background: '#0d1117',
-          color: '#c9d1d9',
-          fontFamily: 'monospace',
-          fontSize: 13,
-          padding: 16,
-          borderRadius: 6,
-          minHeight: 300,
-          maxHeight: 'calc(100vh - 320px)',
-          overflowY: 'auto',
-          lineHeight: 1.7,
-          marginBottom: 16,
-        }}
-      >
-        {logLines.length === 0 && deployStatus === 'running' && (
-          <span style={{ color: '#8b949e' }}>
-            <LoadingOutlined style={{ marginRight: 8 }} />
-            正在连接服务器...
-          </span>
-        )}
-        {logLines.map((line, i) => (
-          <div
-            key={i}
-            style={{
-              color:
-                line.includes('错误') || line.includes('失败') || line.includes('Error')
-                  ? '#f85149'
-                  : line.includes('成功') || line.includes('完成')
-                  ? '#3fb950'
-                  : '#c9d1d9',
-            }}
-          >
-            {line}
-          </div>
-        ))}
-        {deployStatus === 'success' && (
-          <div style={{ color: '#3fb950', marginTop: 8 }}>✓ Agent 安装完成</div>
-        )}
-        {deployStatus === 'failed' && (
-          <div style={{ color: '#f85149', marginTop: 8 }}>✗ 安装失败，请查看上方日志或手动安装</div>
-        )}
-      </div>
+      <LogTerminal
+        lines={logLines}
+        status={deployStatus}
+        successText="Agent 安装完成"
+        failedText="安装失败，请查看上方日志或手动安装"
+        minHeight={300}
+        maxHeight="calc(100vh - 320px)"
+        style={{ marginBottom: 16 }}
+      />
 
       {deployStatus === 'failed' && (
         <Alert

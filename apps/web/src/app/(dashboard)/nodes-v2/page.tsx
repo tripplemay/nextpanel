@@ -12,15 +12,19 @@ import {
   type NodeMouseHandler,
 } from '@xyflow/react';
 import { ApiOutlined } from '@ant-design/icons';
-import { Button, Card, Empty, Spin, Typography } from 'antd';
+import { Button, Card, Empty, Typography, theme } from 'antd';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import '@xyflow/react/dist/style.css';
 import PageHeader from '@/components/common/PageHeader';
+import { CardGridSkeleton } from '@/components/common/skeletons';
 import NodePresetModal from '@/components/nodes/NodePresetModal';
 import ServerFlowNode from '@/components/nodes/topology/ServerFlowNode';
 import MultiChainEdge from '@/components/nodes/topology/MultiChainEdge';
 import TopologyInspectorPanel from '@/components/nodes/topology/TopologyInspectorPanel';
 import { useNodeActions } from '@/hooks/useNodeActions';
 import { nodesApi, serversApi } from '@/lib/api';
+import { useThemeMode } from '@/theme/ThemeContext';
+import { statusColors } from '@/theme/semantic';
 import type { Node } from '@/types/api';
 import type { ChainTopologyEdge, InspectorSelection, ServerTopologyNode } from '@/components/nodes/topology/types';
 import { buildTopology } from '@/components/nodes/topology/topology-utils';
@@ -44,6 +48,8 @@ type PresetContext =
 
 export default function NodesV2Page() {
   const qc = useQueryClient();
+  const { resolvedMode, tokens } = useThemeMode();
+  const { token } = theme.useToken();
   const [presetContext, setPresetContext] = useState<PresetContext>(null);
   const [selection, setSelection] = useState<InspectorSelection>(null);
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<ServerTopologyNode>([]);
@@ -65,7 +71,11 @@ export default function NodesV2Page() {
   const servers = serversData ?? EMPTY_SERVERS;
   const nodeActions = useNodeActions({ nodes: allNodes });
 
-  const topology = useMemo(() => buildTopology(servers, allNodes), [servers, allNodes]);
+  // 主题切换时重建拓扑以刷新链路配色（仅颜色随 theme 变化，结构不变）
+  const topology = useMemo(
+    () => buildTopology(servers, allNodes, resolvedMode),
+    [servers, allNodes, resolvedMode],
+  );
   const dataReady = allNodesData !== undefined && serversData !== undefined;
 
   useEffect(() => {
@@ -104,6 +114,7 @@ export default function NodesV2Page() {
     setSelection({ type: 'edge', edgeId: edge.id });
   };
 
+  // 30s 轮询不会触发 isLoading，仅首次加载为 true，因此骨架只出现一次、轮询静默
   const loading = nodesLoading || serversLoading || !dataReady;
 
   const batchTestButton = (
@@ -119,69 +130,70 @@ export default function NodesV2Page() {
   );
 
   return (
-    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+    <Card style={{ boxShadow: tokens.cardShadow }}>
       <PageHeader
         title="节点拓扑"
         extra={batchTestButton}
       />
 
-      <Spin spinning={loading}>
-        {loading ? (
-          <div className={styles.topologyShell} />
-        ) : servers.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无服务器，先创建服务器后再查看拓扑" style={{ padding: '32px 0' }} />
-        ) : (
-          <div className={styles.topologyShell}>
-            <ReactFlow
-              className={styles.flowCanvas}
-              nodes={flowNodes}
-              edges={flowEdges}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onNodeClick={handleNodeClick}
-              onEdgeClick={handleEdgeClick}
-              onPaneClick={() => setSelection(null)}
-              fitView
-              minZoom={0.35}
-              maxZoom={1.5}
-              nodesDraggable
-              nodesConnectable={false}
-              elementsSelectable
-            >
-              <Background gap={18} size={1} color="#b9c7db" />
-              <Controls position="bottom-left" />
-              <MiniMap
-                zoomable
-                pannable
-                position="bottom-right"
-                nodeColor={(node) => node.selected ? '#2563eb' : '#94a3b8'}
-              />
-            </ReactFlow>
-
-            {!loading && allNodes.length === 0 && (
-              <div style={{ position: 'absolute', left: 20, bottom: 20, zIndex: 8 }}>
-                <Card size="small">
-                  <Typography.Text type="secondary">
-                    当前还没有节点。可以先在节点管理中创建节点，再回到拓扑视图查看关系。
-                  </Typography.Text>
-                </Card>
-              </div>
-            )}
-
-            <TopologyInspectorPanel
-              selection={selection}
-              serverNodes={flowNodes}
-              edges={flowEdges}
-              nodeActions={nodeActions}
-              onClose={() => setSelection(null)}
-              onAddDirectNode={(serverId) => setPresetContext({ mode: 'direct', serverId })}
-              onAddChainNode={(entryServerId) => setPresetContext({ mode: 'chain', entryServerId })}
+      {loading ? (
+        <div className={styles.topologyShell} style={{ padding: 16 }}>
+          <CardGridSkeleton count={3} />
+        </div>
+      ) : servers.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无服务器，先创建服务器后再查看拓扑" style={{ padding: '32px 0' }} />
+      ) : (
+        <div className={styles.topologyShell}>
+          <ReactFlow
+            className={styles.flowCanvas}
+            style={{ backgroundColor: tokens.topologyBg }}
+            nodes={flowNodes}
+            edges={flowEdges}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onNodeClick={handleNodeClick}
+            onEdgeClick={handleEdgeClick}
+            onPaneClick={() => setSelection(null)}
+            fitView
+            minZoom={0.35}
+            maxZoom={1.5}
+            nodesDraggable
+            nodesConnectable={false}
+            elementsSelectable
+          >
+            <Background gap={18} size={1} color={token.colorBorder} />
+            <Controls position="bottom-left" />
+            <MiniMap
+              zoomable
+              pannable
+              position="bottom-right"
+              nodeColor={(node) => node.selected ? statusColors.info : statusColors.neutral}
             />
-          </div>
-        )}
-      </Spin>
+          </ReactFlow>
+
+          {allNodes.length === 0 && (
+            <div style={{ position: 'absolute', left: 20, bottom: 20, zIndex: 8 }}>
+              <Card size="small">
+                <Typography.Text type="secondary">
+                  当前还没有节点。可以先在节点管理中创建节点，再回到拓扑视图查看关系。
+                </Typography.Text>
+              </Card>
+            </div>
+          )}
+
+          <TopologyInspectorPanel
+            selection={selection}
+            serverNodes={flowNodes}
+            edges={flowEdges}
+            nodeActions={nodeActions}
+            onClose={() => setSelection(null)}
+            onAddDirectNode={(serverId) => setPresetContext({ mode: 'direct', serverId })}
+            onAddChainNode={(entryServerId) => setPresetContext({ mode: 'chain', entryServerId })}
+          />
+        </div>
+      )}
 
       <NodePresetModal
         open={presetContext !== null}

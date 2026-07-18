@@ -11,6 +11,7 @@ import {
   Input,
   Popconfirm,
   Space,
+  theme,
   Typography,
 } from 'antd';
 import {
@@ -22,6 +23,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { cloudflareApi } from '@/lib/api';
 import PageHeader from '@/components/common/PageHeader';
+import AppCard from '@/components/common/AppCard';
 import type { AxiosError } from 'axios';
 
 const { Text, Link, Paragraph } = Typography;
@@ -66,6 +68,7 @@ const helpSteps = (
 
 export default function CloudflareSettingsPage() {
   const { message } = App.useApp();
+  const { token } = theme.useToken();
   const qc = useQueryClient();
   const [form] = Form.useForm();
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
@@ -118,14 +121,14 @@ export default function CloudflareSettingsPage() {
   });
 
   return (
-    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+    <AppCard>
       <PageHeader title="Cloudflare DNS" />
 
       <Card size="small" style={{ maxWidth: 560 }}>
         {/* 帮助折叠 */}
         <Collapse
           ghost
-          style={{ marginBottom: 16 }}
+          style={{ marginBottom: 16, background: token.colorFillQuaternary, borderRadius: 8 }}
           items={[
             {
               key: 'help',
@@ -239,7 +242,7 @@ export default function CloudflareSettingsPage() {
 
         {/* 删除配置 */}
         {setting && (
-          <div style={{ marginTop: 32, borderTop: '1px solid #f0f0f0', paddingTop: 16 }}>
+          <div style={{ marginTop: 32, borderTop: `1px solid ${token.colorBorderSecondary}`, paddingTop: 16 }}>
             <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
               危险操作
             </Text>
@@ -258,6 +261,6 @@ export default function CloudflareSettingsPage() {
           </div>
         )}
       </Card>
-    </Card>
+    </AppCard>
   );
 }

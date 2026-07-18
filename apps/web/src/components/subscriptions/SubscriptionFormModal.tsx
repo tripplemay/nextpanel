@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { Modal, Form, Input, Select, App, Tag, Space } from 'antd';
+import { Modal, Form, Input, Select, App, Tag, Space, theme as antdTheme } from 'antd';
 import ServerTagList from '@/components/servers/ServerTagList';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { subscriptionsApi, nodesApi, externalNodesApi } from '@/lib/api';
@@ -30,6 +30,7 @@ export default function SubscriptionFormModal({
   const { message } = App.useApp();
   const [form] = Form.useForm<CreateSubscriptionDto & { externalNodeIds?: string[] }>();
   const isEdit = !!subscription;
+  const { token } = antdTheme.useToken();
 
   const { data: nodes, isLoading: nodesLoading } = useQuery({
     queryKey: ['nodes'],
@@ -84,7 +85,7 @@ export default function SubscriptionFormModal({
     label: (
       <Space size={4} wrap={false}>
         {n.name}
-        <span style={{ color: '#8c8c8c', fontSize: 12 }}>({n.protocol}:{n.listenPort})</span>
+        <span style={{ color: token.colorTextSecondary, fontSize: 12 }}>({n.protocol}:{n.listenPort})</span>
         <Tag color={STATUS_COLOR[n.status] ?? 'default'} style={{ margin: 0, fontSize: 11 }}>
           {n.status}
         </Tag>
@@ -101,7 +102,7 @@ export default function SubscriptionFormModal({
     label: (
       <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         {n.name}
-        <span style={{ color: '#8c8c8c', fontSize: 12 }}>({n.protocol}:{n.port})</span>
+        <span style={{ color: token.colorTextSecondary, fontSize: 12 }}>({n.protocol}:{n.port})</span>
         <Tag color="orange" style={{ margin: 0, fontSize: 11 }}>外部</Tag>
       </span>
     ),

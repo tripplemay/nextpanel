@@ -2,9 +2,21 @@
 
 import '@ant-design/v5-patch-for-react-19';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { App, ConfigProvider, theme } from 'antd';
+import { App, ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { ThemeProvider, useThemeMode } from '@/theme/ThemeContext';
+import { buildAntdTheme } from '@/theme/antd-theme';
+
+function ThemedConfigProvider({ children }: { children: React.ReactNode }) {
+  const { resolvedMode } = useThemeMode();
+  const themeConfig = useMemo(() => buildAntdTheme(resolvedMode), [resolvedMode]);
+  return (
+    <ConfigProvider locale={zhCN} theme={themeConfig}>
+      <App>{children}</App>
+    </ConfigProvider>
+  );
+}
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -16,15 +28,9 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ConfigProvider
-        locale={zhCN}
-        theme={{
-          algorithm: theme.defaultAlgorithm,
-          token: { colorPrimary: '#1677ff', borderRadius: 8 },
-        }}
-      >
-        <App>{children}</App>
-      </ConfigProvider>
+      <ThemeProvider>
+        <ThemedConfigProvider>{children}</ThemedConfigProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

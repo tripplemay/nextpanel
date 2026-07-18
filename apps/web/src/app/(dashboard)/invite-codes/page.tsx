@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import {
-  App, Card, Table, Button, Modal, Form, InputNumber, Space,
+  App, Table, Button, Modal, Form, InputNumber, Space,
   Popconfirm, Typography, Input, Tabs, Progress, Statistic, Row, Col,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined, CopyOutlined, EditOutlined } from '@ant-design/icons';
@@ -10,6 +10,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { inviteCodesApi } from '@/lib/api';
 import type { InviteCode } from '@/types/api';
 import PageHeader from '@/components/common/PageHeader';
+import AppCard from '@/components/common/AppCard';
+import { TableSkeleton } from '@/components/common/skeletons';
+import EmptyState from '@/components/common/EmptyState';
+import { statusColors } from '@/theme/semantic';
 import { useIsMobile } from '@/hooks/useIsMobile';
 
 const { Text } = Typography;
@@ -44,11 +48,12 @@ export default function InviteCodesPage() {
   const [form] = Form.useForm();
   const [customForm] = Form.useForm();
 
-  const { data: codes = [], isLoading } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['invite-codes'],
     queryFn: () => inviteCodesApi.list().then((r) => r.data),
     staleTime: 5 * 60 * 1000,
   });
+  const codes = data ?? [];
 
   const createMutation = useMutation({
     mutationFn: ({ quantity, maxUses }: { quantity: number; maxUses: number }) =>
@@ -181,40 +186,54 @@ export default function InviteCodesPage() {
       {/* 统计概览 */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={8}>
-          <Card size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+          <AppCard size="small" style={{ textAlign: 'center' }}>
             <Statistic title="总邀请码" value={codes.length} />
-          </Card>
+          </AppCard>
         </Col>
         <Col span={8}>
-          <Card size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)', textAlign: 'center' }}>
-            <Statistic title="可用" value={availableCodes.length} valueStyle={{ color: '#52c41a' }} />
-          </Card>
+          <AppCard size="small" style={{ textAlign: 'center' }}>
+            <Statistic title="可用" value={availableCodes.length} valueStyle={{ color: statusColors.success }} />
+          </AppCard>
         </Col>
         <Col span={8}>
-          <Card size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)', textAlign: 'center' }}>
-            <Statistic title="已用完" value={exhaustedCodes.length} valueStyle={{ color: '#d9d9d9' }} />
-          </Card>
+          <AppCard size="small" style={{ textAlign: 'center' }}>
+            <Statistic title="已用完" value={exhaustedCodes.length} valueStyle={{ color: statusColors.neutral }} />
+          </AppCard>
         </Col>
       </Row>
 
-      <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+      <AppCard>
         <Tabs
           activeKey={activeTab}
           onChange={setActiveTab}
           items={tabItems}
           style={{ marginBottom: 8 }}
         />
-        <Table
-          size="middle"
-          rowKey="id"
-          loading={isLoading}
-          dataSource={filteredCodes}
-          columns={columns}
-          scroll={{ x: 'max-content' }}
-          pagination={{ showTotal: (total) => `共 ${total} 条` }}
-          rowClassName={(record) => record.usedCount >= record.maxUses ? 'row-exhausted' : ''}
-        />
-      </Card>
+        {isLoading && !data ? (
+          <TableSkeleton />
+        ) : (
+          <Table
+            size="middle"
+            rowKey="id"
+            loading={isLoading}
+            dataSource={filteredCodes}
+            columns={columns}
+            scroll={{ x: 'max-content' }}
+            locale={{
+              emptyText: (
+                <EmptyState
+                  title="暂无邀请码"
+                  description="生成邀请码后即可邀请新用户注册"
+                  actionLabel="生成邀请码"
+                  onAction={() => setCreateModalOpen(true)}
+                />
+              ),
+            }}
+            pagination={{ showTotal: (total) => `共 ${total} 条` }}
+            rowClassName={(record) => record.usedCount >= record.maxUses ? 'row-exhausted' : ''}
+          />
+        )}
+      </AppCard>
 
       <style>{`.row-exhausted td { opacity: 0.45; }`}</style>
 

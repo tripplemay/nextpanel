@@ -5,7 +5,7 @@ import { App, Input, Modal } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { AxiosError } from 'axios';
 import { nodesApi } from '@/lib/api';
-import { useAuthStore } from '@/store/auth';
+import { streamSse } from '@/lib/sse';
 import { useDeployStream } from '@/hooks/useDeployStream';
 import DeployDrawer from '@/components/nodes/DeployDrawer';
 import NodeShareModal from '@/components/nodes/NodeShareModal';
@@ -91,12 +91,26 @@ export function useNodeActions({ nodes }: UseNodeActionsOptions): UseNodeActions
   const renameMutation = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
       nodesApi.rename(id, name).then((r) => r.data),
+    onMutate: async ({ id, name }) => {
+      // 乐观更新：先把列表里的名字改掉，失败再回滚
+      await qc.cancelQueries({ queryKey: ['nodes'] });
+      const previous = qc.getQueriesData<Node[]>({ queryKey: ['nodes'] });
+      qc.setQueriesData<Node[]>({ queryKey: ['nodes'] }, (old) =>
+        old?.map((n) => (n.id === id ? { ...n, name } : n)),
+      );
+      return { previous };
+    },
     onSuccess: () => {
       message.success('节点已重命名');
       setRenameNode(null);
+    },
+    onError: (err, _vars, context) => {
+      context?.previous?.forEach(([key, data]) => qc.setQueryData(key, data));
+      message.error(apiErrorMessage(err, '重命名失败'));
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['nodes'] });
     },
-    onError: () => message.error('重命名失败'),
   });
 
   const toggleMutation = useMutation({
@@ -104,11 +118,23 @@ export function useNodeActions({ nodes }: UseNodeActionsOptions): UseNodeActions
       setTogglingId(id);
       return nodesApi.toggle(id).then((r) => r.data);
     },
-    onSuccess: () => {
+    onMutate: async (id) => {
+      // 乐观更新：先翻转开关状态，失败再回滚
+      await qc.cancelQueries({ queryKey: ['nodes'] });
+      const previous = qc.getQueriesData<Node[]>({ queryKey: ['nodes'] });
+      qc.setQueriesData<Node[]>({ queryKey: ['nodes'] }, (old) =>
+        old?.map((n) => (n.id === id ? { ...n, enabled: !n.enabled } : n)),
+      );
+      return { previous };
+    },
+    onError: (err, _id, context) => {
+      context?.previous?.forEach(([key, data]) => qc.setQueryData(key, data));
+      message.error(apiErrorMessage(err, '切换节点状态失败'));
+    },
+    onSettled: () => {
+      setTogglingId(null);
       qc.invalidateQueries({ queryKey: ['nodes'] });
     },
-    onError: (err) => message.error(apiErrorMessage(err, '切换节点状态失败')),
-    onSettled: () => setTogglingId(null),
   });
 
   const startBatchTest = useCallback(async () => {
@@ -124,65 +150,34 @@ export function useNodeActions({ nodes }: UseNodeActionsOptions): UseNodeActions
     setTestResults({});
     abortBatchRef.current = new AbortController();
 
-    const token = useAuthStore.getState().token ?? '';
-
-    try {
-      const res = await fetch('/api/nodes/test-all', {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: abortBatchRef.current.signal,
-      });
-
-      if (!res.ok || !res.body) {
-        void message.error('批量测试请求失败');
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const chunks = buffer.split('\n\n');
-        buffer = chunks.pop() ?? '';
-
-        for (const chunk of chunks) {
-          const dataLine = chunk.split('\n').find((l) => l.startsWith('data:'));
-          if (!dataLine) continue;
-          try {
-            const event = JSON.parse(dataLine.slice(5).trim()) as Record<string, unknown>;
-            if (event.type === 'result') {
-              const id = event.nodeId as string;
-              setTestResults((prev) => ({
-                ...prev,
-                [id]: {
-                  reachable: event.reachable as boolean,
-                  latency: event.latency as number,
-                  message: event.message as string,
-                  testedAt: event.testedAt as string,
-                },
-              }));
-              setBatchProgress((prev) => prev ? { ...prev, done: prev.done + 1 } : null);
-            } else if (event.type === 'done') {
-              void message.success(`批量测试完成，共 ${event.total as number} 个节点`);
-              qc.invalidateQueries({ queryKey: ['nodes'] });
-            }
-          } catch {
-            // Ignore malformed SSE chunks; the stream can continue with later chunks.
-          }
+    const result = await streamSse(
+      '/api/nodes/test-all',
+      (event) => {
+        if (event.type === 'result') {
+          const id = event.nodeId as string;
+          setTestResults((prev) => ({
+            ...prev,
+            [id]: {
+              reachable: event.reachable as boolean,
+              latency: event.latency as number,
+              message: event.message as string,
+              testedAt: event.testedAt as string,
+            },
+          }));
+          setBatchProgress((prev) => prev ? { ...prev, done: prev.done + 1 } : null);
+        } else if (event.type === 'done') {
+          void message.success(`批量测试完成，共 ${event.total as number} 个节点`);
+          qc.invalidateQueries({ queryKey: ['nodes'] });
         }
-      }
-    } catch (err: unknown) {
-      if ((err as Error).name !== 'AbortError') {
-        void message.error('批量测试连接中断');
-      }
-    } finally {
-      setBatchTesting(false);
-      setBatchProgress(null);
+      },
+      abortBatchRef.current.signal,
+    );
+
+    if (!result.ok) {
+      void message.error(result.status ? '批量测试请求失败' : '批量测试连接中断');
     }
+    setBatchTesting(false);
+    setBatchProgress(null);
   }, [batchTesting, message, nodes.length, qc]);
 
   const openDeploy = useCallback((node: Node) => {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Button, Card, Col, Collapse, Empty, Row, Spin, Tag, Typography } from 'antd';
+import { Button, Col, Collapse, Row, Tag, Typography } from 'antd';
 import {
   LinkOutlined,
   ThunderboltOutlined,
@@ -15,6 +15,9 @@ import { useQuery } from '@tanstack/react-query';
 import { recommendsApi } from '@/lib/api';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import PageHeader from '@/components/common/PageHeader';
+import AppCard from '@/components/common/AppCard';
+import { CardGridSkeleton } from '@/components/common/skeletons';
+import EmptyState from '@/components/common/EmptyState';
 import type { ServerRecommend, ServerRecommendCategory } from '@/types/api';
 
 const CATEGORY_THEMES: Record<string, { color: string; icon: React.ReactNode }> = {
@@ -113,7 +116,7 @@ export default function RecommendsPage() {
         <Row gutter={[16, 16]} style={{ padding: '4px 0' }}>
           {recommends.map((rec) => (
             <Col key={rec.id} xs={24} sm={12} lg={8} xl={6}>
-              <Card
+              <AppCard
                 size="small"
                 hoverable
                 style={{
@@ -176,7 +179,7 @@ export default function RecommendsPage() {
                 >
                   购买
                 </Button>
-              </Card>
+              </AppCard>
             </Col>
           ))}
         </Row>
@@ -185,24 +188,27 @@ export default function RecommendsPage() {
   });
 
   return (
-    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+    <AppCard>
       <PageHeader title="服务器推荐" />
 
-      <Spin spinning={isLoading}>
-        {!isLoading && nonEmptyCategories.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无推荐" style={{ padding: '32px 0' }} />
-        ) : (
-          <Collapse
-            activeKey={activeKeys}
-            onChange={(keys) => {
-              const activeSet = new Set(Array.isArray(keys) ? keys : [keys]);
-              setCollapsedIds(nonEmptyCategories.map((c) => c.id).filter((id) => !activeSet.has(id)));
-            }}
-            items={collapseItems}
-            style={{ background: 'transparent' }}
-          />
-        )}
-      </Spin>
-    </Card>
+      {isLoading ? (
+        <CardGridSkeleton />
+      ) : nonEmptyCategories.length === 0 ? (
+        <EmptyState
+          title="暂无推荐"
+          description="管理员还没有配置服务器推荐，稍后再来看看吧"
+        />
+      ) : (
+        <Collapse
+          activeKey={activeKeys}
+          onChange={(keys) => {
+            const activeSet = new Set(Array.isArray(keys) ? keys : [keys]);
+            setCollapsedIds(nonEmptyCategories.map((c) => c.id).filter((id) => !activeSet.has(id)));
+          }}
+          items={collapseItems}
+          style={{ background: 'transparent' }}
+        />
+      )}
+    </AppCard>
   );
 }

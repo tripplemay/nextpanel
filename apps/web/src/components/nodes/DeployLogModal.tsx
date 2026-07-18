@@ -5,6 +5,7 @@ import { Modal, Spin, Typography, Empty, Tag, Space, Button, Collapse } from 'an
 import { CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { operationLogsApi } from '@/lib/api';
+import LogTerminal from '@/components/common/LogTerminal';
 import type { Node, OperationLogEntry } from '@/types/api';
 
 const { Text } = Typography;
@@ -29,37 +30,13 @@ function LogText({ logId }: { logId: string }) {
   if (isLoading) return <Spin size="small" />;
   if (!data?.log) return <Text type="secondary">暂无日志内容</Text>;
 
-  const lines = data.log.split('\n');
   return (
-    <div
-      style={{
-        background: '#0d1117',
-        color: '#c9d1d9',
-        fontFamily: 'monospace',
-        fontSize: 12,
-        padding: 12,
-        borderRadius: 4,
-        maxHeight: 400,
-        overflowY: 'auto',
-        lineHeight: 1.7,
-      }}
-    >
-      {lines.map((line, i) => (
-        <div
-          key={i}
-          style={{
-            color:
-              line.includes('error') || line.includes('Error') || line.includes('失败')
-                ? '#f85149'
-                : line.includes('成功') || line.includes('completed') || line.includes('OK') || line.includes('已停止') || line.includes('已删除')
-                  ? '#3fb950'
-                  : '#c9d1d9',
-          }}
-        >
-          {line}
-        </div>
-      ))}
-    </div>
+    <LogTerminal
+      lines={data.log.split('\n')}
+      minHeight={0}
+      maxHeight={400}
+      style={{ fontSize: 12, padding: 12, borderRadius: 4 }}
+    />
   );
 }
 

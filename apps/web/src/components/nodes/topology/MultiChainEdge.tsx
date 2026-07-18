@@ -1,6 +1,7 @@
 'use client';
 
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from '@xyflow/react';
+import { statusColors } from '@/theme/semantic';
 import type { ChainTopologyEdge } from './types';
 import styles from './Topology.module.css';
 
@@ -16,7 +17,7 @@ export default function MultiChainEdge({
   selected,
 }: EdgeProps<ChainTopologyEdge>) {
   const chainNodes = data?.chainNodes ?? [];
-  const colors = data?.colors.length ? data.colors : ['#2563eb'];
+  const colors = data?.colors.length ? data.colors : [statusColors.info];
   const count = Math.max(chainNodes.length, colors.length, 1);
   const [labelPath, labelX, labelY] = getBezierPath({
     sourceX,

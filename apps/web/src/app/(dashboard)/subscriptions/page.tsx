@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { App, Button, Table, Space, Card, Tag, Typography, Collapse, Empty, QRCode, Tabs, Input, Modal, Divider, Dropdown } from 'antd';
+import { App, Button, Table, Space, Card, Tag, Typography, Collapse, Empty, QRCode, Tabs, Modal, Divider, Dropdown, theme as antdTheme } from 'antd';
 import type { ColumnType } from 'antd/es/table';
-import { EditOutlined, ReloadOutlined, DeleteOutlined, ExportOutlined, TeamOutlined, MoreOutlined } from '@ant-design/icons';
+import { EditOutlined, ReloadOutlined, DeleteOutlined, ExportOutlined, TeamOutlined, MoreOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import ServerTagList from '@/components/servers/ServerTagList';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -13,6 +13,12 @@ import SubscriptionFormModal from '@/components/subscriptions/SubscriptionFormMo
 import SubscriptionShareManager from '@/components/subscriptions/SubscriptionShareManager';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
+import AppCard from '@/components/common/AppCard';
+import EmptyState from '@/components/common/EmptyState';
+import CopyButton from '@/components/common/CopyButton';
+import { TableSkeleton } from '@/components/common/skeletons';
+import { useThemeTokens } from '@/theme/ThemeContext';
+import { statusColors } from '@/theme/semantic';
 import type { Subscription, ViewerSubscriptionList } from '@/types/api';
 
 interface SubFormat {
@@ -53,8 +59,92 @@ function buildNodeRows(sub: Subscription) {
   ];
 }
 
+/** 链接展示行：token 化底色块 + 等宽字体 + 复制按钮 */
+function LinkBlock({ url, label }: { url: string; label?: string }) {
+  const { token } = antdTheme.useToken();
+  return (
+    <div>
+      {label && (
+        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+          {label}
+        </Typography.Text>
+      )}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          background: token.colorFillQuaternary,
+          border: `1px solid ${token.colorBorderSecondary}`,
+          borderRadius: token.borderRadius,
+          padding: '6px 8px 6px 12px',
+        }}
+      >
+        <Typography.Text
+          style={{ flex: 1, minWidth: 0, fontSize: 12, fontFamily: token.fontFamilyCode }}
+          ellipsis={{ tooltip: url }}
+        >
+          {url}
+        </Typography.Text>
+        <CopyButton text={url} size="small" />
+      </div>
+    </div>
+  );
+}
+
+/** 二维码卡片：始终保持白底黑码，暗色主题下也可正常扫码 */
+function QrCard({ value, size = 200 }: { value: string; size?: number }) {
+  const { token } = antdTheme.useToken();
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+      <div
+        style={{
+          padding: 12,
+          background: '#fff',
+          border: `1px solid ${token.colorBorderSecondary}`,
+          borderRadius: token.borderRadiusLG,
+          lineHeight: 0,
+        }}
+      >
+        <QRCode value={value} size={size} color="#000" bgColor="#fff" bordered={false} />
+      </div>
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        扫码导入客户端
+      </Typography.Text>
+    </div>
+  );
+}
+
+/** Hiddify 一键导入主按钮：语义成功色 + hover 抬升 */
+function HiddifyImportButton({ url }: { url: string }) {
+  const tokens = useThemeTokens();
+  const [hover, setHover] = useState(false);
+  return (
+    <a href={url}>
+      <Button
+        type="primary"
+        size="large"
+        style={{
+          background: statusColors.success,
+          borderColor: statusColors.success,
+          fontWeight: 500,
+          padding: '0 32px',
+          transform: hover ? 'translateY(-1px)' : 'none',
+          boxShadow: hover ? tokens.cardShadowHover : 'none',
+          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+        }}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+      >
+        一键导入 Hiddify
+      </Button>
+    </a>
+  );
+}
+
 function NodeTable({ sub }: { sub: Subscription }) {
   const { isMobile, isTablet } = useIsMobile();
+  const { token } = antdTheme.useToken();
   const rows = buildNodeRows(sub);
   if (rows.length === 0) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无节点" style={{ padding: '16px 0' }} />;
@@ -66,7 +156,7 @@ function NodeTable({ sub }: { sub: Subscription }) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {rows.map((row) => (
-          <Card key={row.id} size="small" style={{ borderRadius: 8 }}>
+          <Card key={row.id} size="small" style={{ borderRadius: token.borderRadiusLG }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, flex: 1, marginRight: 8 }}>
                 <Typography.Text strong style={{ fontSize: 14, minWidth: 0 }} ellipsis>{row.name}</Typography.Text>
@@ -146,6 +236,7 @@ export default function SubscriptionsPage() {
   const qc = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const isViewer = user?.role === 'VIEWER';
+  const { token } = antdTheme.useToken();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Subscription | null>(null);
@@ -215,21 +306,28 @@ export default function SubscriptionsPage() {
       return {
         key: sub.id,
         label: (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
-            <span style={{ fontWeight: 500, flexShrink: 0 }}>{sub.name}</span>
-            <Typography.Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
-              {totalCount} 个节点
-            </Typography.Text>
-            {!opts.readonly && !isViewer && (
-              <Tag
-                icon={<TeamOutlined />}
-                color={shareCount > 0 ? 'blue' : 'default'}
-                style={{ margin: 0, fontSize: 11, flexShrink: 0 }}
-              >
-                已分享 {shareCount} 人
-              </Tag>
-            )}
-            <div style={{ marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
+            {/* 主标题 + 次要信息 */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <Typography.Text strong style={{ fontSize: 14, minWidth: 0 }} ellipsis={{ tooltip: sub.name }}>
+                  {sub.name}
+                </Typography.Text>
+                {!opts.readonly && !isViewer && (
+                  <Tag
+                    icon={<TeamOutlined />}
+                    color={shareCount > 0 ? 'blue' : 'default'}
+                    style={{ margin: 0, fontSize: 11, flexShrink: 0 }}
+                  >
+                    已分享 {shareCount} 人
+                  </Tag>
+                )}
+              </div>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {totalCount} 个节点
+              </Typography.Text>
+            </div>
+            <div style={{ flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
               {isMobile ? (
                 <Space size={4}>
                   <Button
@@ -323,38 +421,50 @@ export default function SubscriptionsPage() {
     });
   }
 
+  const collapseStyle = { background: 'transparent', borderColor: token.colorBorderSecondary };
+
+  // ── First-load skeleton ─────────────────────────────────────────────────────
+  if (isLoading) {
+    return <TableSkeleton rows={4} />;
+  }
+
   // ── VIEWER view ─────────────────────────────────────────────────────────────
   if (isViewerResponse) {
     const mine = viewerData?.mine ?? [];
     const shared = viewerData?.shared ?? [];
 
     return (
-      <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+      <AppCard>
         <PageHeader
           title="我的订阅"
           addLabel="新增订阅"
           onAdd={() => setCreateOpen(true)}
         />
 
-        {!isLoading && mine.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无订阅" style={{ padding: '24px 0' }} />
+        {mine.length === 0 ? (
+          <EmptyState
+            title="还没有订阅"
+            description="创建订阅后可将一组节点打包成一个订阅链接，导入客户端即可使用"
+            actionLabel="新增订阅"
+            onAction={() => setCreateOpen(true)}
+          />
         ) : (
           <Collapse
             defaultActiveKey={mine.map((s) => s.id)}
             items={buildCollapseItems(mine, { readonly: false })}
-            style={{ background: 'transparent' }}
+            style={collapseStyle}
           />
         )}
 
         <Divider orientation="left" style={{ marginTop: 32 }}>共享订阅</Divider>
 
-        {!isLoading && shared.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无分享给你的订阅" style={{ padding: '24px 0' }} />
+        {shared.length === 0 ? (
+          <EmptyState title="暂无分享给你的订阅" />
         ) : (
           <Collapse
             defaultActiveKey={shared.map((s) => s.id)}
             items={buildCollapseItems(shared, { readonly: true, useShareToken: true })}
-            style={{ background: 'transparent' }}
+            style={collapseStyle}
           />
         )}
 
@@ -378,9 +488,9 @@ export default function SubscriptionsPage() {
 
         {/* Export links modal */}
         <Modal open={!!linkTarget} footer={null} onCancel={() => setLinkTarget(null)} title="订阅链接" width={560} style={{ maxWidth: '95vw' }}>
-          {linkTarget && <LinkTabs formats={linkTarget} onCopy={(url) => { navigator.clipboard.writeText(url); message.success('已复制'); }} />}
+          {linkTarget && <LinkTabs formats={linkTarget} />}
         </Modal>
-      </Card>
+      </AppCard>
     );
   }
 
@@ -388,20 +498,25 @@ export default function SubscriptionsPage() {
   const subs = ownerData ?? [];
 
   return (
-    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+    <AppCard>
       <PageHeader
         title="订阅管理"
         addLabel="新增订阅"
         onAdd={() => setCreateOpen(true)}
       />
 
-      {isLoading ? null : subs.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无订阅" style={{ padding: '32px 0' }} />
+      {subs.length === 0 ? (
+        <EmptyState
+          title="还没有订阅"
+          description="创建订阅后可将一组节点打包成一个订阅链接，导入客户端即可使用"
+          actionLabel="新增订阅"
+          onAction={() => setCreateOpen(true)}
+        />
       ) : (
         <Collapse
           defaultActiveKey={subs.map((s) => s.id)}
           items={buildCollapseItems(subs, { readonly: false })}
-          style={{ background: 'transparent' }}
+          style={collapseStyle}
         />
       )}
 
@@ -445,9 +560,9 @@ export default function SubscriptionsPage() {
 
       {/* Export links modal */}
       <Modal open={!!linkTarget} footer={null} onCancel={() => setLinkTarget(null)} title="订阅链接" width={560} style={{ maxWidth: '95vw' }}>
-        {linkTarget && <LinkTabs formats={linkTarget} onCopy={(url) => { navigator.clipboard.writeText(url); message.success('已复制'); }} />}
+        {linkTarget && <LinkTabs formats={linkTarget} />}
       </Modal>
-    </Card>
+    </AppCard>
   );
 }
 
@@ -457,9 +572,22 @@ const FORMAT_DESCRIPTIONS: Record<string, string> = {
   homeproxy: '适合 OpenWrt 路由器上的 HomeProxy 插件，包含完整分流规则（广告屏蔽、AI 服务、流媒体、国内直连）',
 };
 
-function LinkTabs({ formats, onCopy }: { formats: SubFormat[]; onCopy: (url: string) => void }) {
+function LinkTabs({ formats }: { formats: SubFormat[] }) {
   const { isMobile } = useIsMobile();
   const [showQr, setShowQr] = useState(isMobile);
+
+  const qrToggle = (value: string) => (
+    <div style={{ textAlign: 'center' }}>
+      <Button type="link" size="small" onClick={() => setShowQr((v) => !v)}>
+        {showQr ? '收起二维码' : '显示二维码'}
+      </Button>
+      {showQr && (
+        <div style={{ marginTop: 8 }}>
+          <QrCard value={value} />
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <Tabs
@@ -473,40 +601,10 @@ function LinkTabs({ formats, onCopy }: { formats: SubFormat[]; onCopy: (url: str
               推荐使用 Hiddify 客户端，全平台免费开源。支持 iOS / Android / Windows / macOS / Linux。
             </Typography.Text>
             <div style={{ textAlign: 'center' }}>
-              <a href={f.url}>
-                <Button type="primary" size="large" style={{ background: '#52c41a', borderColor: '#52c41a', fontWeight: 500, padding: '0 32px' }}>
-                  一键导入 Hiddify
-                </Button>
-              </a>
+              <HiddifyImportButton url={f.url} />
             </div>
-            {f.extra && (
-              <div>
-                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-                  订阅链接（手动添加时复制此链接）
-                </Typography.Text>
-                <Space.Compact style={{ width: '100%' }}>
-                  <Input value={f.extra} readOnly />
-                  <Button onClick={() => onCopy(f.extra!)}>复制</Button>
-                </Space.Compact>
-              </div>
-            )}
-            {isMobile && f.extra && (
-              <div style={{ display: 'flex', justifyContent: 'center' }}>
-                <QRCode value={f.extra} size={160} />
-              </div>
-            )}
-            {!isMobile && f.extra && (
-              <div style={{ textAlign: 'center' }}>
-                <Button type="link" size="small" onClick={() => setShowQr((v) => !v)}>
-                  {showQr ? '收起二维码' : '显示二维码'}
-                </Button>
-                {showQr && (
-                  <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
-                    <QRCode value={f.extra} size={200} />
-                  </div>
-                )}
-              </div>
-            )}
+            {f.extra && <LinkBlock url={f.extra} label="订阅链接（手动添加时复制此链接）" />}
+            {f.extra && (isMobile ? <QrCard value={f.extra} size={160} /> : qrToggle(f.extra))}
             <div style={{ textAlign: 'center' }}>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 下载 Hiddify：<Typography.Link href="https://hiddify.com" target="_blank">hiddify.com</Typography.Link>
@@ -514,7 +612,7 @@ function LinkTabs({ formats, onCopy }: { formats: SubFormat[]; onCopy: (url: str
             </div>
           </Space>
         ) : f.key === 'homeproxy' ? (
-          <HomeProxyTab url={f.url} onCopy={onCopy} />
+          <HomeProxyTab url={f.url} />
         ) : (
           <Space direction="vertical" style={{ width: '100%' }} size={16}>
             {FORMAT_DESCRIPTIONS[f.key] && (
@@ -522,27 +620,8 @@ function LinkTabs({ formats, onCopy }: { formats: SubFormat[]; onCopy: (url: str
                 {FORMAT_DESCRIPTIONS[f.key]}
               </Typography.Text>
             )}
-            <Space.Compact style={{ width: '100%' }}>
-              <Input value={f.url} readOnly />
-              <Button onClick={() => onCopy(f.url)}>复制</Button>
-            </Space.Compact>
-            {isMobile && (
-              <div style={{ display: 'flex', justifyContent: 'center' }}>
-                <QRCode value={f.url} size={160} />
-              </div>
-            )}
-            {!isMobile && (
-              <div style={{ textAlign: 'center' }}>
-                <Button type="link" size="small" onClick={() => setShowQr((v) => !v)}>
-                  {showQr ? '收起二维码' : '显示二维码'}
-                </Button>
-                {showQr && (
-                  <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
-                    <QRCode value={f.url} size={200} />
-                  </div>
-                )}
-              </div>
-            )}
+            <LinkBlock url={f.url} label="订阅链接" />
+            {isMobile ? <QrCard value={f.url} size={160} /> : qrToggle(f.url)}
           </Space>
         ),
       }))}
@@ -560,21 +639,23 @@ const HOMEPROXY_STEPS = [
   '按插件内向导完成 HomeProxy 初次配置（透明代理模式、LAN 接口等）',
 ];
 
-function HomeProxyTab({ url, onCopy }: { url: string; onCopy: (url: string) => void }) {
+function HomeProxyTab({ url }: { url: string }) {
+  const { token } = antdTheme.useToken();
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size={20}>
+    <Space direction="vertical" style={{ width: '100%' }} size={16}>
       <Typography.Text type="secondary" style={{ fontSize: 13 }}>
         {FORMAT_DESCRIPTIONS['homeproxy']}
       </Typography.Text>
 
       {/* Download plugin */}
       <div>
-        <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+        <Typography.Text strong style={{ display: 'block', marginBottom: 8, fontSize: 13 }}>
           第一步：下载路由器插件
         </Typography.Text>
-        <Space wrap>
+        <Space wrap align="center">
           <Button
             type="primary"
+            icon={<DownloadOutlined />}
             href={HOMEPROXY_PLUGIN_URL}
             target="_blank"
           >
@@ -588,35 +669,56 @@ function HomeProxyTab({ url, onCopy }: { url: string; onCopy: (url: string) => v
 
       {/* Config URL */}
       <div>
-        <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+        <Typography.Text strong style={{ display: 'block', marginBottom: 8, fontSize: 13 }}>
           第二步：在插件中填入配置 URL
         </Typography.Text>
-        <Space.Compact style={{ width: '100%' }}>
-          <Input value={url} readOnly />
-          <Button onClick={() => onCopy(url)}>复制</Button>
-        </Space.Compact>
-        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+        <LinkBlock url={url} />
+        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
           包含完整分流规则，插件将自动定期拉取最新节点和规则
         </Typography.Text>
       </div>
 
       {/* Setup guide */}
       <div>
-        <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+        <Typography.Text strong style={{ display: 'block', marginBottom: 10, fontSize: 13 }}>
           安装步骤
         </Typography.Text>
-        <ol style={{ paddingLeft: 20, margin: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {HOMEPROXY_STEPS.map((step, i) => (
-            <li key={i} style={{ marginBottom: 6, fontSize: 13, color: 'rgba(0,0,0,0.65)' }}>
-              {step}
-            </li>
+            <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <span
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: '50%',
+                  background: token.colorPrimary,
+                  color: token.colorTextLightSolid,
+                  fontSize: 12,
+                  lineHeight: '20px',
+                  textAlign: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                {i + 1}
+              </span>
+              <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                {step}
+              </Typography.Text>
+            </div>
           ))}
-        </ol>
+        </div>
       </div>
 
       {/* Routing rules info */}
-      <div style={{ background: '#f5f5f5', borderRadius: 8, padding: '12px 16px' }}>
-        <Typography.Text strong style={{ fontSize: 13, display: 'block', marginBottom: 6 }}>
+      <div
+        style={{
+          background: token.colorFillQuaternary,
+          border: `1px solid ${token.colorBorderSecondary}`,
+          borderRadius: token.borderRadiusLG,
+          padding: '12px 16px',
+        }}
+      >
+        <Typography.Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>
           内置分流规则
         </Typography.Text>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -627,7 +729,7 @@ function HomeProxyTab({ url, onCopy }: { url: string; onCopy: (url: string) => v
             { label: '🇨🇳 国内直连', color: 'green' },
             { label: '🌐 其余走代理', color: 'default' },
           ].map((tag) => (
-            <Tag key={tag.label} color={tag.color}>{tag.label}</Tag>
+            <Tag key={tag.label} color={tag.color} style={{ margin: 0 }}>{tag.label}</Tag>
           ))}
         </div>
         <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>

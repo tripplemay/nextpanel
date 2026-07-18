@@ -1,7 +1,8 @@
 import type { Node, Server } from '@/types/api';
+import type { ResolvedTheme } from '@/theme/tokens';
 import type { ChainTopologyEdge, ServerTopologyNode } from './types';
 
-const EDGE_PALETTE = [
+const EDGE_PALETTE_LIGHT = [
   '#2563eb',
   '#f97316',
   '#16a34a',
@@ -14,12 +15,27 @@ const EDGE_PALETTE = [
   '#9333ea',
 ];
 
-export function stableNodeColor(id: string): string {
+/** 暗色链路色板：与亮色同序，整体提亮以保证在 #0d1117 画布上的对比度 */
+const EDGE_PALETTE_DARK = [
+  '#58a6ff',
+  '#ffa657',
+  '#3fb950',
+  '#f85149',
+  '#a371f7',
+  '#39c5cf',
+  '#f778ba',
+  '#e3b341',
+  '#2dd4bf',
+  '#d2a8ff',
+];
+
+export function stableNodeColor(id: string, theme: ResolvedTheme = 'light'): string {
   let hash = 0;
   for (let i = 0; i < id.length; i += 1) {
     hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
   }
-  return EDGE_PALETTE[hash % EDGE_PALETTE.length];
+  const palette = theme === 'dark' ? EDGE_PALETTE_DARK : EDGE_PALETTE_LIGHT;
+  return palette[hash % palette.length];
 }
 
 export function formatBytes(bytes: number, hasStats: boolean): string {
@@ -41,7 +57,7 @@ export function formatTimeAgo(isoString: string | null): string {
   return `${Math.floor(hours / 24)}天前`;
 }
 
-export function buildTopology(servers: Server[], nodes: Node[]) {
+export function buildTopology(servers: Server[], nodes: Node[], theme: ResolvedTheme = 'light') {
   const serversById = new Map(servers.map((server) => [server.id, server]));
   const directByServer = new Map<string, Node[]>();
   const chainByEntryServer = new Map<string, Node[]>();
@@ -107,7 +123,7 @@ export function buildTopology(servers: Server[], nodes: Node[]) {
         entryServer,
         exitServer,
         chainNodes,
-        colors: chainNodes.map((node) => stableNodeColor(node.id)),
+        colors: chainNodes.map((node) => stableNodeColor(node.id, theme)),
       },
     }];
   });

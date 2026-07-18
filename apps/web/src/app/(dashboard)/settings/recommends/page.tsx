@@ -4,7 +4,6 @@ import { useMemo, useState } from 'react';
 import {
   App,
   Button,
-  Card,
   Collapse,
   Empty,
   Form,
@@ -14,7 +13,6 @@ import {
   Popconfirm,
   Select,
   Space,
-  Spin,
   Table,
   Tag,
   Typography,
@@ -24,6 +22,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { recommendsApi } from '@/lib/api';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import PageHeader from '@/components/common/PageHeader';
+import AppCard from '@/components/common/AppCard';
+import { TableSkeleton } from '@/components/common/skeletons';
+import EmptyState from '@/components/common/EmptyState';
 import type { ServerRecommendCategory, ServerRecommend } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
@@ -55,10 +56,11 @@ export default function RecommendsManagePage() {
   // Track collapsed IDs (all expanded by default)
   const [collapsedIds, setCollapsedIds] = useState<string[]>([]);
 
-  const { data: categories = [], isLoading } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['recommends'],
     queryFn: () => recommendsApi.list().then((r) => r.data),
   });
+  const categories = data ?? [];
 
   const activeKeys = useMemo(
     () => categories.map((c) => c.id).filter((id) => !collapsedIds.includes(id)),
@@ -310,7 +312,7 @@ export default function RecommendsManagePage() {
   });
 
   return (
-    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+    <AppCard>
       <PageHeader title="服务器推荐管理" />
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12 }}>
@@ -322,21 +324,26 @@ export default function RecommendsManagePage() {
         </Button>
       </div>
 
-      <Spin spinning={isLoading}>
-        {!isLoading && categories.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无分类" style={{ padding: '32px 0' }} />
-        ) : (
-          <Collapse
-            activeKey={activeKeys}
-            onChange={(keys) => {
-              const activeSet = new Set(Array.isArray(keys) ? keys : [keys]);
-              setCollapsedIds(categories.map((c) => c.id).filter((id) => !activeSet.has(id)));
-            }}
-            items={collapseItems}
-            style={{ background: 'transparent' }}
-          />
-        )}
-      </Spin>
+      {isLoading && !data ? (
+        <TableSkeleton />
+      ) : categories.length === 0 ? (
+        <EmptyState
+          title="暂无分类"
+          description="创建分类后即可添加服务商推荐"
+          actionLabel="新增分类"
+          onAction={openAddCat}
+        />
+      ) : (
+        <Collapse
+          activeKey={activeKeys}
+          onChange={(keys) => {
+            const activeSet = new Set(Array.isArray(keys) ? keys : [keys]);
+            setCollapsedIds(categories.map((c) => c.id).filter((id) => !activeSet.has(id)));
+          }}
+          items={collapseItems}
+          style={{ background: 'transparent' }}
+        />
+      )}
 
       {/* ── Category Modal ── */}
       <Modal
@@ -425,6 +432,6 @@ export default function RecommendsManagePage() {
           </Form.Item>
         </Form>
       </Modal>
-    </Card>
+    </AppCard>
   );
 }

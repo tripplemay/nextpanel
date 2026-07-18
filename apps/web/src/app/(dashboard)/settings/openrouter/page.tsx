@@ -6,6 +6,7 @@ import { CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, ApiOutlined }
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { openRouterApi } from '@/lib/api';
 import PageHeader from '@/components/common/PageHeader';
+import AppCard from '@/components/common/AppCard';
 import type { UpsertOpenRouterSettingDto } from '@/types/api';
 
 const { Text } = Typography;
@@ -123,112 +124,114 @@ export default function OpenRouterSettingsPage() {
   }));
 
   return (
-    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+    <AppCard>
       <PageHeader title="OpenRouter" />
 
-      {/* 配置状态 */}
-      <div style={{ marginBottom: 16 }}>
-        {setting ? (
-          <Space>
-            <Tag color="green" icon={<CheckCircleOutlined />}>已配置</Tag>
-            <Text type="secondary">当前模型：{setting.model}</Text>
-          </Space>
-        ) : (
-          <Tag color="default">未配置</Tag>
-        )}
-        {testResult && (
-          <Tag
-            color={testResult.success ? 'green' : 'red'}
-            icon={testResult.success ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
-            style={{ marginLeft: 8 }}
-          >
-            {testResult.message}
-          </Tag>
-        )}
-      </div>
-
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginBottom: 24 }}
-        message="配置说明"
-        description={
-          <div>
-            <div>OpenRouter 用于服务器推荐功能中的 AI 自动识别。</div>
-            <div>配置 API Key 后，添加服务商时可通过 URL 自动提取名称、价格和地区信息。</div>
-            <div style={{ marginTop: 8 }}>
-              <Text type="secondary">
-                前往{' '}
-                <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">
-                  openrouter.ai/keys
-                </a>{' '}
-                获取 API Key
-              </Text>
-            </div>
-          </div>
-        }
-      />
-
-      <Form form={form} layout="vertical" style={{ maxWidth: 560 }}>
-        <Form.Item
-          name="apiKey"
-          label="API Key"
-          rules={setting ? [] : [{ required: true, message: '请输入 API Key' }]}
-          extra={setting ? '留空保持不变' : ''}
-        >
-          <Input.Password placeholder="sk-or-..." />
-        </Form.Item>
-
-        <Form.Item
-          name="model"
-          label="模型"
-          initialValue="anthropic/claude-sonnet-4"
-        >
-          {setting && models ? (
-            <Select
-              showSearch
-              placeholder="选择模型"
-              loading={modelsLoading}
-              options={modelOptions}
-              filterOption={(input, option) => {
-                const text = (option?.searchText as string) ?? '';
-                return text.toLowerCase().includes(input.toLowerCase());
-              }}
-              optionLabelProp="value"
-              style={{ width: '100%' }}
-            />
+      <Card size="small" style={{ maxWidth: 640 }}>
+        {/* 配置状态 */}
+        <div style={{ marginBottom: 16 }}>
+          {setting ? (
+            <Space>
+              <Tag color="green" icon={<CheckCircleOutlined />}>已配置</Tag>
+              <Text type="secondary">当前模型：{setting.model}</Text>
+            </Space>
           ) : (
-            <Input placeholder="anthropic/claude-sonnet-4（保存 API Key 后可选择模型）" />
+            <Tag color="default">未配置</Tag>
           )}
-        </Form.Item>
+          {testResult && (
+            <Tag
+              color={testResult.success ? 'green' : 'red'}
+              icon={testResult.success ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
+              style={{ marginLeft: 8 }}
+            >
+              {testResult.message}
+            </Tag>
+          )}
+        </div>
 
-        <Form.Item>
-          <Space wrap>
-            <Button type="primary" onClick={handleSave} loading={saveMutation.isPending}>
-              保存
-            </Button>
-            {setting && (
-              <>
-                <Button
-                  icon={<ApiOutlined />}
-                  onClick={handleTest}
-                  loading={testing}
-                >
-                  测试连接
-                </Button>
-                <Button
-                  danger
-                  icon={<DeleteOutlined />}
-                  onClick={handleRemove}
-                  loading={removeMutation.isPending}
-                >
-                  删除配置
-                </Button>
-              </>
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 24 }}
+          message="配置说明"
+          description={
+            <div>
+              <div>OpenRouter 用于服务器推荐功能中的 AI 自动识别。</div>
+              <div>配置 API Key 后，添加服务商时可通过 URL 自动提取名称、价格和地区信息。</div>
+              <div style={{ marginTop: 8 }}>
+                <Text type="secondary">
+                  前往{' '}
+                  <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">
+                    openrouter.ai/keys
+                  </a>{' '}
+                  获取 API Key
+                </Text>
+              </div>
+            </div>
+          }
+        />
+
+        <Form form={form} layout="vertical" style={{ maxWidth: 560 }}>
+          <Form.Item
+            name="apiKey"
+            label="API Key"
+            rules={setting ? [] : [{ required: true, message: '请输入 API Key' }]}
+            extra={setting ? '留空保持不变' : ''}
+          >
+            <Input.Password placeholder="sk-or-..." />
+          </Form.Item>
+
+          <Form.Item
+            name="model"
+            label="模型"
+            initialValue="anthropic/claude-sonnet-4"
+          >
+            {setting && models ? (
+              <Select
+                showSearch
+                placeholder="选择模型"
+                loading={modelsLoading}
+                options={modelOptions}
+                filterOption={(input, option) => {
+                  const text = (option?.searchText as string) ?? '';
+                  return text.toLowerCase().includes(input.toLowerCase());
+                }}
+                optionLabelProp="value"
+                style={{ width: '100%' }}
+              />
+            ) : (
+              <Input placeholder="anthropic/claude-sonnet-4（保存 API Key 后可选择模型）" />
             )}
-          </Space>
-        </Form.Item>
-      </Form>
-    </Card>
+          </Form.Item>
+
+          <Form.Item>
+            <Space wrap>
+              <Button type="primary" onClick={handleSave} loading={saveMutation.isPending}>
+                保存
+              </Button>
+              {setting && (
+                <>
+                  <Button
+                    icon={<ApiOutlined />}
+                    onClick={handleTest}
+                    loading={testing}
+                  >
+                    测试连接
+                  </Button>
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={handleRemove}
+                    loading={removeMutation.isPending}
+                  >
+                    删除配置
+                  </Button>
+                </>
+              )}
+            </Space>
+          </Form.Item>
+        </Form>
+      </Card>
+    </AppCard>
   );
 }

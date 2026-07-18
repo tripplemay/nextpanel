@@ -1,25 +1,24 @@
 'use client';
 
 import { useMemo, useRef, useState, useEffect } from 'react';
-import dayjs from 'dayjs';
-import relativeTime from 'dayjs/plugin/relativeTime';
-import 'dayjs/locale/zh-cn';
+import dayjs from '@/lib/dayjs';
 import {
   App,
   Button,
   Table,
   Tag,
   Space,
-  Card,
   Tooltip,
   Popover,
   Dropdown,
   Input,
   Select,
+  Segmented,
   Typography,
   Row,
   Col,
   Alert,
+  theme,
 } from 'antd';
 import {
   AppstoreOutlined,
@@ -44,12 +43,13 @@ import ServerCard from '@/components/servers/ServerCard';
 import ServerTagList from '@/components/servers/ServerTagList';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
+import AppCard from '@/components/common/AppCard';
+import EmptyState from '@/components/common/EmptyState';
+import { TableSkeleton, CardGridSkeleton } from '@/components/common/skeletons';
+import { statusColors, usageColor, pingColor, heartbeatColor } from '@/theme/semantic';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import type { Server } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
-
-dayjs.extend(relativeTime);
-dayjs.locale('zh-cn');
 
 const { Text } = Typography;
 
@@ -61,15 +61,10 @@ function formatRate(bytes: number | null | undefined): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB/s`;
 }
 
-function usageColor(pct: number | null | undefined): string {
-  if (pct == null) return '#1677ff';
-  if (pct < 70) return '#52c41a';
-  if (pct < 90) return '#faad14';
-  return '#ff4d4f';
-}
-
 function GfwDot({ gfwBlocked }: { gfwBlocked: boolean | null }) {
-  const color = gfwBlocked === false ? '#52c41a' : gfwBlocked === true ? '#ff4d4f' : '#d9d9d9';
+  const { token } = theme.useToken();
+  const color =
+    gfwBlocked === false ? statusColors.success : gfwBlocked === true ? statusColors.error : token.colorBorder;
   const label = gfwBlocked === false ? '未被封锁' : gfwBlocked === true ? '已被封锁' : 'GFW 未检测';
   return (
     <Tooltip title={label}>
@@ -78,16 +73,9 @@ function GfwDot({ gfwBlocked }: { gfwBlocked: boolean | null }) {
   );
 }
 
-function heartbeatColor(lastSeenAt: string | null): string {
-  if (!lastSeenAt) return '#8c8c8c';
-  const diffMin = dayjs().diff(dayjs(lastSeenAt), 'minute');
-  if (diffMin <= 5) return '#52c41a';
-  if (diffMin <= 30) return '#faad14';
-  return '#ff4d4f';
-}
-
 export default function ServersPage() {
   const { message, modal } = App.useApp();
+  const { token } = theme.useToken();
   const qc = useQueryClient();
   const router = useRouter();
   const { isMobile } = useIsMobile();
@@ -124,7 +112,7 @@ export default function ServersPage() {
   const [tagsFilter, setTagsFilter] = useState<string[]>([]);
   const [regionFilter, setRegionFilter] = useState<string | undefined>(undefined);
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['servers'],
     queryFn: () => serversApi.list().then((r) => r.data as Server[]),
     refetchInterval: 30_000,
@@ -207,6 +195,11 @@ export default function ServersPage() {
     onSettled: () => setTestingSshId(null),
   });
 
+  const handleAddServer = () => {
+    setEditTarget(null);
+    setModalOpen(true);
+  };
+
   const handleDelete = (record: Server) =>
     modal.confirm({
       title: '确认删除该服务器？',
@@ -227,7 +220,7 @@ export default function ServersPage() {
           <p>以下节点的服务未能从服务器上清理，仍可能在后台运行：</p>
           <ul style={{ paddingLeft: 16, margin: '8px 0' }}>
             {failures.map((f) => (
-              <li key={f.nodeName} style={{ fontSize: 12, color: '#ff4d4f' }}>
+              <li key={f.nodeName} style={{ fontSize: 12, color: statusColors.error }}>
                 <strong>{f.nodeName}</strong>：{f.error}
               </li>
             ))}
@@ -304,6 +297,8 @@ export default function ServersPage() {
     });
   }, [data, searchText, statusFilter, tagsFilter, regionFilter]);
 
+  const hasActiveFilter = Boolean(searchText || statusFilter || tagsFilter.length > 0 || regionFilter);
+
   const upgradableIds = useMemo(() => {
     if (!data || !latestAgent?.version) return [];
     return data
@@ -341,12 +336,12 @@ export default function ServersPage() {
             </Tooltip>
             {record.notes && (
               <Tooltip title={record.notes}>
-                <FileTextOutlined style={{ color: '#8c8c8c', fontSize: 12, flexShrink: 0 }} />
+                <FileTextOutlined style={{ color: token.colorTextTertiary, fontSize: 12, flexShrink: 0 }} />
               </Tooltip>
             )}
           </Space>
           <Space size={4}>
-            <small style={{ color: '#888' }}>{record.ip}</small>
+            <small style={{ color: token.colorTextTertiary }}>{record.ip}</small>
             <GfwDot gfwBlocked={record.ipCheck?.gfwBlocked ?? null} />
           </Space>
         </Space>
@@ -379,7 +374,7 @@ export default function ServersPage() {
               const val = record[key];
               return (
                 <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Text style={{ fontSize: 11, color: '#8c8c8c', width: 24, flexShrink: 0 }}>{labels[key]}</Text>
+                  <Text style={{ fontSize: 11, color: token.colorTextTertiary, width: 24, flexShrink: 0 }}>{labels[key]}</Text>
                   <Text style={{ fontSize: 12, fontWeight: 500, color: usageColor(val) }}>
                     {val != null ? `${Math.round(val)}%` : '—'}
                   </Text>
@@ -388,15 +383,15 @@ export default function ServersPage() {
             })}
           </Space>
         ) : (
-          <span style={{ color: '#ccc' }}>—</span>
+          <span style={{ color: token.colorTextQuaternary }}>—</span>
         ),
     },
     {
       title: '网络',
       render: (_: unknown, record) => (
         <Space direction="vertical" size={0} style={{ fontSize: 12 }}>
-          <span style={{ color: '#52c41a' }}>↑ {formatRate(record.networkOut)}</span>
-          <span style={{ color: '#1677ff' }}>↓ {formatRate(record.networkIn)}</span>
+          <span style={{ color: statusColors.success }}>↑ {formatRate(record.networkOut)}</span>
+          <span style={{ color: token.colorPrimary }}>↓ {formatRate(record.networkIn)}</span>
         </Space>
       ),
     },
@@ -404,9 +399,8 @@ export default function ServersPage() {
       title: '延迟',
       render: (_: unknown, record) => {
         const ms = record.pingMs;
-        if (ms == null) return <span style={{ color: '#ccc' }}>—</span>;
-        const color = ms <= 50 ? '#52c41a' : ms <= 150 ? '#faad14' : '#ff4d4f';
-        return <span style={{ color, fontWeight: 500 }}>{ms} ms</span>;
+        if (ms == null) return <span style={{ color: token.colorTextQuaternary }}>—</span>;
+        return <span style={{ color: pingColor(ms), fontWeight: 500 }}>{ms} ms</span>;
       },
     },
     {
@@ -430,7 +424,7 @@ export default function ServersPage() {
       title: 'Agent',
       width: 120,
       render: (_: unknown, record) => {
-        if (!record.agentVersion) return <span style={{ color: '#ccc' }}>—</span>;
+        if (!record.agentVersion) return <span style={{ color: token.colorTextQuaternary }}>—</span>;
 
         const isOutdated = latestAgent?.version && record.agentVersion !== latestAgent.version;
         const isPending = record.pendingAgentUpdate;
@@ -438,15 +432,15 @@ export default function ServersPage() {
         if (isPending) {
           return (
             <Space size={4}>
-              <SyncOutlined spin style={{ color: '#1677ff', fontSize: 12 }} />
-              <span style={{ fontSize: 12, color: '#1677ff' }}>更新中...</span>
+              <SyncOutlined spin style={{ color: token.colorPrimary, fontSize: 12 }} />
+              <span style={{ fontSize: 12, color: token.colorPrimary }}>更新中...</span>
             </Space>
           );
         }
 
         return (
           <Space size={4}>
-            <span style={{ fontSize: 12, color: isOutdated ? '#faad14' : '#8c8c8c' }}>
+            <span style={{ fontSize: 12, color: isOutdated ? statusColors.warning : token.colorTextTertiary }}>
               v{record.agentVersion}
             </span>
             {isOutdated && latestAgent && (
@@ -455,7 +449,7 @@ export default function ServersPage() {
                   type="link"
                   size="small"
                   icon={<UpCircleOutlined />}
-                  style={{ padding: 0, height: 'auto', fontSize: 12, color: '#1677ff' }}
+                  style={{ padding: 0, height: 'auto', fontSize: 12 }}
                   loading={upgradingIds.has(record.id)}
                   onClick={() => {
                     setUpgradingIds((prev) => new Set([...prev, record.id]));
@@ -523,173 +517,195 @@ export default function ServersPage() {
     },
   ];
 
-  const viewToggle = (
-    <Space>
-      <Button
-        size="small"
-        type={viewMode === 'table' ? 'primary' : 'default'}
-        icon={<BarsOutlined />}
-        onClick={() => switchView('table')}
-      />
-      <Button
-        size="small"
-        type={viewMode === 'card' ? 'primary' : 'default'}
-        icon={<AppstoreOutlined />}
-        onClick={() => switchView('card')}
-      />
-    </Space>
-  );
-
   return (
-    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+    <>
       <PageHeader
         title="服务器管理"
         addLabel="新增服务器"
-        onAdd={() => { setEditTarget(null); setModalOpen(true); }}
-        extra={viewToggle}
+        onAdd={handleAddServer}
       />
 
-      {/* 搜索与筛选栏 */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-        <Input.Search
-          placeholder="搜索名称或 IP"
-          allowClear
-          style={{ width: isMobile ? '100%' : 200 }}
-          onChange={(e) => {
-            const value = e.target.value;
-            if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-            searchTimerRef.current = setTimeout(() => setSearchText(value), 300);
-          }}
-        />
-        <Select
-          placeholder="状态"
-          allowClear
-          style={{ width: isMobile ? 'calc(50% - 4px)' : 120 }}
-          onChange={(v) => setStatusFilter(v)}
-          options={[
-            { value: 'ONLINE', label: '在线' },
-            { value: 'OFFLINE', label: '离线' },
-            { value: 'UNKNOWN', label: '未知' },
-            { value: 'ERROR', label: '异常' },
-          ]}
-        />
-        <Select
-          mode="multiple"
-          placeholder="标签筛选"
-          allowClear
-          style={{ width: isMobile ? '100%' : 150, minWidth: isMobile ? undefined : 150 }}
-          onChange={(v) => setTagsFilter(v)}
-          options={allTags.map((t) => ({ value: t, label: t }))}
-        />
-        <Select
-          placeholder="区域"
-          allowClear
-          style={{ width: isMobile ? 'calc(50% - 4px)' : 120 }}
-          onChange={(v) => setRegionFilter(v)}
-          options={allRegions.map((r) => ({ value: r, label: r }))}
-        />
-      </div>
+      {/* 首次加载骨架屏；30s 轮询为后台静默刷新，不再闪烁骨架 */}
+      {isLoading ? (
+        viewMode === 'card' ? <CardGridSkeleton /> : <TableSkeleton />
+      ) : (
+        <AppCard>
+          {/* 筛选工具条：搜索 + 筛选器一组，视图切换靠右；移动端自动换行 */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+            <Input.Search
+              placeholder="搜索名称或 IP"
+              allowClear
+              style={{ width: isMobile ? '100%' : 200 }}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+                searchTimerRef.current = setTimeout(() => setSearchText(value), 300);
+              }}
+            />
+            <Select
+              placeholder="状态"
+              allowClear
+              style={{ width: isMobile ? 'calc(50% - 4px)' : 120 }}
+              onChange={(v) => setStatusFilter(v)}
+              options={[
+                { value: 'ONLINE', label: '在线' },
+                { value: 'OFFLINE', label: '离线' },
+                { value: 'UNKNOWN', label: '未知' },
+                { value: 'ERROR', label: '异常' },
+              ]}
+            />
+            <Select
+              mode="multiple"
+              placeholder="标签筛选"
+              allowClear
+              style={{ width: isMobile ? '100%' : 150, minWidth: isMobile ? undefined : 150 }}
+              onChange={(v) => setTagsFilter(v)}
+              options={allTags.map((t) => ({ value: t, label: t }))}
+            />
+            <Select
+              placeholder="区域"
+              allowClear
+              style={{ width: isMobile ? 'calc(50% - 4px)' : 120 }}
+              onChange={(v) => setRegionFilter(v)}
+              options={allRegions.map((r) => ({ value: r, label: r }))}
+            />
+            <Segmented
+              value={viewMode}
+              onChange={(v) => switchView(v as 'table' | 'card')}
+              style={{ marginLeft: isMobile ? 0 : 'auto' }}
+              options={[
+                {
+                  value: 'table',
+                  icon: (
+                    <Tooltip title="表格视图">
+                      <BarsOutlined />
+                    </Tooltip>
+                  ),
+                },
+                {
+                  value: 'card',
+                  icon: (
+                    <Tooltip title="卡片视图">
+                      <AppstoreOutlined />
+                    </Tooltip>
+                  ),
+                },
+              ]}
+            />
+          </div>
 
-      {/* 批量操作栏 */}
-      {selectedRowKeys.length > 0 && (
-        <Alert
-          style={{ marginBottom: 12 }}
-          message={
-            <Space>
-              <span>已选 {selectedRowKeys.length} 台服务器</span>
-              <Button
-                size="small"
-                icon={<CheckCircleOutlined />}
-                loading={bulkTestingIds.size > 0}
-                onClick={handleBulkTestSsh}
-              >
-                批量测试 SSH
-              </Button>
-              <Button
-                size="small"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={handleBulkDelete}
-              >
-                批量删除
-              </Button>
-              <Button size="small" onClick={() => setSelectedRowKeys([])}>取消选择</Button>
-            </Space>
-          }
-          type="info"
-          showIcon={false}
-        />
-      )}
+          {/* 批量操作栏 */}
+          {selectedRowKeys.length > 0 && (
+            <Alert
+              style={{ marginBottom: 16 }}
+              message={
+                <Space wrap size={[8, 8]}>
+                  <span>已选 {selectedRowKeys.length} 台服务器</span>
+                  <Button
+                    size="small"
+                    icon={<CheckCircleOutlined />}
+                    loading={bulkTestingIds.size > 0}
+                    onClick={handleBulkTestSsh}
+                  >
+                    批量测试 SSH
+                  </Button>
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={handleBulkDelete}
+                  >
+                    批量删除
+                  </Button>
+                  <Button size="small" onClick={() => setSelectedRowKeys([])}>取消选择</Button>
+                </Space>
+              }
+              type="info"
+              showIcon={false}
+            />
+          )}
 
-      {/* Agent 可升级提示 */}
-      {upgradableIds.length > 0 && (
-        <Alert
-          style={{ marginBottom: 12 }}
-          message={
-            <Space>
-              <span>
-                <UpCircleOutlined style={{ color: '#faad14' }} /> {upgradableIds.length} 台服务器的 Agent 可升级到 v{latestAgent?.version}
-              </span>
-              <Popover
-                title={`v${latestAgent?.version} 更新内容`}
-                content={
-                  <div style={{ maxWidth: 360, whiteSpace: 'pre-wrap', fontSize: 12 }}>
-                    {latestAgent?.releaseNotes || '暂无更新说明'}
-                  </div>
-                }
-                trigger="click"
-              >
-                <Button size="small" icon={<InfoCircleOutlined />}>查看更新内容</Button>
-              </Popover>
-              <Button
-                size="small"
-                icon={<SyncOutlined />}
-                loading={agentUpdateBatchMutation.isPending}
-                onClick={handleBulkAgentUpdate}
-              >
-                一键升级全部
-              </Button>
-            </Space>
-          }
-          type="warning"
-          showIcon={false}
-        />
-      )}
+          {/* Agent 可升级提示 */}
+          {upgradableIds.length > 0 && (
+            <Alert
+              style={{ marginBottom: 16 }}
+              message={
+                <Space wrap size={[8, 8]}>
+                  <span>
+                    <UpCircleOutlined style={{ color: statusColors.warning }} /> {upgradableIds.length} 台服务器的 Agent 可升级到 v{latestAgent?.version}
+                  </span>
+                  <Popover
+                    title={`v${latestAgent?.version} 更新内容`}
+                    content={
+                      <div style={{ maxWidth: 360, whiteSpace: 'pre-wrap', fontSize: 12 }}>
+                        {latestAgent?.releaseNotes || '暂无更新说明'}
+                      </div>
+                    }
+                    trigger="click"
+                  >
+                    <Button size="small" icon={<InfoCircleOutlined />}>查看更新内容</Button>
+                  </Popover>
+                  <Button
+                    size="small"
+                    icon={<SyncOutlined />}
+                    loading={agentUpdateBatchMutation.isPending}
+                    onClick={handleBulkAgentUpdate}
+                  >
+                    一键升级全部
+                  </Button>
+                </Space>
+              }
+              type="warning"
+              showIcon={false}
+            />
+          )}
 
-      {/* 表格视图 */}
-      {viewMode === 'table' && (
-        <Table
-          rowKey="id"
-          size="middle"
-          loading={isLoading}
-          dataSource={filteredData}
-          columns={columns}
-          scroll={{ x: 'max-content' }}
-          rowSelection={{
-            selectedRowKeys,
-            onChange: (keys) => setSelectedRowKeys(keys as string[]),
-          }}
-          pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
-        />
-      )}
-
-      {/* 卡片视图 */}
-      {viewMode === 'card' && (
-        <Row gutter={[16, 16]}>
-          {filteredData.map((server) => (
-            <Col key={server.id} xs={24} sm={12} lg={8} xl={6}>
-              <ServerCard
-                server={server}
-                testingSsh={testingSshId === server.id || bulkTestingIds.has(server.id)}
-                onEdit={handleEdit}
-                onInstall={setInstallTarget}
-                onDelete={handleDelete}
-                onForceDelete={handleForceDelete}
-                onTestSsh={(s) => testSshMutation.mutate(s.id)}
-              />
-            </Col>
-          ))}
-        </Row>
+          {/* 内容区：错误 / 空状态 / 表格 / 卡片 */}
+          {isError ? (
+            <EmptyState
+              title="加载失败"
+              description="无法获取服务器列表，请检查网络连接后重试"
+              actionLabel="重新加载"
+              onAction={() => refetch()}
+            />
+          ) : filteredData.length === 0 ? (
+            <EmptyState
+              title={hasActiveFilter ? '没有匹配的服务器' : '还没有服务器'}
+              description={hasActiveFilter ? '试试调整搜索关键词或筛选条件' : '添加第一台服务器，开始部署和管理你的节点'}
+              actionLabel={hasActiveFilter ? undefined : '新增服务器'}
+              onAction={hasActiveFilter ? undefined : handleAddServer}
+            />
+          ) : viewMode === 'table' ? (
+            <Table
+              rowKey="id"
+              size="middle"
+              dataSource={filteredData}
+              columns={columns}
+              scroll={{ x: 'max-content' }}
+              rowSelection={{
+                selectedRowKeys,
+                onChange: (keys) => setSelectedRowKeys(keys as string[]),
+              }}
+              pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
+            />
+          ) : (
+            <Row gutter={[16, 16]}>
+              {filteredData.map((server) => (
+                <Col key={server.id} xs={24} sm={12} lg={8} xl={6}>
+                  <ServerCard
+                    server={server}
+                    testingSsh={testingSshId === server.id || bulkTestingIds.has(server.id)}
+                    onEdit={handleEdit}
+                    onInstall={setInstallTarget}
+                    onDelete={handleDelete}
+                    onForceDelete={handleForceDelete}
+                    onTestSsh={(s) => testSshMutation.mutate(s.id)}
+                  />
+                </Col>
+              ))}
+            </Row>
+          )}
+        </AppCard>
       )}
 
       <ServerFormModal
@@ -727,6 +743,6 @@ export default function ServersPage() {
           onClose={() => { setAutoSetupTarget(null); qc.invalidateQueries({ queryKey: ['servers'] }); }}
         />
       )}
-    </Card>
+    </>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Modal, Steps, Button, Typography, Space, Card, Row, Col } from 'antd';
+import { Modal, Steps, Button, Typography, Space, Row, Col, theme as antdTheme } from 'antd';
 import {
   CloudServerOutlined,
   NodeIndexOutlined,
@@ -11,6 +11,9 @@ import {
   DeploymentUnitOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
+
+import AppCard from '@/components/common/AppCard';
+import { statusColors } from '@/theme/semantic';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -22,12 +25,12 @@ interface Props {
 
 const features = [
   {
-    icon: <CloudServerOutlined style={{ fontSize: 28, color: '#1677ff' }} />,
+    icon: <CloudServerOutlined style={{ fontSize: 28, color: statusColors.info }} />,
     title: '服务器管理',
     desc: '通过 SSH 管理你的 VPS，查看实时资源监控',
   },
   {
-    icon: <NodeIndexOutlined style={{ fontSize: 28, color: '#52c41a' }} />,
+    icon: <NodeIndexOutlined style={{ fontSize: 28, color: statusColors.success }} />,
     title: '节点部署',
     desc: '一键部署 Xray / Sing-Box / V2Ray 代理节点',
   },
@@ -57,6 +60,7 @@ const steps = [
 ];
 
 export default function WelcomeModal({ open, onClose, onAddServer }: Props) {
+  const { token } = antdTheme.useToken();
   const [current, setCurrent] = useState(0);
 
   function handleClose() {
@@ -122,14 +126,14 @@ export default function WelcomeModal({ open, onClose, onAddServer }: Props) {
           <Row gutter={16}>
             {features.map((f) => (
               <Col span={8} key={f.title}>
-                <Card
+                <AppCard
                   size="small"
-                  style={{ textAlign: 'center', height: '100%', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+                  style={{ textAlign: 'center', height: '100%' }}
                 >
                   <div style={{ marginBottom: 12 }}>{f.icon}</div>
                   <Text strong style={{ display: 'block', marginBottom: 6 }}>{f.title}</Text>
                   <Text type="secondary" style={{ fontSize: 12 }}>{f.desc}</Text>
-                </Card>
+                </AppCard>
               </Col>
             ))}
           </Row>
@@ -143,17 +147,16 @@ export default function WelcomeModal({ open, onClose, onAddServer }: Props) {
           </Title>
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             {steps.map((s, i) => (
-              <Card
+              <AppCard
                 key={s.title}
                 size="small"
-                style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
               >
                 <Space size={16} align="start">
                   <div style={{
                     width: 40, height: 40, borderRadius: '50%',
-                    background: '#e6f4ff', display: 'flex',
+                    background: token.colorPrimaryBg, display: 'flex',
                     alignItems: 'center', justifyContent: 'center',
-                    fontSize: 18, color: '#1677ff', flexShrink: 0,
+                    fontSize: 18, color: token.colorPrimary, flexShrink: 0,
                   }}>
                     {i + 1}
                   </div>
@@ -164,7 +167,7 @@ export default function WelcomeModal({ open, onClose, onAddServer }: Props) {
                     <Text type="secondary" style={{ fontSize: 13 }}>{s.desc}</Text>
                   </div>
                 </Space>
-              </Card>
+              </AppCard>
             ))}
           </Space>
         </div>
@@ -172,7 +175,7 @@ export default function WelcomeModal({ open, onClose, onAddServer }: Props) {
 
       {current === 2 && (
         <div style={{ textAlign: 'center', padding: '16px 0 8px' }}>
-          <CheckCircleOutlined style={{ fontSize: 48, color: '#52c41a', marginBottom: 16 }} />
+          <CheckCircleOutlined style={{ fontSize: 48, color: statusColors.success, marginBottom: 16 }} />
           <Title level={4} style={{ marginBottom: 8 }}>准备好了！</Title>
           <Paragraph type="secondary" style={{ marginBottom: 0 }}>
             现在就添加第一台服务器，开始你的部署之旅

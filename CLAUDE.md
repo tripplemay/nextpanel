@@ -25,6 +25,7 @@ cd apps/server && pnpm test -- --testPathPattern=nodes.service
 pnpm dev              # Next.js 开发模式，端口 3400
 pnpm dev:clean        # 清除 .next 缓存后启动（修复 pnpm build 后 404 问题）
 pnpm build            # 生产构建（验证 TS 错误）
+pnpm analyze          # 构建并生成包体积分析报告（@next/bundle-analyzer）
 pnpm lint             # next lint
 
 # 数据库（在 apps/server 目录下）
@@ -98,23 +99,41 @@ Swagger UI：http://localhost:3001/api/docs（后端运行时可访问）
 
 **API 客户端**（`lib/api.ts`）：Axios 实例，请求拦截器注入 `Authorization: Bearer <token>`，响应拦截器在 401 时跳转到 `/login`。所有响应类型定义在 `src/types/api.ts`。
 
-**UI**：Ant Design 5，使用 `zhCN` 中文语言包。SSR 兼容需要 `@ant-design/nextjs-registry`。应用包裹在 `<Providers>`（`app/providers.tsx`）中 — QueryClient + ConfigProvider（全局 `borderRadius: 8` token）+ App。
+**UI**：Ant Design 5，使用 `zhCN` 中文语言包。SSR 兼容需要 `@ant-design/nextjs-registry`。应用包裹在 `<Providers>`（`app/providers.tsx`）中 — QueryClient + ThemeProvider + ConfigProvider + App。
+
+**主题系统**（`src/theme/`，亮/暗双主题）：
+- `ThemeContext.tsx` — `useThemeMode()`（mode/resolvedMode/setMode，localStorage `np-theme-mode` 持久化，支持 system 跟随）、`useThemeTokens()`
+- `tokens.ts` — 自定义语义 token（日志终端/图表/拓扑/侧栏/阴影），亮暗两套；AntD 组件颜色优先用 `theme.useToken()`，不要往 tokens.ts 加 AntD 已有的颜色
+- `antd-theme.ts` — `buildAntdTheme(mode)`：darkAlgorithm + Menu/Card 组件级定制
+- `semantic.ts` — `statusColors` + `usageColor`/`pingColor`/`heartbeatColor`（状态色唯一来源）
+- `app/layout.tsx` 内联脚本在首绘前写入 `<html data-theme>` 防闪烁；CSS Module 暗色用 `:global([data-theme='dark'])` 覆盖
 
 **前端规范**（所有页面统一执行）：
-- 所有页面：`<Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>` 包裹
-- 所有表格：`size="middle"` 且 `pagination={{ showTotal: (total) => \`共 ${total} 条\` }}` — 例外：按服务器分组视图中，节点数 ≤ 10 时隐藏分页，避免空白占位
-- `<PageHeader>` 自带 `<Divider>`，表格前**不要**加 `marginBottom`
-- 状态展示：使用 `<StatusTag status={...} />`（`components/common/StatusTag.tsx`），不要自行组合 Badge/Tag
+- **禁止硬编码颜色**：状态色用 `statusColors`，边框/文字色用 `theme.useToken()`，自定义表面用 `useThemeTokens()`；新增页面必须在亮/暗两种主题下走查
+- 卡片用 `<AppCard>`（`components/common/AppCard.tsx`，自带主题阴影，`hoverable` 有抬升效果），不要裸用 Card + 手写 boxShadow
+- 所有表格：`size="middle"` 且 `pagination={{ showTotal: (total) => \`共 ${total} 条\` }}` — 例外：按服务器分组视图中，节点数 ≤ 10 时隐藏分页
+- 加载态：首次加载用骨架屏（`components/common/skeletons` 的 TableSkeleton/CardGridSkeleton/DetailSkeleton），轮询静默刷新，不要整页 Spin
+- 空状态用 `<EmptyState>`（含引导操作按钮）
+- 状态展示：使用 `<StatusTag status={...} />`（全中文标签），不要自行组合 Badge/Tag
+- 日志展示统一 `<LogTerminal>`（`components/common/LogTerminal.tsx`，关键字着色/自动滚底/复制/下载）
+- 资源使用率条用 `<UsageBar>`；`<PageHeader>` 已吸顶毛玻璃，表格前**不要**加 `marginBottom`
+- dayjs 只从 `@/lib/dayjs` 导入（插件/locale 单一入口，禁止重复 extend）
+- SSE 调用统一走 `lib/sse.ts` 的 `streamSse`（部署/删除/Agent 安装/自动配置/批量测试共用，EventSource 不支持 Bearer 头）
+- 乐观更新：高频小操作（节点启停/重命名、用户角色）用 TanStack Query `onMutate` + 回滚
+- 大体积依赖按需加载：recharts 经 `next/dynamic`（`MetricsChart`），`@xyflow/react` CSS 仅在 nodes-v2 页引入，flag-icons CSS 仅在 (dashboard) 引入
 
-**组件结构**（`components/`）：按功能组织 — `servers/`、`nodes/`、`templates/`、`pipelines/`、`subscriptions/`、`common/`。
+**组件结构**（`components/`）：按功能组织 — `servers/`、`nodes/`（含 `topology/`）、`subscriptions/`、`auth/`、`common/`。
 
 关键共享组件：
-- `common/PageHeader.tsx` — 标题 + 新增按钮 + Divider
-- `common/StatusTag.tsx` — 带状态颜色映射的 Tag
+- `common/PageHeader.tsx` — 吸顶标题 + 新增按钮 + Divider
+- `common/StatusTag.tsx` — 全中文状态 Tag
 - `common/CopyButton.tsx` — 带反馈的剪贴板复制按钮
+- `common/AppCard.tsx` / `common/EmptyState.tsx` / `common/skeletons.tsx` / `common/UsageBar.tsx` / `common/LogTerminal.tsx`
+- `common/CommandPalette.tsx` — Cmd/Ctrl+K 全局搜索跳转（页面/服务器/节点）
 - `nodes/DeployDrawer.tsx` — SSE 终端抽屉（部署和删除共用）
-- `nodes/DeployLogModal.tsx` — 操作历史弹窗（列出节点历次部署/卸载日志）
-- `hooks/useDeployStream.ts` — `EventSource` 封装，基于 URL 复用
+- `nodes/DeployLogModal.tsx` — 操作历史弹窗
+- `servers/MetricsChart.tsx` — recharts 趋势图（dynamic import）
+- `hooks/useDeployStream.ts` — SSE 日志流 hook（基于 `lib/sse.ts`）
 
 ### 数据库（PostgreSQL + Prisma）
 

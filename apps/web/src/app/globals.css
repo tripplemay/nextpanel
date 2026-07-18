@@ -10,3 +10,121 @@ body {
   overflow-x: hidden;
   height: 100%;
 }
+
+/* body 背景跟随主题（内联脚本在首绘前写入 data-theme，保证暗色用户无白闪） */
+body {
+  background: #f5f7fa;
+  transition: background-color 0.2s ease;
+}
+
+:root[data-theme='dark'] body {
+  background: #0d1117;
+}
+
+::selection {
+  background: rgba(22, 119, 255, 0.25);
+}
+
+/* 细滚动条，暗色下自动反色 */
+* {
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+
+:root[data-theme='dark'] *::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ========== 仪表盘侧边栏菜单 ========== */
+/* 圆角菜单项 + 激活态主色指示条（仅展开态；折叠态沿用 antd 默认居中图标） */
+.np-sidebar .ant-menu-inline {
+  border-inline-end: none !important;
+}
+
+.np-sidebar .ant-menu-inline:not(.ant-menu-inline-collapsed) .ant-menu-item,
+.np-sidebar .ant-menu-inline:not(.ant-menu-inline-collapsed) .ant-menu-submenu-title {
+  border-radius: 8px;
+  margin-inline: 8px;
+  width: auto;
+}
+
+.np-sidebar .ant-menu-inline:not(.ant-menu-inline-collapsed) .ant-menu-item-selected {
+  position: relative;
+}
+
+.np-sidebar .ant-menu-inline:not(.ant-menu-inline-collapsed) .ant-menu-item-selected::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 22%;
+  bottom: 22%;
+  width: 3px;
+  border-radius: 2px;
+  background: #1677ff;
+}
+
+/* 侧边栏分组标题（管理员分组）字号收紧 */
+.np-sidebar .ant-menu-item-group-title {
+  font-size: 12px;
+  padding-inline: 20px;
+}
+
+/* ========== 页面切换过渡 ========== */
+@keyframes np-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.np-page-enter {
+  animation: np-page-enter 0.18s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .np-page-enter {
+    animation: none;
+  }
+}
+
+/* ========== 命令面板 ========== */
+.np-kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  font-size: 11px;
+  font-family: inherit;
+  border: 1px solid rgba(128, 128, 128, 0.45);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  line-height: 1.4;
+  opacity: 0.8;
+}
+
+.np-cmdk-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 768px) {
+  .np-cmdk-hint {
+    display: none;
+  }
+}

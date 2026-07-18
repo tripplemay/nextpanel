@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { App, Button, Table, Tag, Space, Card, Spin, Switch, Dropdown, Typography, Collapse, Empty, Tooltip } from 'antd';
+import { App, Button, Table, Tag, Space, Switch, Dropdown, Typography, Collapse, Empty, Tooltip, theme as antdTheme } from 'antd';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { ApiOutlined, ShareAltOutlined, FileTextOutlined, EditOutlined, CloudUploadOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import ServerTagList from '@/components/servers/ServerTagList';
@@ -10,10 +10,53 @@ import { nodesApi, serversApi } from '@/lib/api';
 import NodePresetModal from '@/components/nodes/NodePresetModal';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
+import AppCard from '@/components/common/AppCard';
+import EmptyState from '@/components/common/EmptyState';
+import { TableSkeleton } from '@/components/common/skeletons';
+import { statusColors } from '@/theme/semantic';
+import { useThemeTokens } from '@/theme/ThemeContext';
 import { useNodeActions } from '@/hooks/useNodeActions';
 import type { Node, Server } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
+/** 状态点脉冲动画（inline style 不支持 @keyframes，用 <style> 注入） */
+const STATUS_DOT_CSS = `
+.np-status-dot {
+  transition: background-color 0.2s ease;
+}
+.np-status-dot-pulse {
+  animation: np-status-dot-pulse 1.2s ease-in-out infinite;
+}
+@keyframes np-status-dot-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.6); opacity: 0.45; }
+}
+`;
+
+/** 通用状态点：颜色取自语义色板；pulse 用于"测试中"等进行中状态 */
+function StatusDot({ color, pulse = false }: { color: string; pulse?: boolean }) {
+  return (
+    <span
+      className={pulse ? 'np-status-dot np-status-dot-pulse' : 'np-status-dot'}
+      style={{
+        display: 'inline-block',
+        width: 8,
+        height: 8,
+        borderRadius: '50%',
+        background: color,
+        flexShrink: 0,
+      }}
+    />
+  );
+}
+
+/** 服务器状态 → 语义色 */
+function serverStatusColor(status: string): string {
+  if (status === 'ONLINE') return statusColors.success;
+  if (status === 'OFFLINE' || status === 'ERROR') return statusColors.error;
+  if (status === 'DELETING') return statusColors.warning;
+  return statusColors.neutral;
+}
 
 function formatBytes(bytes: number, hasStats: boolean): string {
   if (!hasStats) return '-';
@@ -37,6 +80,8 @@ function formatTimeAgo(isoString: string | null): string {
 export default function NodesPage() {
   const { message, modal } = App.useApp();
   const qc = useQueryClient();
+  const { token } = antdTheme.useToken();
+  const tokens = useThemeTokens();
 
   // Modals
   const [presetModalOpen, setPresetModalOpen] = useState(false);
@@ -160,32 +205,53 @@ export default function NodesPage() {
         const sessionResult = testResults[r.id];
         const isTestingThis = testingId === r.id || (batchTesting && !sessionResult);
 
-        if (isTestingThis) return <Spin size="small" />;
+        if (isTestingThis) {
+          return (
+            <Space size={6}>
+              <StatusDot color={statusColors.info} pulse />
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>测试中</Typography.Text>
+            </Space>
+          );
+        }
 
         if (sessionResult) {
           if (sessionResult.reachable) {
             return (
               <Space direction="vertical" size={2}>
-                <Tag color="green" style={{ marginRight: 0 }}>{sessionResult.latency}ms</Tag>
+                <Space size={6}>
+                  <StatusDot color={statusColors.success} />
+                  <Tag color="green" style={{ marginRight: 0 }}>{sessionResult.latency}ms</Tag>
+                </Space>
                 <Typography.Text type="secondary" style={{ fontSize: 11 }}>{formatTimeAgo(sessionResult.testedAt)}</Typography.Text>
               </Space>
             );
           }
-          return <Tag color="red">失败</Tag>;
+          return (
+            <Space size={6}>
+              <StatusDot color={statusColors.error} />
+              <Tag color="red" style={{ marginRight: 0 }}>失败</Tag>
+            </Space>
+          );
         }
 
         if (r.lastTestedAt) {
           if (r.lastReachable) {
             return (
               <Space direction="vertical" size={2}>
-                <Tag color="green" style={{ marginRight: 0 }}>{r.lastLatency}ms</Tag>
+                <Space size={6}>
+                  <StatusDot color={statusColors.success} />
+                  <Tag color="green" style={{ marginRight: 0 }}>{r.lastLatency}ms</Tag>
+                </Space>
                 <Typography.Text type="secondary" style={{ fontSize: 11 }}>{formatTimeAgo(r.lastTestedAt)}</Typography.Text>
               </Space>
             );
           }
           return (
             <Space direction="vertical" size={2}>
-              <Tag color="red" style={{ marginRight: 0 }}>失败</Tag>
+              <Space size={6}>
+                <StatusDot color={statusColors.error} />
+                <Tag color="red" style={{ marginRight: 0 }}>失败</Tag>
+              </Space>
               <Typography.Text type="secondary" style={{ fontSize: 11 }}>{formatTimeAgo(r.lastTestedAt)}</Typography.Text>
             </Space>
           );
@@ -301,28 +367,44 @@ export default function NodesPage() {
   const collapseItems = groups.map(({ server, nodes: serverNodes }) => ({
     key: server.id,
     label: (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
-        <span style={{ fontWeight: 500, flexShrink: 0 }}>{server.name}</span>
-        {server.countryCode && (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0, flexWrap: 'wrap', rowGap: 4 }}>
+        {/* 主标题：国旗 + 服务器名 */}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          {server.countryCode && (
+            <span
+              className={`fi fi-${server.countryCode.toLowerCase()} fis`}
+              style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0 }}
+            />
+          )}
           <span
-            className={`fi fi-${server.countryCode.toLowerCase()} fis`}
-            style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0 }}
-          />
-        )}
-        <StatusTag status={server.status} />
-        {!isMobile && server.region && <Tag style={{ margin: 0 }}>{server.region}</Tag>}
+            style={{
+              fontWeight: 600,
+              fontSize: 14,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {server.name}
+          </span>
+        </span>
+        {/* 状态点与状态标签对齐 */}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <StatusDot color={serverStatusColor(server.status)} pulse={server.status === 'DELETING'} />
+          <StatusTag status={server.status} />
+        </span>
+        {/* 次要信息：IP / 区域 / 节点数 */}
         {!isMobile && (
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{server.ip}</Typography.Text>
-        )}
-        {!isMobile && (
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{serverNodes.length} 个节点</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
+            {[server.ip, server.region, `${serverNodes.length} 个节点`].filter(Boolean).join(' · ')}
+          </Typography.Text>
         )}
         {!isMobile && (server.tags.length > 0 || (server.autoTags ?? []).length > 0) && (
-          <span onClick={(e) => e.stopPropagation()}>
+          <span onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0 }}>
             <ServerTagList tags={server.tags} autoTags={server.autoTags ?? []} readonly />
           </span>
         )}
-        <div style={{ marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ marginLeft: 'auto', flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
           <Button
             size="small"
             icon={<PlusOutlined />}
@@ -350,15 +432,38 @@ export default function NodesPage() {
           const sessionResult = testResults[node.id];
           const isTestingThis = testingId === node.id || (batchTesting && !sessionResult);
           const connectivityEl = isTestingThis ? (
-            <Spin size="small" />
+            <Space size={6}>
+              <StatusDot color={statusColors.info} pulse />
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>测试中</Typography.Text>
+            </Space>
           ) : sessionResult ? (
             sessionResult.reachable
-              ? <Tag color="green" style={{ margin: 0 }}>{sessionResult.latency}ms</Tag>
-              : <Tag color="red" style={{ margin: 0 }}>失败</Tag>
+              ? (
+                <Space size={6}>
+                  <StatusDot color={statusColors.success} />
+                  <Tag color="green" style={{ margin: 0 }}>{sessionResult.latency}ms</Tag>
+                </Space>
+              )
+              : (
+                <Space size={6}>
+                  <StatusDot color={statusColors.error} />
+                  <Tag color="red" style={{ margin: 0 }}>失败</Tag>
+                </Space>
+              )
           ) : node.lastTestedAt ? (
             node.lastReachable
-              ? <Tag color="green" style={{ margin: 0 }}>{node.lastLatency}ms</Tag>
-              : <Tag color="red" style={{ margin: 0 }}>失败</Tag>
+              ? (
+                <Space size={6}>
+                  <StatusDot color={statusColors.success} />
+                  <Tag color="green" style={{ margin: 0 }}>{node.lastLatency}ms</Tag>
+                </Space>
+              )
+              : (
+                <Space size={6}>
+                  <StatusDot color={statusColors.error} />
+                  <Tag color="red" style={{ margin: 0 }}>失败</Tag>
+                </Space>
+              )
           ) : (
             <Tag style={{ margin: 0 }}>未测试</Tag>
           );
@@ -385,7 +490,7 @@ export default function NodesPage() {
           ];
 
           return (
-            <Card key={node.id} size="small" style={{ borderRadius: 8 }}>
+            <AppCard key={node.id} size="small" hoverable style={{ borderRadius: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6, overflow: 'hidden' }}>
                 <Space size={4} style={{ minWidth: 0, flex: 1, marginRight: 8 }}>
                   <Typography.Text strong style={{ fontSize: 14 }} ellipsis>{node.name}</Typography.Text>
@@ -422,7 +527,7 @@ export default function NodesPage() {
                   </Dropdown>
                 </Space>
               </div>
-            </Card>
+            </AppCard>
           );
         })}
       </div>
@@ -438,8 +543,33 @@ export default function NodesPage() {
     ),
   }));
 
+  // 分组面板容器：token 化描边/背景/阴影 + hover 过渡（值随主题切换重渲染）
+  const collapseCss = `
+.np-nodes-collapse .ant-collapse-item {
+  border: 1px solid ${token.colorBorderSecondary};
+  border-radius: 10px !important;
+  margin-bottom: 12px;
+  overflow: hidden;
+  background: ${token.colorBgContainer};
+  box-shadow: ${tokens.cardShadow};
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.np-nodes-collapse .ant-collapse-item:last-child {
+  margin-bottom: 0;
+}
+.np-nodes-collapse .ant-collapse-header {
+  transition: background-color 0.2s ease;
+}
+.np-nodes-collapse .ant-collapse-item:not(.ant-collapse-item-active) .ant-collapse-header:hover {
+  background-color: ${token.colorFillTertiary};
+}
+`;
+
+  const firstLoading = isLoading || serversLoading;
+
   return (
-    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+    <AppCard>
+      <style>{STATUS_DOT_CSS + collapseCss}</style>
       <PageHeader
         title="节点管理"
         addLabel="新增节点"
@@ -449,21 +579,30 @@ export default function NodesPage() {
         }}
         extra={batchTestButton}
       />
-      <Spin spinning={isLoading || serversLoading}>
-        {!isLoading && !serversLoading && (data ?? []).length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无节点" style={{ padding: '32px 0' }} />
-        ) : (
-          <Collapse
-            activeKey={activeKeys}
-            onChange={(keys) => {
-              const activeSet = new Set(Array.isArray(keys) ? keys : [keys]);
-              setCollapsedIds(groups.map((g) => g.server.id).filter((id) => !activeSet.has(id)));
-            }}
-            items={collapseItems}
-            style={{ background: 'transparent' }}
-          />
-        )}
-      </Spin>
+      {firstLoading ? (
+        <TableSkeleton rows={8} />
+      ) : nodes.length === 0 ? (
+        <EmptyState
+          title="暂无节点"
+          description="创建你的第一个代理节点，或在对应服务器分组中批量添加"
+          actionLabel="新增节点"
+          onAction={() => {
+            setPresetServerId(undefined);
+            setPresetModalOpen(true);
+          }}
+        />
+      ) : (
+        <Collapse
+          className="np-nodes-collapse"
+          activeKey={activeKeys}
+          onChange={(keys) => {
+            const activeSet = new Set(Array.isArray(keys) ? keys : [keys]);
+            setCollapsedIds(groups.map((g) => g.server.id).filter((id) => !activeSet.has(id)));
+          }}
+          items={collapseItems}
+          style={{ background: 'transparent', border: 'none' }}
+        />
+      )}
 
       <NodePresetModal
         open={presetModalOpen}
@@ -481,6 +620,6 @@ export default function NodesPage() {
       />
 
       {nodeActions.modals}
-    </Card>
+    </AppCard>
   );
 }

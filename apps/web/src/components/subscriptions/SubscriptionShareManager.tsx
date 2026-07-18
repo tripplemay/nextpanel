@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Space, Select, Button, List, Avatar, Popconfirm, Typography, Spin, Empty } from 'antd';
+import { Space, Select, Button, List, Avatar, Popconfirm, Typography, Spin, Empty, theme as antdTheme } from 'antd';
 import { UserOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { subscriptionsApi, usersApi } from '@/lib/api';
@@ -9,6 +9,54 @@ import type { SubscriptionShare } from '@/types/api';
 
 interface Props {
   subscriptionId: string;
+}
+
+/** 单个分享记录行：hover 底色 + 过渡 */
+function ShareRow({
+  share,
+  removing,
+  onRemove,
+}: {
+  share: SubscriptionShare;
+  removing: boolean;
+  onRemove: () => void;
+}) {
+  const { token } = antdTheme.useToken();
+  const [hover, setHover] = useState(false);
+  return (
+    <List.Item
+      style={{
+        background: hover ? token.colorFillQuaternary : 'transparent',
+        transition: 'background-color 0.15s ease',
+      }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      actions={[
+        <Popconfirm
+          key="remove"
+          title="确认取消分享？"
+          okText="确认"
+          cancelText="取消"
+          okType="danger"
+          onConfirm={onRemove}
+        >
+          <Button
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            loading={removing}
+          >
+            移除
+          </Button>
+        </Popconfirm>,
+      ]}
+    >
+      <List.Item.Meta
+        avatar={<Avatar size="small" icon={<UserOutlined />} />}
+        title={<Typography.Text>{share.user.username}</Typography.Text>}
+      />
+    </List.Item>
+  );
 }
 
 export default function SubscriptionShareManager({ subscriptionId }: Props) {
@@ -56,7 +104,15 @@ export default function SubscriptionShareManager({ subscriptionId }: Props) {
           onChange={setSelectedUserId}
           loading={viewersLoading}
           options={availableViewers.map((v) => ({ value: v.id, label: v.username }))}
-          notFoundContent={viewersLoading ? <Spin size="small" /> : <span style={{ fontSize: 12 }}>暂无可分享的 VIEWER 用户</span>}
+          notFoundContent={
+            viewersLoading ? (
+              <Spin size="small" />
+            ) : (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                暂无可分享的 VIEWER 用户
+              </Typography.Text>
+            )
+          }
         />
         <Button
           type="primary"
@@ -76,34 +132,15 @@ export default function SubscriptionShareManager({ subscriptionId }: Props) {
       ) : (
         <List
           size="small"
+          bordered
           dataSource={shares}
           renderItem={(share: SubscriptionShare) => (
-            <List.Item
-              actions={[
-                <Popconfirm
-                  key="remove"
-                  title="确认取消分享？"
-                  okText="确认"
-                  cancelText="取消"
-                  okType="danger"
-                  onConfirm={() => removeMutation.mutate(share.userId)}
-                >
-                  <Button
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    loading={removeMutation.isPending}
-                  >
-                    移除
-                  </Button>
-                </Popconfirm>,
-              ]}
-            >
-              <List.Item.Meta
-                avatar={<Avatar size="small" icon={<UserOutlined />} />}
-                title={<Typography.Text>{share.user.username}</Typography.Text>}
-              />
-            </List.Item>
+            <ShareRow
+              key={share.userId}
+              share={share}
+              removing={removeMutation.isPending}
+              onRemove={() => removeMutation.mutate(share.userId)}
+            />
           )}
         />
       )}

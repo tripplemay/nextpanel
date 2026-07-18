@@ -1,17 +1,13 @@
 'use client';
 
-import { Button, Card, Collapse, Descriptions, Skeleton, Tag, Space, Typography, Tooltip } from 'antd';
+import { Button, Card, Collapse, Descriptions, Skeleton, Tag, Space, Typography, Tooltip, theme as antdTheme } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import dayjs from 'dayjs';
-import relativeTime from 'dayjs/plugin/relativeTime';
-import 'dayjs/locale/zh-cn';
+import dayjs from '@/lib/dayjs';
 import { ipCheckApi } from '@/lib/api';
+import { statusColors } from '@/theme/semantic';
 import type { ServerIpCheck, RouteData, OutboundNode, InboundNode, RouteHop } from '@/types/api';
 import { useIsMobile } from '@/hooks/useIsMobile';
-
-dayjs.extend(relativeTime);
-dayjs.locale('zh-cn');
 
 const { Text } = Typography;
 
@@ -27,12 +23,12 @@ function StatusBadge({ value, region }: { value: string | null; region?: string 
 
   if (isPositive) {
     const label = region ? `✅ 可用 · ${region}` : '✅ 可用';
-    return <Text style={{ color: '#52c41a' }}>{label}</Text>;
+    return <Text style={{ color: statusColors.success }}>{label}</Text>;
   }
   if (isPartial) {
-    return <Text style={{ color: '#faad14' }}>⚠️ 仅自制内容</Text>;
+    return <Text style={{ color: statusColors.warning }}>⚠️ 仅自制内容</Text>;
   }
-  return <Text style={{ color: '#ff4d4f' }}>❌ 不可用</Text>;
+  return <Text style={{ color: statusColors.error }}>❌ 不可用</Text>;
 }
 
 function NetflixStatus({ netflix, region }: { netflix: string | null; region: string | null }) {
@@ -40,12 +36,12 @@ function NetflixStatus({ netflix, region }: { netflix: string | null; region: st
 
   if (netflix === 'UNLOCKED') {
     const label = region ? `✅ 完全解锁 · ${region}` : '✅ 完全解锁';
-    return <Text style={{ color: '#52c41a' }}>{label}</Text>;
+    return <Text style={{ color: statusColors.success }}>{label}</Text>;
   }
   if (netflix === 'ORIGINALS_ONLY') {
-    return <Text style={{ color: '#faad14' }}>⚠️ 仅自制内容</Text>;
+    return <Text style={{ color: statusColors.warning }}>⚠️ 仅自制内容</Text>;
   }
-  return <Text style={{ color: '#ff4d4f' }}>❌ 不可用</Text>;
+  return <Text style={{ color: statusColors.error }}>❌ 不可用</Text>;
 }
 
 function GfwStatus({ gfwBlocked, gfwCheckedAt }: { gfwBlocked: boolean | null; gfwCheckedAt: string | null }) {
@@ -55,8 +51,8 @@ function GfwStatus({ gfwBlocked, gfwCheckedAt }: { gfwBlocked: boolean | null; g
 
   const timeAgo = gfwCheckedAt ? dayjs(gfwCheckedAt).fromNow() : null;
   const status = gfwBlocked
-    ? <Text style={{ color: '#ff4d4f' }}>🚫 已被封锁</Text>
-    : <Text style={{ color: '#52c41a' }}>✅ 未封锁</Text>;
+    ? <Text style={{ color: statusColors.error }}>🚫 已被封锁</Text>
+    : <Text style={{ color: statusColors.success }}>✅ 未封锁</Text>;
 
   return (
     <Space size={8}>
@@ -80,11 +76,12 @@ const ISPS   = ['联通', '电信', '移动'];
 
 function msText(ms: number) {
   if (ms < 0) return <Text type="secondary">超时</Text>;
-  const color = ms < 80 ? '#52c41a' : ms < 150 ? '#faad14' : '#ff4d4f';
+  const color = ms < 80 ? statusColors.success : ms < 150 ? statusColors.warning : statusColors.error;
   return <Text style={{ color }}>{ms.toFixed(1)} ms</Text>;
 }
 
 function RouteInboundTable({ inbound }: { inbound: InboundNode[] }) {
+  const { token } = antdTheme.useToken();
   const map = new Map<string, Map<string, InboundNode>>();
   for (const n of inbound) {
     if (!map.has(n.isp)) map.set(n.isp, new Map());
@@ -98,9 +95,9 @@ function RouteInboundTable({ inbound }: { inbound: InboundNode[] }) {
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
           <tr>
-            <th style={{ textAlign: 'left', padding: '3px 6px', color: '#8c8c8c', fontWeight: 400 }}>运营商</th>
+            <th style={{ textAlign: 'left', padding: '3px 6px', color: token.colorTextTertiary, fontWeight: 400 }}>运营商</th>
             {CITIES.map((c) => (
-              <th key={c} style={{ textAlign: 'center', padding: '3px 6px', color: '#8c8c8c', fontWeight: 400 }}>{c}</th>
+              <th key={c} style={{ textAlign: 'center', padding: '3px 6px', color: token.colorTextTertiary, fontWeight: 400 }}>{c}</th>
             ))}
           </tr>
         </thead>
@@ -121,7 +118,7 @@ function RouteInboundTable({ inbound }: { inbound: InboundNode[] }) {
         </tbody>
       </table>
       {source && (
-        <div style={{ marginTop: 4, fontSize: 11, color: '#bfbfbf' }}>来源: {source}</div>
+        <div style={{ marginTop: 4, fontSize: 11, color: token.colorTextQuaternary }}>来源: {source}</div>
       )}
     </div>
   );
@@ -176,8 +173,11 @@ function RouteOutboundList({ outbound }: { outbound: OutboundNode[] }) {
   return <Collapse size="small" ghost items={items} />;
 }
 
-const DIVIDER = <div style={{ width: 1, background: '#f0f0f0', alignSelf: 'stretch', margin: '0 16px', flexShrink: 0 }} />;
-const SECTION_LABEL: React.CSSProperties = { fontSize: 12, color: '#8c8c8c', display: 'block', marginBottom: 8 };
+function DividerLine() {
+  const { token } = antdTheme.useToken();
+  return <div style={{ width: 1, background: token.colorBorderSecondary, alignSelf: 'stretch', margin: '0 16px', flexShrink: 0 }} />;
+}
+const SECTION_LABEL: React.CSSProperties = { fontSize: 12, color: statusColors.neutral, display: 'block', marginBottom: 8 };
 
 export default function IpCheckCard({ serverId }: Props) {
   const queryClient = useQueryClient();
@@ -333,7 +333,7 @@ export default function IpCheckCard({ serverId }: Props) {
           )}
         </div>
 
-        {!isMobile && DIVIDER}
+        {!isMobile && <DividerLine />}
 
         {/* 右列：路由测试，内部再拆两列（移动端垂直排列） */}
         <div style={{ flex: 3, minWidth: 0, width: isMobile ? '100%' : undefined, display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'flex-start', gap: isMobile ? 16 : 0 }}>
@@ -350,7 +350,7 @@ export default function IpCheckCard({ serverId }: Props) {
             )}
           </div>
 
-          {!isMobile && DIVIDER}
+          {!isMobile && <DividerLine />}
 
           {/* 回程 */}
           <div style={{ flex: 1, minWidth: 0, width: isMobile ? '100%' : undefined }}>

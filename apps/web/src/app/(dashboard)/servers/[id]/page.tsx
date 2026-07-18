@@ -1,14 +1,11 @@
 'use client';
 
 import { use, useState, useEffect, useCallback } from 'react';
-import { Grid } from 'antd';
 import { useRouter } from 'next/navigation';
-import dayjs from 'dayjs';
-import relativeTime from 'dayjs/plugin/relativeTime';
-import 'dayjs/locale/zh-cn';
+import dayjs from '@/lib/dayjs';
 import {
   App,
-  Card,
+  Grid,
   Row,
   Col,
   Button,
@@ -17,8 +14,6 @@ import {
   Table,
   Typography,
   Space,
-  Spin,
-  Empty,
   Badge,
   Statistic,
   Tooltip as AntTooltip,
@@ -27,39 +22,58 @@ import {
   Form,
   Select,
   Input,
+  theme as antdTheme,
 } from 'antd';
-import { ArrowLeftOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
 import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from 'recharts';
+  ArrowLeftOutlined,
+  ArrowUpOutlined,
+  ArrowDownOutlined,
+  ExclamationCircleOutlined,
+} from '@ant-design/icons';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import dynamic from 'next/dynamic';
+import { Skeleton } from 'antd';
 import { serversApi, metricsApi, nodesApi, operationLogsApi } from '@/lib/api';
-import { useQueryClient, useMutation } from '@tanstack/react-query';
-import { ExclamationCircleOutlined } from '@ant-design/icons';
 import StatusTag from '@/components/common/StatusTag';
+import AppCard from '@/components/common/AppCard';
+import EmptyState from '@/components/common/EmptyState';
+import { DetailSkeleton } from '@/components/common/skeletons';
 import IpCheckCard from '@/components/servers/IpCheckCard';
 import ServerTagList from '@/components/servers/ServerTagList';
+import { statusColors, usageColor, pingColor, heartbeatColor } from '@/theme/semantic';
 import type { Node, Metric, OperationLogEntry } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 
-dayjs.extend(relativeTime);
-dayjs.locale('zh-cn');
+// recharts 体积较大，图表按需加载（仅本页使用，不进入其他页面首屏包）
+const MetricsChart = dynamic(() => import('@/components/servers/MetricsChart'), {
+  ssr: false,
+  loading: () => <Skeleton active paragraph={{ rows: 4 }} />,
+});
 
 const { Title, Text } = Typography;
 
 function GfwDot({ gfwBlocked }: { gfwBlocked: boolean | null | undefined }) {
-  const color = gfwBlocked === false ? '#52c41a' : gfwBlocked === true ? '#ff4d4f' : '#d9d9d9';
+  const { token } = antdTheme.useToken();
+  const color =
+    gfwBlocked === false
+      ? statusColors.success
+      : gfwBlocked === true
+        ? statusColors.error
+        : token.colorBorder;
   const label = gfwBlocked === false ? '未被封锁' : gfwBlocked === true ? '已被封锁' : 'GFW 未检测';
   return (
     <AntTooltip title={label}>
-      <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
+      <span
+        style={{
+          display: 'inline-block',
+          width: 7,
+          height: 7,
+          borderRadius: '50%',
+          background: color,
+          flexShrink: 0,
+          transition: 'background 0.2s ease',
+        }}
+      />
     </AntTooltip>
   );
 }
@@ -79,13 +93,6 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-function usageColor(pct: number | null | undefined): string {
-  if (pct == null) return '#1677ff';
-  if (pct < 70) return '#52c41a';
-  if (pct < 90) return '#faad14';
-  return '#ff4d4f';
-}
-
 export default function ServerDetailPage({
   params,
 }: {
@@ -97,6 +104,7 @@ export default function ServerDetailPage({
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
   const qc = useQueryClient();
+  const { token } = antdTheme.useToken();
   const [restoreModalOpen, setRestoreModalOpen] = useState(false);
   const [restoreForm] = Form.useForm();
 
@@ -151,14 +159,14 @@ export default function ServerDetailPage({
     enabled: !!id,
   });
 
-  const { data: nodes = [] } = useQuery({
+  const { data: nodes = [], isLoading: nodesLoading } = useQuery({
     queryKey: ['nodes', id],
     queryFn: () => nodesApi.list(id).then((r) => r.data as Node[]),
     refetchInterval: 30_000,
     enabled: !!id,
   });
 
-  const { data: logs = [] } = useQuery({
+  const { data: logs = [], isLoading: logsLoading } = useQuery({
     queryKey: ['operation-logs', 'server', id],
     queryFn: () => operationLogsApi.listByResource('server', id).then((r) => r.data),
     enabled: !!id,
@@ -261,19 +269,26 @@ export default function ServerDetailPage({
     : allLogColumns;
 
   if (serverLoading) {
+    return <DetailSkeleton />;
+  }
+
+  if (!server) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 80 }}>
-        <Spin size="large" />
-      </div>
+      <EmptyState
+        title="服务器不存在"
+        description="该服务器可能已被删除"
+        actionLabel="返回服务器列表"
+        onAction={() => router.push('/servers')}
+      />
     );
   }
 
-  if (!server) return <Empty description="服务器不存在" />;
+  // recharts 主题化样式与图表组件已抽取到 MetricsChart（dynamic import）
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       {/* 页头 */}
-      <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+      <AppCard>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <Button icon={<ArrowLeftOutlined />} onClick={() => router.push('/servers')}>
@@ -290,7 +305,7 @@ export default function ServerDetailPage({
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingLeft: isMobile ? 0 : 4 }}>
           <StatusTag status={server.status} />
           {server.pingMs != null && (
-            <Text style={{ color: server.pingMs <= 50 ? '#52c41a' : server.pingMs <= 150 ? '#faad14' : '#ff4d4f' }}>
+            <Text style={{ color: pingColor(server.pingMs) }}>
               {server.pingMs} ms
             </Text>
           )}
@@ -298,18 +313,18 @@ export default function ServerDetailPage({
             <Tag color="blue">Agent {server.agentVersion}</Tag>
           )}
           {server.lastSeenAt && (
-            <Text type="secondary" style={{ fontSize: 12 }}>
+            <Text style={{ fontSize: 12, color: heartbeatColor(server.lastSeenAt) }}>
               最后心跳 {dayjs(server.lastSeenAt).fromNow()}
             </Text>
           )}
           </div>
         </div>
-      </Card>
+      </AppCard>
 
       {/* 基础信息 */}
       <Row gutter={16}>
         <Col xs={24} md={12}>
-          <Card title="基础信息" size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+          <AppCard title="基础信息" size="small">
             <Descriptions column={1} size="small">
               <Descriptions.Item label="IP 地址">{server.ip}</Descriptions.Item>
               <Descriptions.Item label="区域">{server.region || '—'}</Descriptions.Item>
@@ -336,10 +351,10 @@ export default function ServerDetailPage({
                 {dayjs(server.createdAt).format('YYYY-MM-DD HH:mm')}
               </Descriptions.Item>
             </Descriptions>
-          </Card>
+          </AppCard>
         </Col>
         <Col xs={24} md={12}>
-          <Card title="SSH 配置" size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+          <AppCard title="SSH 配置" size="small">
             {server.credentialsDestroyed && (
               <Alert
                 type="warning"
@@ -370,7 +385,7 @@ export default function ServerDetailPage({
                 </Button>
               )}
             </div>
-          </Card>
+          </AppCard>
           <Modal
             title="恢复 SSH 凭证"
             open={restoreModalOpen}
@@ -431,107 +446,75 @@ export default function ServerDetailPage({
           ] as { label: string; value: number | null }[]
         ).map(({ label, value }) => (
           <Col xs={12} sm={6} key={label}>
-            <Card size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+            <AppCard size="small" style={{ textAlign: 'center' }}>
               <Statistic
                 title={label}
                 value={value != null ? Math.round(value) : '—'}
                 suffix={value != null ? '%' : undefined}
                 valueStyle={{ color: usageColor(value), fontSize: 24 }}
               />
-            </Card>
+            </AppCard>
           </Col>
         ))}
         <Col xs={12} sm={6}>
-          <Card size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)', textAlign: 'center' }}>
-            <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>网速</div>
-            <div style={{ fontSize: 22, fontWeight: 600, color: '#52c41a', lineHeight: 1.3 }}>
+          <AppCard size="small" style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 14, color: token.colorTextSecondary, marginBottom: 4 }}>网速</div>
+            <div style={{ fontSize: 20, fontWeight: 600, color: statusColors.success, lineHeight: 1.3 }}>
               <ArrowUpOutlined style={{ fontSize: 14, marginRight: 4 }} />
               {server.networkOut != null ? formatRate(server.networkOut) : '—'}
             </div>
-            <div style={{ fontSize: 14, color: '#1677ff', marginTop: 2 }}>
+            <div style={{ fontSize: 14, color: statusColors.info, marginTop: 2 }}>
               <ArrowDownOutlined style={{ fontSize: 12, marginRight: 4 }} />
               {server.networkIn != null ? formatRate(server.networkIn) : '—'}
             </div>
-          </Card>
+          </AppCard>
         </Col>
       </Row>
 
       {/* 资源趋势图 */}
-      <Card
+      <AppCard
         title={`资源使用趋势${timeRange ? `（${timeRange}）` : ''}`}
         size="small"
-        style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
       >
         {chartData.length === 0 ? (
-          <Empty description="暂无监控数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          <EmptyState title="暂无监控数据" />
         ) : (
-          <Row gutter={16}>
-            <Col xs={24} xl={12}>
-              <Text type="secondary" style={{ fontSize: 12 }}>CPU / 内存 / 磁盘 (%)</Text>
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="time" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
-                  <Tooltip formatter={(v) => (v != null ? `${v}%` : '')} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Line type="monotone" dataKey="CPU" stroke="#1677ff" dot={false} strokeWidth={1.5} />
-                  <Line type="monotone" dataKey="内存" stroke="#52c41a" dot={false} strokeWidth={1.5} />
-                  <Line type="monotone" dataKey="磁盘" stroke="#faad14" dot={false} strokeWidth={1.5} />
-                </LineChart>
-              </ResponsiveContainer>
-            </Col>
-            <Col xs={24} xl={12}>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                网络流量 (KB/s){timeRange ? `　${timeRange}` : ''}
-              </Text>
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="time" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fontSize: 11 }} unit=" KB/s" />
-                  <Tooltip formatter={(v) => (v != null ? formatRate(Number(v) * 1024) : '')} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Line type="monotone" dataKey="上传" stroke="#52c41a" dot={false} strokeWidth={1.5} />
-                  <Line type="monotone" dataKey="下载" stroke="#1677ff" dot={false} strokeWidth={1.5} />
-                </LineChart>
-              </ResponsiveContainer>
-            </Col>
-          </Row>
+          <MetricsChart data={chartData} timeRange={timeRange} />
         )}
-      </Card>
+      </AppCard>
 
       {/* IP 质量检测 */}
       <IpCheckCard serverId={id} />
 
       {/* 节点列表 */}
-      <Card
+      <AppCard
         title={`节点列表（${nodes.length}）`}
         size="small"
-        style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
         extra={<Button size="small" onClick={() => router.push('/nodes')}>前往节点管理</Button>}
       >
         <Table
           rowKey="id"
           size="middle"
+          loading={nodesLoading}
           dataSource={nodes}
           columns={nodeColumns}
           scroll={{ x: 'max-content' }}
           pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条` }}
         />
-      </Card>
+      </AppCard>
 
       {/* 操作日志 */}
-      <Card title={`操作日志（${logs.length}）`} size="small" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+      <AppCard title={`操作日志（${logs.length}）`} size="small">
         <Table
           rowKey="id"
           size="middle"
+          loading={logsLoading}
           dataSource={logs}
           columns={logColumns}
           scroll={{ x: 'max-content' }}
           pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条` }}
         />
-      </Card>
+      </AppCard>
     </Space>
   );
 }

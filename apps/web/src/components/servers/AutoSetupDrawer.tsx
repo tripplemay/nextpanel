@@ -5,10 +5,10 @@ import { Drawer, Button, Space, Badge, Typography } from 'antd';
 import {
   CheckCircleFilled,
   CloseCircleFilled,
-  LoadingOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import { useDeployStream } from '@/hooks/useDeployStream';
+import LogTerminal from '@/components/common/LogTerminal';
 
 const { Text } = Typography;
 
@@ -72,50 +72,14 @@ export default function AutoSetupDrawer({
         )
       }
     >
-      <div
-        style={{
-          background: '#0d1117',
-          color: '#c9d1d9',
-          fontFamily: 'monospace',
-          fontSize: 13,
-          padding: 16,
-          borderRadius: 6,
-          minHeight: 300,
-          maxHeight: 'calc(100vh - 280px)',
-          overflowY: 'auto',
-          lineHeight: 1.7,
-        }}
-      >
-        {logLines.length === 0 && deployStatus === 'running' && (
-          <span style={{ color: '#8b949e' }}>
-            <LoadingOutlined style={{ marginRight: 8 }} />
-            正在连接服务器...
-          </span>
-        )}
-        {logLines.map((line, i) => (
-          <div
-            key={i}
-            style={{
-              color:
-                line.includes('ERROR') || line.includes('失败') || line.includes('error')
-                  ? '#f85149'
-                  : line.includes('成功') || line.includes('完成') || line.includes('===')
-                  ? '#3fb950'
-                  : line.includes('---')
-                  ? '#e3b341'
-                  : '#c9d1d9',
-            }}
-          >
-            {line}
-          </div>
-        ))}
-        {deployStatus === 'success' && (
-          <div style={{ color: '#3fb950', marginTop: 8 }}>✓ 自动配置完成，节点已部署</div>
-        )}
-        {deployStatus === 'failed' && (
-          <div style={{ color: '#f85149', marginTop: 8 }}>✗ 配置失败，请查看上方日志</div>
-        )}
-      </div>
+      <LogTerminal
+        lines={logLines}
+        status={deployStatus}
+        successText="自动配置完成，节点已部署"
+        failedText="配置失败，请查看上方日志"
+        minHeight={300}
+        maxHeight="calc(100vh - 280px)"
+      />
     </Drawer>
   );
 }

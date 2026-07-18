@@ -1,13 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { App, Card, Table, Tag, Select, Popconfirm, Button, Space } from 'antd';
+import { App, Table, Tag, Select, Popconfirm, Button, Space, Typography } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usersApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
 import type { UserRecord } from '@/types/api';
 import PageHeader from '@/components/common/PageHeader';
+import AppCard from '@/components/common/AppCard';
+import { TableSkeleton } from '@/components/common/skeletons';
 import { useIsMobile } from '@/hooks/useIsMobile';
 
 const ROLE_COLORS: Record<string, string> = {
@@ -30,22 +32,35 @@ export default function UsersPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [batchRole, setBatchRole] = useState<string | undefined>();
 
-  const { data: users = [], isLoading } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['users'],
     queryFn: () => usersApi.list().then((r) => r.data),
     staleTime: 5 * 60 * 1000,
   });
+  const users = data ?? [];
 
   const updateRoleMutation = useMutation({
     mutationFn: ({ id, role }: { id: string; role: string }) =>
       usersApi.updateRole(id, role),
+    onMutate: async ({ id, role }) => {
+      // 乐观更新：先改本地角色，失败回滚
+      await queryClient.cancelQueries({ queryKey: ['users'] });
+      const previous = queryClient.getQueryData<UserRecord[]>(['users']);
+      queryClient.setQueryData<UserRecord[]>(['users'], (old) =>
+        old?.map((u) => (u.id === id ? { ...u, role: role as UserRecord['role'] } : u)),
+      );
+      return { previous };
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users'] });
       message.success('角色已更新');
     },
-    onError: (err: unknown) => {
+    onError: (err: unknown, _vars, context) => {
+      if (context?.previous) queryClient.setQueryData(['users'], context.previous);
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
       message.error(msg ?? '更新失败');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
     },
   });
 
@@ -141,10 +156,10 @@ export default function UsersPage() {
   return (
     <>
       <PageHeader title="用户管理" />
-      <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+      <AppCard>
         {selectedIds.length > 0 && (
-          <Space style={{ marginBottom: 12 }}>
-            <span style={{ fontSize: 13, color: '#595959' }}>已选 {selectedIds.length} 人，批量设置角色：</span>
+          <Space style={{ marginBottom: 12 }} wrap>
+            <Typography.Text type="secondary" style={{ fontSize: 13 }}>已选 {selectedIds.length} 人，批量设置角色：</Typography.Text>
             <Select
               value={batchRole}
               placeholder="选择角色"
@@ -161,23 +176,27 @@ export default function UsersPage() {
             <Button onClick={() => { setSelectedIds([]); setBatchRole(undefined); }}>取消</Button>
           </Space>
         )}
-        <Table
-          size="middle"
-          rowKey="id"
-          loading={isLoading}
-          dataSource={users}
-          columns={columns}
-          scroll={{ x: 'max-content' }}
-          pagination={{ showTotal: (total) => `共 ${total} 条` }}
-          rowSelection={{
-            selectedRowKeys: selectedIds,
-            onChange: (keys) => setSelectedIds(keys as string[]),
-            getCheckboxProps: (record: UserRecord) => ({
-              disabled: !selectableIds.has(record.id),
-            }),
-          }}
-        />
-      </Card>
+        {isLoading && !data ? (
+          <TableSkeleton />
+        ) : (
+          <Table
+            size="middle"
+            rowKey="id"
+            loading={isLoading}
+            dataSource={users}
+            columns={columns}
+            scroll={{ x: 'max-content' }}
+            pagination={{ showTotal: (total) => `共 ${total} 条` }}
+            rowSelection={{
+              selectedRowKeys: selectedIds,
+              onChange: (keys) => setSelectedIds(keys as string[]),
+              getCheckboxProps: (record: UserRecord) => ({
+                disabled: !selectableIds.has(record.id),
+              }),
+            }}
+          />
+        )}
+      </AppCard>
     </>
   );
 }

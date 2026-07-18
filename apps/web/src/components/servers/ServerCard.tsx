@@ -1,17 +1,32 @@
 'use client';
 
-import dayjs from 'dayjs';
+import dayjs from '@/lib/dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
-import { Card, Space, Tag, Typography, Progress, Dropdown, Button, Tooltip } from 'antd';
+import { Space, Tag, Typography, Dropdown, Button, Tooltip, theme as antdTheme } from 'antd';
 import ServerTagList from './ServerTagList';
 
 function GfwDot({ gfwBlocked }: { gfwBlocked: boolean | null | undefined }) {
-  const color = gfwBlocked === false ? '#52c41a' : gfwBlocked === true ? '#ff4d4f' : '#d9d9d9';
+  const { token } = antdTheme.useToken();
+  const color =
+    gfwBlocked === false
+      ? statusColors.success
+      : gfwBlocked === true
+        ? statusColors.error
+        : token.colorBorder;
   const label = gfwBlocked === false ? '未被封锁' : gfwBlocked === true ? '已被封锁' : 'GFW 未检测';
   return (
     <Tooltip title={label}>
-      <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
+      <span
+        style={{
+          display: 'inline-block',
+          width: 7,
+          height: 7,
+          borderRadius: '50%',
+          background: color,
+          flexShrink: 0,
+        }}
+      />
     </Tooltip>
   );
 }
@@ -25,34 +40,12 @@ import {
 } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import StatusTag from '@/components/common/StatusTag';
+import AppCard from '@/components/common/AppCard';
+import UsageBar from '@/components/common/UsageBar';
+import { pingColor, heartbeatColor, statusColors } from '@/theme/semantic';
 import type { Server } from '@/types/api';
 
-dayjs.extend(relativeTime);
-dayjs.locale('zh-cn');
-
 const { Text } = Typography;
-
-function heartbeatColor(lastSeenAt: string | null): string {
-  if (!lastSeenAt) return '#8c8c8c';
-  const diffMin = dayjs().diff(dayjs(lastSeenAt), 'minute');
-  if (diffMin <= 5) return '#52c41a';
-  if (diffMin <= 30) return '#faad14';
-  return '#ff4d4f';
-}
-
-function pingColor(ms: number | null): string {
-  if (ms == null) return '#8c8c8c';
-  if (ms <= 50) return '#52c41a';
-  if (ms <= 150) return '#faad14';
-  return '#ff4d4f';
-}
-
-function usageColor(pct: number | null | undefined): string {
-  if (pct == null) return '#1677ff';
-  if (pct < 70) return '#52c41a';
-  if (pct < 90) return '#faad14';
-  return '#ff4d4f';
-}
 
 interface Props {
   server: Server;
@@ -74,13 +67,15 @@ export default function ServerCard({
   onTestSsh,
 }: Props) {
   const router = useRouter();
+  const { token } = antdTheme.useToken();
   const isDeleting = server.status === 'DELETING';
   const hasDeleteError = server.status === 'ERROR' && !!server.deleteError;
 
   return (
-    <Card
+    <AppCard
       size="small"
-      style={{ borderRadius: 8, opacity: isDeleting ? 0.6 : 1, cursor: 'pointer' }}
+      hoverable
+      style={{ opacity: isDeleting ? 0.6 : 1, cursor: 'pointer' }}
       styles={{ body: { padding: 16 } }}
       onClick={() => router.push(`/servers/${server.id}`)}
     >
@@ -173,22 +168,9 @@ export default function ServerCard({
 
       {/* 资源进度条 */}
       <Space direction="vertical" size={4} style={{ width: '100%' }}>
-        {(['cpuUsage', 'memUsage', 'diskUsage'] as const).map((key) => {
-          const labels: Record<string, string> = { cpuUsage: 'CPU', memUsage: '内存', diskUsage: '磁盘' };
-          const val = server[key];
-          return (
-            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Text style={{ fontSize: 11, color: '#8c8c8c', width: 28, flexShrink: 0 }}>{labels[key]}</Text>
-              <Progress
-                percent={val != null ? Math.round(val) : 0}
-                size="small"
-                strokeColor={usageColor(val)}
-                style={{ flex: 1, margin: 0 }}
-                format={(p) => val != null ? `${p}%` : '—'}
-              />
-            </div>
-          );
-        })}
+        <UsageBar label="CPU" percent={server.cpuUsage} />
+        <UsageBar label="内存" percent={server.memUsage} />
+        <UsageBar label="磁盘" percent={server.diskUsage} />
       </Space>
 
       {/* 标签 */}
@@ -200,7 +182,7 @@ export default function ServerCard({
 
       {/* 删除失败操作区 */}
       {hasDeleteError && (
-        <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #f0f0f0' }}>
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${token.colorBorderSecondary}` }}>
           <Text type="danger" style={{ fontSize: 11, display: 'block', marginBottom: 6 }}>
             节点清理失败，请重试或强制删除
           </Text>
@@ -210,6 +192,6 @@ export default function ServerCard({
           </Space>
         </div>
       )}
-    </Card>
+    </AppCard>
   );
 }

@@ -2,16 +2,51 @@
 
 import { useState } from 'react';
 import {
-  App, Button, Table, Tag, Space, Card, Modal, Input, Empty, Spin, Popconfirm, Typography, Tooltip,
+  App, Button, Table, Tag, Space, Modal, Input, Popconfirm, Typography, Tooltip, theme as antdTheme,
 } from 'antd';
-import { ImportOutlined, DeleteOutlined, ApiOutlined } from '@ant-design/icons';
+import { DeleteOutlined, ApiOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { externalNodesApi } from '@/lib/api';
 import PageHeader from '@/components/common/PageHeader';
+import AppCard from '@/components/common/AppCard';
+import EmptyState from '@/components/common/EmptyState';
+import { TableSkeleton } from '@/components/common/skeletons';
+import { statusColors } from '@/theme/semantic';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import type { ExternalNode, ConnectivityResult } from '@/types/api';
 
 const { TextArea } = Input;
+
+/** 状态点脉冲动画（inline style 不支持 @keyframes，用 <style> 注入） */
+const STATUS_DOT_CSS = `
+.np-status-dot {
+  transition: background-color 0.2s ease;
+}
+.np-status-dot-pulse {
+  animation: np-status-dot-pulse 1.2s ease-in-out infinite;
+}
+@keyframes np-status-dot-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.6); opacity: 0.45; }
+}
+`;
+
+/** 连通性状态点：颜色取自语义色板；pulse 用于"测试中"状态 */
+function StatusDot({ color, pulse = false }: { color: string; pulse?: boolean }) {
+  return (
+    <span
+      className={pulse ? 'np-status-dot np-status-dot-pulse' : 'np-status-dot'}
+      style={{
+        display: 'inline-block',
+        width: 8,
+        height: 8,
+        borderRadius: '50%',
+        background: color,
+        flexShrink: 0,
+      }}
+    />
+  );
+}
 
 function formatTimeAgo(isoString: string | null): string {
   if (!isoString) return '';
@@ -28,6 +63,7 @@ export default function ExternalNodesPage() {
   const { message } = App.useApp();
   const qc = useQueryClient();
   const { isMobile } = useIsMobile();
+  const { token } = antdTheme.useToken();
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -106,15 +142,25 @@ export default function ExternalNodesPage() {
       title: '连通性',
       width: 110,
       render: (_: unknown, r: ExternalNode) => {
-        if (testingId === r.id) return <Spin size="small" />;
+        if (testingId === r.id) {
+          return (
+            <Space size={6}>
+              <StatusDot color={statusColors.info} pulse />
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>测试中</Typography.Text>
+            </Space>
+          );
+        }
         const res = testResults[r.id];
         const source = res ?? (r.lastTestedAt ? { reachable: r.lastReachable, latency: r.lastLatency, testedAt: r.lastTestedAt } : null);
         if (!source) return <Tag>未测试</Tag>;
         return (
           <Space direction="vertical" size={2}>
-            <Tag color={source.reachable ? 'green' : 'red'} style={{ marginRight: 0 }}>
-              {source.reachable ? `${source.latency}ms` : '失败'}
-            </Tag>
+            <Space size={6}>
+              <StatusDot color={source.reachable ? statusColors.success : statusColors.error} />
+              <Tag color={source.reachable ? 'green' : 'red'} style={{ marginRight: 0 }}>
+                {source.reachable ? `${source.latency}ms` : '失败'}
+              </Tag>
+            </Space>
             <Typography.Text type="secondary" style={{ fontSize: 11 }}>{formatTimeAgo(source.testedAt ?? null)}</Typography.Text>
           </Space>
         );
@@ -154,27 +200,33 @@ export default function ExternalNodesPage() {
     : allExternalColumns;
 
   return (
-    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+    <AppCard>
+      <style>{STATUS_DOT_CSS}</style>
       <PageHeader
         title="外部节点"
         addLabel="导入节点"
         onAdd={() => setImportOpen(true)}
       />
 
-      <Spin spinning={isLoading}>
-        {!isLoading && data.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无外部节点" style={{ padding: '32px 0' }} />
-        ) : (
-          <Table
-            rowKey="id"
-            size="middle"
-            dataSource={data}
-            columns={columns}
-            scroll={{ x: 'max-content' }}
-            pagination={{ showTotal: (total) => `共 ${total} 条` }}
-          />
-        )}
-      </Spin>
+      {isLoading ? (
+        <TableSkeleton rows={6} />
+      ) : data.length === 0 ? (
+        <EmptyState
+          title="暂无外部节点"
+          description="导入订阅链接或节点 URI，将第三方节点纳入统一管理与连通性测试"
+          actionLabel="导入节点"
+          onAction={() => setImportOpen(true)}
+        />
+      ) : (
+        <Table
+          rowKey="id"
+          size="middle"
+          dataSource={data}
+          columns={columns}
+          scroll={{ x: 'max-content' }}
+          pagination={{ showTotal: (total) => `共 ${total} 条` }}
+        />
+      )}
 
       <Modal
         open={importOpen}
@@ -186,7 +238,7 @@ export default function ExternalNodesPage() {
         width={560}
         style={{ maxWidth: '95vw' }}
       >
-        <div style={{ marginBottom: 8, color: '#8c8c8c', fontSize: 13 }}>
+        <div style={{ marginBottom: 8, color: token.colorTextSecondary, fontSize: 13 }}>
           支持以下格式：订阅链接（https://...）、Base64 编码的订阅内容、单个或多个 URI（vmess:// vless:// ss:// trojan:// hysteria2://）
         </div>
         <TextArea
@@ -197,6 +249,6 @@ export default function ExternalNodesPage() {
           style={{ fontFamily: 'monospace', fontSize: 12 }}
         />
       </Modal>
-    </Card>
+    </AppCard>
   );
 }

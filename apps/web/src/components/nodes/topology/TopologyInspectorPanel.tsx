@@ -13,6 +13,8 @@ import {
   ShareAltOutlined,
 } from '@ant-design/icons';
 import StatusTag from '@/components/common/StatusTag';
+import { useThemeMode } from '@/theme/ThemeContext';
+import { statusColors } from '@/theme/semantic';
 import type { Node } from '@/types/api';
 import type { UseNodeActionsResult } from '@/hooks/useNodeActions';
 import type { ChainTopologyEdge, InspectorSelection, ServerTopologyNode } from './types';
@@ -65,13 +67,15 @@ function NodeRow({
   nodeActions: UseNodeActionsResult;
   missingExit?: boolean;
 }) {
+  const { resolvedMode } = useThemeMode();
+
   return (
     <div className={styles.panelNodeRow}>
       <div className={styles.panelNodeMain}>
         <div className={styles.panelNodeTitle}>
           <span
             className={styles.chainColorDot}
-            style={{ background: node.exitServerId ? stableNodeColor(node.id) : '#94a3b8' }}
+            style={{ background: node.exitServerId ? stableNodeColor(node.id, resolvedMode) : statusColors.neutral }}
           />
           <Typography.Text strong ellipsis className={styles.panelNodeName}>
             {node.name}

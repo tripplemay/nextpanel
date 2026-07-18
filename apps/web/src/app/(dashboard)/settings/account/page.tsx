@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { authApi, wxWorkApi } from '@/lib/api';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import PageHeader from '@/components/common/PageHeader';
+import AppCard from '@/components/common/AppCard';
 import type { AxiosError } from 'axios';
 
 const { Text } = Typography;
@@ -67,7 +68,7 @@ export default function AccountSettingsPage() {
   }
 
   return (
-    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+    <AppCard>
       <PageHeader title="账户安全" />
 
       <Card title="修改密码" size="small" style={{ maxWidth: 400 }}>
@@ -152,6 +153,6 @@ export default function AccountSettingsPage() {
           )}
         </Card>
       )}
-    </Card>
+    </AppCard>
   );
 }

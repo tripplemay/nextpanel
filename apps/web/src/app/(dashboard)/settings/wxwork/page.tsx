@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect } from 'react';
-import { App, Button, Card, Form, Input, Space, Typography, Alert } from 'antd';
+import { App, Alert, Button, Card, Form, Input, Space, Typography } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { wxWorkApi } from '@/lib/api';
 import PageHeader from '@/components/common/PageHeader';
+import AppCard from '@/components/common/AppCard';
 import type { UpsertWxWorkSettingDto } from '@/types/api';
 
 const { Text } = Typography;
@@ -76,74 +77,76 @@ export default function WxWorkSettingsPage() {
   }
 
   return (
-    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+    <AppCard>
       <PageHeader title="企业微信" />
 
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginBottom: 24 }}
-        message="配置说明"
-        description={
-          <div>
-            <div>1. 登录企业微信管理后台，创建一个自建应用</div>
-            <div>2. 在应用详情页获取 AgentId 和 Secret</div>
-            <div>3. 在企业信息页获取企业 ID（CorpId）</div>
-            <div>4. 在应用的"网页授权及 JS-SDK"中添加可信域名</div>
-            <div style={{ marginTop: 8 }}>
-              <Text type="secondary">使用企业微信登录需要绑定域名并启用 HTTPS</Text>
+      <Card size="small" style={{ maxWidth: 560 }}>
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 24 }}
+          message="配置说明"
+          description={
+            <div>
+              <div>1. 登录企业微信管理后台，创建一个自建应用</div>
+              <div>2. 在应用详情页获取 AgentId 和 Secret</div>
+              <div>3. 在企业信息页获取企业 ID（CorpId）</div>
+              <div>4. 在应用的"网页授权及 JS-SDK"中添加可信域名</div>
+              <div style={{ marginTop: 8 }}>
+                <Text type="secondary">使用企业微信登录需要绑定域名并启用 HTTPS</Text>
+              </div>
             </div>
-          </div>
-        }
-      />
+          }
+        />
 
-      <Form form={form} layout="vertical" style={{ maxWidth: 480 }}>
-        <Form.Item
-          name="corpId"
-          label="企业 ID（CorpId）"
-          rules={[{ required: true, message: '请输入企业 ID' }]}
-        >
-          <Input placeholder="wxxxxxxxxxxxxxxxxx" />
-        </Form.Item>
+        <Form form={form} layout="vertical" style={{ maxWidth: 480 }}>
+          <Form.Item
+            name="corpId"
+            label="企业 ID（CorpId）"
+            rules={[{ required: true, message: '请输入企业 ID' }]}
+          >
+            <Input placeholder="wxxxxxxxxxxxxxxxxx" />
+          </Form.Item>
 
-        <Form.Item
-          name="agentId"
-          label="应用 ID（AgentId）"
-          rules={[{ required: true, message: '请输入应用 ID' }]}
-        >
-          <Input placeholder="1000002" />
-        </Form.Item>
+          <Form.Item
+            name="agentId"
+            label="应用 ID（AgentId）"
+            rules={[{ required: true, message: '请输入应用 ID' }]}
+          >
+            <Input placeholder="1000002" />
+          </Form.Item>
 
-        <Form.Item
-          name="secret"
-          label="应用密钥（Secret）"
-          rules={setting ? [] : [{ required: true, message: '请输入应用密钥' }]}
-          extra={setting ? '留空保持不变' : ''}
-        >
-          <Input.Password placeholder="应用密钥" />
-        </Form.Item>
+          <Form.Item
+            name="secret"
+            label="应用密钥（Secret）"
+            rules={setting ? [] : [{ required: true, message: '请输入应用密钥' }]}
+            extra={setting ? '留空保持不变' : ''}
+          >
+            <Input.Password placeholder="应用密钥" />
+          </Form.Item>
 
-        <Form.Item
-          name="proxyUrl"
-          label="API 代理（可选）"
-          extra="海外服务器无法访问微信 API 时使用，如 http://proxy:7890"
-        >
-          <Input placeholder="http://proxy.example.com:7890" />
-        </Form.Item>
+          <Form.Item
+            name="proxyUrl"
+            label="API 代理（可选）"
+            extra="海外服务器无法访问微信 API 时使用，如 http://proxy:7890"
+          >
+            <Input placeholder="http://proxy.example.com:7890" />
+          </Form.Item>
 
-        <Form.Item>
-          <Space>
-            <Button type="primary" onClick={handleSave} loading={saveMutation.isPending}>
-              保存
-            </Button>
-            {setting && (
-              <Button danger icon={<DeleteOutlined />} onClick={handleRemove} loading={removeMutation.isPending}>
-                删除配置
+          <Form.Item>
+            <Space>
+              <Button type="primary" onClick={handleSave} loading={saveMutation.isPending}>
+                保存
               </Button>
-            )}
-          </Space>
-        </Form.Item>
-      </Form>
-    </Card>
+              {setting && (
+                <Button danger icon={<DeleteOutlined />} onClick={handleRemove} loading={removeMutation.isPending}>
+                  删除配置
+                </Button>
+              )}
+            </Space>
+          </Form.Item>
+        </Form>
+      </Card>
+    </AppCard>
   );
 }

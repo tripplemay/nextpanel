@@ -49,40 +49,79 @@ export default function AuthLayout({ children }: Props) {
       {!isMobile && (
         <div
           style={{
-            width: 420,
+            width: 440,
             flexShrink: 0,
-            background: 'linear-gradient(135deg, #1677ff 0%, #722ed1 100%)',
+            background:
+              'radial-gradient(600px 400px at 20% 0%, rgba(255,255,255,0.18) 0%, transparent 60%), linear-gradient(150deg, #1677ff 0%, #0958d9 45%, #722ed1 100%)',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'center',
-            padding: '48px 40px',
+            padding: '48px 44px',
+            position: 'relative',
+            overflow: 'hidden',
           }}
         >
+          {/* 点阵纹理装饰 */}
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              backgroundImage: 'radial-gradient(rgba(255,255,255,0.14) 1px, transparent 1px)',
+              backgroundSize: '24px 24px',
+              maskImage: 'linear-gradient(to bottom, transparent, black 20%, black 80%, transparent)',
+              WebkitMaskImage:
+                'linear-gradient(to bottom, transparent, black 20%, black 80%, transparent)',
+              pointerEvents: 'none',
+            }}
+          />
+
           {/* Logo + 标题 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-            <DashboardOutlined style={{ fontSize: 32, color: '#fff' }} />
-            <Title level={2} style={{ margin: 0, color: '#fff' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, position: 'relative' }}>
+            <div
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 12,
+                background: 'rgba(255,255,255,0.16)',
+                border: '1px solid rgba(255,255,255,0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backdropFilter: 'blur(8px)',
+              }}
+            >
+              <DashboardOutlined style={{ fontSize: 24, color: '#fff' }} />
+            </div>
+            <Title level={2} style={{ margin: 0, color: '#fff', letterSpacing: 0.5 }}>
               NextPanel
             </Title>
           </div>
-          <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 15, marginBottom: 48 }}>
+          <Text
+            style={{
+              color: 'rgba(255,255,255,0.75)',
+              fontSize: 15,
+              marginBottom: 44,
+              position: 'relative',
+            }}
+          >
             数据加密通道管理面板
           </Text>
 
           {/* 特性列表 */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, position: 'relative' }}>
             {features.map((f) => (
               <div
                 key={f.title}
                 style={{
-                  background: 'rgba(255,255,255,0.12)',
+                  background: 'rgba(255,255,255,0.10)',
+                  border: '1px solid rgba(255,255,255,0.14)',
                   borderRadius: 12,
-                  padding: '16px 20px',
+                  padding: '14px 18px',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 16,
                   color: '#fff',
-                  backdropFilter: 'blur(4px)',
+                  backdropFilter: 'blur(8px)',
                 }}
               >
                 <div
@@ -90,7 +129,7 @@ export default function AuthLayout({ children }: Props) {
                     width: 40,
                     height: 40,
                     borderRadius: 10,
-                    background: 'rgba(255,255,255,0.2)',
+                    background: 'rgba(255,255,255,0.18)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -114,6 +153,7 @@ export default function AuthLayout({ children }: Props) {
               fontSize: 12,
               marginTop: 'auto',
               paddingTop: 48,
+              position: 'relative',
             }}
           >
             © 2025 NextPanel
@@ -121,14 +161,13 @@ export default function AuthLayout({ children }: Props) {
         </div>
       )}
 
-      {/* 右侧表单区 */}
+      {/* 右侧表单区（背景跟随主题，由全局 body 背景承载） */}
       <div
         style={{
           flex: 1,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: '#fff',
           padding: 24,
         }}
       >
@@ -136,8 +175,21 @@ export default function AuthLayout({ children }: Props) {
           {/* 移动端显示 Logo */}
           {isMobile && (
             <div style={{ textAlign: 'center', marginBottom: 32 }}>
-              <DashboardOutlined style={{ fontSize: 28, color: '#1677ff' }} />
-              <Title level={3} style={{ marginTop: 8, marginBottom: 4 }}>
+              <div
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: 12,
+                  background: 'linear-gradient(135deg, #1677ff 0%, #0958d9 100%)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 4px 12px rgba(22, 119, 255, 0.35)',
+                }}
+              >
+                <DashboardOutlined style={{ fontSize: 26, color: '#fff' }} />
+              </div>
+              <Title level={3} style={{ marginTop: 12, marginBottom: 4 }}>
                 NextPanel
               </Title>
               <Text type="secondary" style={{ fontSize: 13 }}>

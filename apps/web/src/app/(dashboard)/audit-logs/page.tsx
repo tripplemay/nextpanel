@@ -1,13 +1,17 @@
 'use client';
 
 import { useState } from 'react';
-import { App, Table, Tag, Card, Typography, Select, Space, Spin, Empty } from 'antd';
+import { App, Table, Tag, Typography, Select, Space, Spin, Empty, theme } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { auditApi, operationLogsApi } from '@/lib/api';
 import type { AuditLog, OperationLogDetail } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
 import PageHeader from '@/components/common/PageHeader';
+import AppCard from '@/components/common/AppCard';
+import { TableSkeleton } from '@/components/common/skeletons';
+import EmptyState from '@/components/common/EmptyState';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useThemeTokens } from '@/theme/ThemeContext';
 
 const { Text } = Typography;
 
@@ -40,6 +44,7 @@ const ACTION_COLOR: Record<string, string> = {
 // ── SSH log pane (lazy-loaded) ────────────────────────────────────────────────
 
 function SshLogPane({ correlationId }: { correlationId: string }) {
+  const tokens = useThemeTokens();
   const { data, isLoading } = useQuery<OperationLogDetail | null>({
     queryKey: ['operation-log-correlation', correlationId],
     queryFn: () => operationLogsApi.getByCorrelationId(correlationId).then((r) => r.data),
@@ -55,8 +60,8 @@ function SshLogPane({ correlationId }: { correlationId: string }) {
   return (
     <div
       style={{
-        background: '#0d1117',
-        color: '#c9d1d9',
+        background: tokens.logBg,
+        color: tokens.logText,
         fontFamily: 'monospace',
         fontSize: 12,
         padding: 12,
@@ -75,7 +80,7 @@ function SshLogPane({ correlationId }: { correlationId: string }) {
           line.includes('已停止') ||
           line.includes('已删除');
         return (
-          <div key={i} style={{ color: isError ? '#f85149' : isSuccess ? '#3fb950' : '#c9d1d9' }}>
+          <div key={i} style={{ color: isError ? tokens.logError : isSuccess ? tokens.logSuccess : tokens.logText }}>
             {line}
           </div>
         );
@@ -102,6 +107,7 @@ function hasSshLog(record: AuditLog): boolean {
 // ── Expanded row content ──────────────────────────────────────────────────────
 
 function ExpandedRowContent({ record }: { record: AuditLog }) {
+  const { token } = theme.useToken();
 
   if (!hasDiff(record) && !hasSshLog(record)) {
     return <Empty description="暂无详情" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '8px 0' }} />;
@@ -111,13 +117,13 @@ function ExpandedRowContent({ record }: { record: AuditLog }) {
     <Space direction="vertical" style={{ width: '100%' }} size={12}>
       {hasDiff(record) && (
         <div>
-          <Text strong style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 6 }}>
+          <Text strong type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
             变更详情
           </Text>
           <pre
             style={{
-              background: '#f6f8fa',
-              border: '1px solid #e8e8e8',
+              background: token.colorFillQuaternary,
+              border: `1px solid ${token.colorBorderSecondary}`,
               borderRadius: 4,
               padding: 10,
               fontSize: 12,
@@ -132,7 +138,7 @@ function ExpandedRowContent({ record }: { record: AuditLog }) {
       )}
       {hasSshLog(record) && (
         <div>
-          <Text strong style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 6 }}>
+          <Text strong type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
             SSH 执行日志
           </Text>
           <SshLogPane correlationId={record.correlationId!} />
@@ -209,7 +215,7 @@ export default function AuditLogsPage() {
   const rowExpandable = (record: AuditLog) => hasDiff(record) || hasSshLog(record);
 
   return (
-    <Card style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+    <AppCard>
       <PageHeader
         title="审计日志"
         extra={
@@ -225,27 +231,41 @@ export default function AuditLogsPage() {
           />
         }
       />
-      <Table<AuditLog>
-        rowKey="id"
-        loading={isLoading}
-        dataSource={data?.data}
-        columns={columns}
-        scroll={{ x: 'max-content' }}
-        expandable={{
-          expandedRowRender: (record) => <ExpandedRowContent record={record} />,
-          rowExpandable,
-        }}
-        pagination={{
-          current: page,
-          pageSize,
-          total: data?.total,
-          onChange: (p) => {
-            setPage(p);
-          },
-          showTotal: (total) => `共 ${total} 条`,
-        }}
-        size="middle"
-      />
-    </Card>
+      {isLoading && !data ? (
+        <TableSkeleton />
+      ) : (
+        <Table<AuditLog>
+          rowKey="id"
+          loading={isLoading}
+          dataSource={data?.data}
+          columns={columns}
+          scroll={{ x: 'max-content' }}
+          expandable={{
+            expandedRowRender: (record) => <ExpandedRowContent record={record} />,
+            rowExpandable,
+          }}
+          locale={{
+            emptyText: (
+              <EmptyState
+                title="暂无审计日志"
+                description={actionFilter ? '当前筛选条件下没有记录' : '还没有任何操作记录'}
+                actionLabel={actionFilter ? '清除筛选' : undefined}
+                onAction={actionFilter ? () => { setActionFilter(''); setPage(1); } : undefined}
+              />
+            ),
+          }}
+          pagination={{
+            current: page,
+            pageSize,
+            total: data?.total,
+            onChange: (p) => {
+              setPage(p);
+            },
+            showTotal: (total) => `共 ${total} 条`,
+          }}
+          size="middle"
+        />
+      )}
+    </AppCard>
   );
 }
