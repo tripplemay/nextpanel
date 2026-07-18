@@ -69,7 +69,7 @@ export default function DeployDrawer({
         width="100%"
         style={{ top: 0, maxWidth: '100vw', margin: 0, padding: 0 }}
         styles={{
-          content: { borderRadius: 0, height: '100dvh', display: 'flex', flexDirection: 'column' },
+          container: { borderRadius: 0, height: '100dvh', display: 'flex', flexDirection: 'column' },
           body: { flex: 1, overflowY: 'auto', padding: 12 },
         }}
         maskClosable={false}

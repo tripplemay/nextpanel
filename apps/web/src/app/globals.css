@@ -13,12 +13,22 @@ body {
 
 /* body 背景跟随主题（内联脚本在首绘前写入 data-theme，保证暗色用户无白闪） */
 body {
-  background: #f5f7fa;
+  background: #fafafa;
+  font-variant-numeric: tabular-nums;
   transition: background-color 0.2s ease;
 }
 
 :root[data-theme='dark'] body {
-  background: #0d1117;
+  background: #0a0a0b;
+}
+
+/* 标题收紧字距，接近 Linear/Vercel 排版观感 */
+h1.ant-typography,
+h2.ant-typography,
+h3.ant-typography,
+h4.ant-typography,
+h5.ant-typography {
+  letter-spacing: -0.015em;
 }
 
 ::selection {
@@ -56,7 +66,7 @@ body {
 
 .np-sidebar .ant-menu-inline:not(.ant-menu-inline-collapsed) .ant-menu-item,
 .np-sidebar .ant-menu-inline:not(.ant-menu-inline-collapsed) .ant-menu-submenu-title {
-  border-radius: 8px;
+  border-radius: 6px;
   margin-inline: 8px;
   width: auto;
 }

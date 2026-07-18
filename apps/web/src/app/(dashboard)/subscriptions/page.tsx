@@ -456,7 +456,7 @@ export default function SubscriptionsPage() {
           />
         )}
 
-        <Divider orientation="left" style={{ marginTop: 32 }}>共享订阅</Divider>
+        <Divider titlePlacement="start" style={{ marginTop: 32 }}>共享订阅</Divider>
 
         {shared.length === 0 ? (
           <EmptyState title="暂无分享给你的订阅" />

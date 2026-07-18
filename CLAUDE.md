@@ -99,12 +99,12 @@ Swagger UI：http://localhost:3001/api/docs（后端运行时可访问）
 
 **API 客户端**（`lib/api.ts`）：Axios 实例，请求拦截器注入 `Authorization: Bearer <token>`，响应拦截器在 401 时跳转到 `/login`。所有响应类型定义在 `src/types/api.ts`。
 
-**UI**：Ant Design 5，使用 `zhCN` 中文语言包。SSR 兼容需要 `@ant-design/nextjs-registry`。应用包裹在 `<Providers>`（`app/providers.tsx`）中 — QueryClient + ThemeProvider + ConfigProvider + App。
+**UI**：Ant Design 6，使用 `zhCN` 中文语言包。SSR 兼容需要 `@ant-design/nextjs-registry`。应用包裹在 `<Providers>`（`app/providers.tsx`）中 — QueryClient + ThemeProvider + ConfigProvider + App。字体：Inter 可变字体自托管（`app/fonts/InterVariable.woff2` + `next/font/local`，CSS 变量 `--font-inter`；拉丁/数字用 Inter，中文回退系统字体），全局 `tabular-nums`。
 
 **主题系统**（`src/theme/`，亮/暗双主题）：
 - `ThemeContext.tsx` — `useThemeMode()`（mode/resolvedMode/setMode，localStorage `np-theme-mode` 持久化，支持 system 跟随）、`useThemeTokens()`
 - `tokens.ts` — 自定义语义 token（日志终端/图表/拓扑/侧栏/阴影），亮暗两套；AntD 组件颜色优先用 `theme.useToken()`，不要往 tokens.ts 加 AntD 已有的颜色
-- `antd-theme.ts` — `buildAntdTheme(mode)`：darkAlgorithm + Menu/Card 组件级定制
+- `antd-theme.ts` — `buildAntdTheme(mode)`：darkAlgorithm + Linear/Vercel 风格中性配方（zinc 系中性色、细边框代替阴影、6px 圆角、表格紧凑密度）+ Menu/Table/Card 组件级定制
 - `semantic.ts` — `statusColors` + `usageColor`/`pingColor`/`heartbeatColor`（状态色唯一来源）
 - `app/layout.tsx` 内联脚本在首绘前写入 `<html data-theme>` 防闪烁；CSS Module 暗色用 `:global([data-theme='dark'])` 覆盖
 

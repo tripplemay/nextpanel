@@ -283,7 +283,7 @@ export default function NodeFormModal({ open, initialValues, onClose, onSuccess 
         initialValues={{ tls: 'NONE', implementation: 'XRAY', transport: 'TCP', enabled: true }}
       >
         {/* ── 基础信息 ─────────────────────────────────────────────────────── */}
-        <Divider orientation="left" orientationMargin={0}>基础信息</Divider>
+        <Divider titlePlacement="start" styles={{ content: { margin: 0 } }}>基础信息</Divider>
 
         <Form.Item name="serverId" label="服务器" rules={[{ required: true }]}>
           <Select placeholder="选择服务器">
@@ -300,7 +300,7 @@ export default function NodeFormModal({ open, initialValues, onClose, onSuccess 
         </Form.Item>
 
         {/* ── 协议配置 ─────────────────────────────────────────────────────── */}
-        <Divider orientation="left" orientationMargin={0}>协议配置</Divider>
+        <Divider titlePlacement="start" styles={{ content: { margin: 0 } }}>协议配置</Divider>
 
         <Form.Item name="protocol" label="协议" rules={[{ required: true }]}>
           <Select placeholder="选择协议">
@@ -376,7 +376,7 @@ export default function NodeFormModal({ open, initialValues, onClose, onSuccess 
 
         {/* ── 凭证信息 ─────────────────────────────────────────────────────── */}
         {showCreds && (
-          <Divider orientation="left" orientationMargin={0}>凭证信息</Divider>
+          <Divider titlePlacement="start" styles={{ content: { margin: 0 } }}>凭证信息</Divider>
         )}
 
         {showUuid && (

@@ -5,12 +5,12 @@
   overflow: hidden;
   border: 1px solid #dbe5f4;
   border-radius: 18px;
-  background-color: #f5f7fa;
+  background-color: #fafafa;
 }
 
 :global([data-theme='dark']) .topologyShell {
-  border-color: #30363d;
-  background-color: #0d1117;
+  border-color: #26262b;
+  background-color: #0a0a0b;
 }
 
 /* 画布装饰渐变：作为 background-image 叠加在 page.tsx 注入的
@@ -37,24 +37,24 @@
   background-image:
     radial-gradient(circle at 10% 10%, rgba(59, 130, 246, 0.16), transparent 30%),
     radial-gradient(circle at 85% 15%, rgba(20, 184, 166, 0.12), transparent 28%);
-  --xy-controls-button-background-color: #161b22;
-  --xy-controls-button-background-color-hover: #21262d;
-  --xy-controls-button-color: #e6edf3;
-  --xy-controls-button-border-color: #30363d;
+  --xy-controls-button-background-color: #141416;
+  --xy-controls-button-background-color-hover: #1c1c21;
+  --xy-controls-button-color: #f4f4f5;
+  --xy-controls-button-border-color: #26262b;
   --xy-controls-box-shadow: 0 0 2px 1px rgba(0, 0, 0, 0.4);
-  --xy-minimap-background-color: #161b22;
+  --xy-minimap-background-color: #141416;
   --xy-minimap-mask-background-color: rgba(13, 17, 23, 0.65);
   --xy-attribution-background-color: rgba(22, 27, 34, 0.6);
 }
 
 .flowCanvas :global(.react-flow__minimap) {
   overflow: hidden;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e4e4e7;
   border-radius: 8px;
 }
 
 :global([data-theme='dark']) .flowCanvas :global(.react-flow__minimap) {
-  border-color: #30363d;
+  border-color: #26262b;
 }
 
 /* 只对颜色/描边做过渡；绝不要碰 transform，否则会破坏拖动 */
@@ -74,7 +74,7 @@
 }
 
 :global([data-theme='dark']) .serverNode {
-  border-color: #30363d;
+  border-color: #26262b;
   background: rgba(22, 27, 34, 0.94);
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
 }
@@ -98,7 +98,7 @@
 }
 
 :global([data-theme='dark']) .flowHandle {
-  border-color: #161b22;
+  border-color: #141416;
   background: #58a6ff;
 }
 
@@ -109,7 +109,7 @@
 }
 
 :global([data-theme='dark']) .serverHeader {
-  border-bottom-color: #21262d;
+  border-bottom-color: #1c1c21;
   background: linear-gradient(135deg, rgba(230, 237, 243, 0.03), rgba(88, 166, 255, 0.08));
 }
 
@@ -136,7 +136,7 @@
 }
 
 :global([data-theme='dark']) .serverMeta {
-  color: #8b949e;
+  color: #a1a1aa;
 }
 
 .serverMeta span {
@@ -170,8 +170,8 @@
 }
 
 :global([data-theme='dark']) .nodeZone {
-  border-color: #21262d;
-  background: #0d1117;
+  border-color: #1c1c21;
+  background: #0a0a0b;
 }
 
 .zoneHeader {
@@ -186,7 +186,7 @@
 }
 
 :global([data-theme='dark']) .zoneHeader {
-  color: #e6edf3;
+  color: #f4f4f5;
 }
 
 .zoneHeader span:first-child {
@@ -204,7 +204,7 @@
 }
 
 :global([data-theme='dark']) .zoneHeader span:last-child {
-  color: #8b949e;
+  color: #a1a1aa;
 }
 
 .protocolDots {
@@ -222,7 +222,7 @@
 
 :global([data-theme='dark']) .emptyText,
 :global([data-theme='dark']) .emptyLine {
-  color: #8b949e;
+  color: #a1a1aa;
 }
 
 .emptyLine {
@@ -251,8 +251,8 @@
 }
 
 :global([data-theme='dark']) .previewItem {
-  background: #21262d;
-  color: #e6edf3;
+  background: #1c1c21;
+  color: #f4f4f5;
 }
 
 .previewName {
@@ -268,7 +268,7 @@
 }
 
 :global([data-theme='dark']) .previewMeta {
-  color: #8b949e;
+  color: #a1a1aa;
 }
 
 .disabledDot {
@@ -290,7 +290,7 @@
 }
 
 :global([data-theme='dark']) .previewMore {
-  color: #8b949e;
+  color: #a1a1aa;
 }
 
 .warningLine {
@@ -324,7 +324,7 @@
 }
 
 :global([data-theme='dark']) .edgeLabel {
-  border-color: #30363d;
+  border-color: #26262b;
   background: rgba(22, 27, 34, 0.92);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
   color: #c9d1d9;
@@ -361,7 +361,7 @@
 }
 
 :global([data-theme='dark']) .inspectorPanel {
-  border-color: #30363d;
+  border-color: #26262b;
   background: rgba(22, 27, 34, 0.96);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
 }
@@ -381,8 +381,8 @@
 }
 
 :global([data-theme='dark']) .panelSection {
-  border-color: #21262d;
-  background: #0d1117;
+  border-color: #1c1c21;
+  background: #0a0a0b;
 }
 
 .panelSectionHeader {
@@ -400,7 +400,7 @@
 }
 
 :global([data-theme='dark']) .panelSectionDescription {
-  color: #8b949e;
+  color: #a1a1aa;
 }
 
 .panelNodeList {
@@ -421,8 +421,8 @@
 }
 
 :global([data-theme='dark']) .panelNodeRow {
-  border-color: #21262d;
-  background: #161b22;
+  border-color: #1c1c21;
+  background: #141416;
 }
 
 .panelNodeMain {
