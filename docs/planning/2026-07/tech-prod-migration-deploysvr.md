@@ -1,7 +1,10 @@
 # 生产迁移 Runbook：nextpanel → deploysvr
 
-> 状态：**P1–P4 已完成并自测通过，等待用户确认后执行 P5（切 DNS + 重配 agent）与 P6（CI/CD + 旧机下线）**
+> 状态：**✅ 迁移完成（P1–P6 全部执行完毕），生产在 deploysvr 稳定运行**
 > 日期：2026-07-13
+>
+> 结果：DNS 已切新机（CF proxied）；10/10 agent 在新面板在线；CI/CD 已指向新机并成功自动部署一次；旧机 nextpanel 已停（aidash/worldcup 不动，旧库未改可回滚）。
+> agent 迁移采用「旧机 nginx 桥接」（:3003→新机:3205）+ agent 的 ServerURL 回退（域名→新机），未逐台重装。
 
 ## 背景
 
