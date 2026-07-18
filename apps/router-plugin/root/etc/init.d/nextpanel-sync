@@ -3,6 +3,9 @@
 # 1. Imports nodes via HomeProxy's subscription update script
 # 2. Writes complete routing rules into HomeProxy UCI (custom mode):
 #    ads block → AI services → streaming → China direct → default proxy
+# 3. Injects China IP CIDRs into nftables direct-bypass set so that
+#    CN traffic never enters sing-box (works around routing_mark not
+#    taking effect in custom mode on many OpenWrt builds).
 
 START=99
 STOP=01
@@ -16,6 +19,10 @@ CRON_FILE=/etc/crontabs/root
 CRON_TAG="nextpanel-sync"
 HP_SCRIPTS="/etc/homeproxy/scripts"
 HP_CFG="homeproxy"
+HP_RESOURCES="/etc/homeproxy/resources"
+NFT_TABLE="inet fw4"
+NFT_SET_V4="homeproxy_wan_direct_addr_v4"
+NFT_SET_V6="homeproxy_wan_direct_addr_v6"
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 
@@ -84,6 +91,97 @@ edgeservices.bing.com
 copilot.bing.com
 "
 
+# ─── Local rule-set builder ──────────────────────────────────────────────────
+# Converts HomeProxy's already-maintained txt resource files into sing-box
+# local .srs rule-sets.  No CDN download needed → no cold-start routing gap.
+
+build_local_rulesets() {
+    if [ ! -f "${HP_RESOURCES}/china_list.txt" ]; then
+        log "WARNING: HomeProxy resources not found — skipping local rule-set build"
+        return 0
+    fi
+
+    log "Building local CN rule-sets from HomeProxy resources..."
+
+    # Domain list → JSON source → compiled .srs
+    awk 'BEGIN{printf "{\"version\":1,\"rules\":[{\"domain_suffix\":["}
+         NR==1{printf "\"%s\"", $0; next}
+         {printf ",\"%s\"", $0}
+         END{printf "]}]}"}' \
+        "${HP_RESOURCES}/china_list.txt" > /tmp/np_cn_site.json \
+    && sing-box rule-set compile /tmp/np_cn_site.json \
+               -o /etc/homeproxy/np_cn_site.srs \
+    && log "Built np_cn_site.srs ($(wc -l < ${HP_RESOURCES}/china_list.txt) domains)" \
+    || { log "WARNING: Failed to build np_cn_site.srs"; return 0; }
+
+    # IPv4 + IPv6 CIDRs → JSON source → compiled .srs
+    awk 'BEGIN{printf "{\"version\":1,\"rules\":[{\"ip_cidr\":["}
+         NR==1{printf "\"%s\"", $0; next}
+         {printf ",\"%s\"", $0}
+         END{printf "]}]}"}' \
+        "${HP_RESOURCES}/china_ip4.txt" \
+        "${HP_RESOURCES}/china_ip6.txt" > /tmp/np_cn_ip.json \
+    && sing-box rule-set compile /tmp/np_cn_ip.json \
+               -o /etc/homeproxy/np_cn_ip.srs \
+    && log "Built np_cn_ip.srs" \
+    || { log "WARNING: Failed to build np_cn_ip.srs"; return 0; }
+
+    rm -f /tmp/np_cn_site.json /tmp/np_cn_ip.json
+}
+
+# ─── nftables CN bypass ─────────────────────────────────────────────────────
+# In custom routing mode, sing-box's routing_mark does not reliably take
+# effect on many OpenWrt builds. Packets routed to direct-out get
+# re-intercepted by nftables, creating a loop that times out.
+#
+# Fix: inject China IP CIDRs into HomeProxy's nftables direct-bypass sets
+# (homeproxy_wan_direct_addr_v4 / _v6). Traffic matching these sets is
+# returned by the redirect/mangle chains BEFORE reaching sing-box, so it
+# goes straight out via the WAN — no routing_mark needed.
+#
+# This must run AFTER every HomeProxy restart because fw4 reload clears
+# the sets.
+
+inject_cn_bypass() {
+    if ! nft list set ${NFT_TABLE} ${NFT_SET_V4} > /dev/null 2>&1; then
+        log "WARNING: nft set ${NFT_SET_V4} not found — HomeProxy may not be running"
+        return 0
+    fi
+
+    local count_v4=0 count_v6=0
+
+    # ── IPv4 ──────────────────────────────────────────────────────────────
+    if [ -f "${HP_RESOURCES}/china_ip4.txt" ]; then
+        # Build a comma-separated element list and add in one batch
+        local v4_elements
+        v4_elements=$(awk '
+            NR==1 { printf "%s", $0; next }
+            { printf ", %s", $0 }
+        ' "${HP_RESOURCES}/china_ip4.txt")
+
+        if [ -n "$v4_elements" ]; then
+            nft add element ${NFT_TABLE} ${NFT_SET_V4} "{ ${v4_elements} }" 2>/dev/null
+            count_v4=$(wc -l < "${HP_RESOURCES}/china_ip4.txt")
+        fi
+    fi
+
+    # ── IPv6 ──────────────────────────────────────────────────────────────
+    if [ -f "${HP_RESOURCES}/china_ip6.txt" ]; then
+        local v6_elements
+        v6_elements=$(awk '
+            NR==1 { printf "%s", $0; next }
+            { printf ", %s", $0 }
+        ' "${HP_RESOURCES}/china_ip6.txt")
+
+        if [ -n "$v6_elements" ]; then
+            nft add element ${NFT_TABLE} ${NFT_SET_V6} "{ ${v6_elements} }" 2>/dev/null
+            count_v6=$(wc -l < "${HP_RESOURCES}/china_ip6.txt")
+        fi
+    fi
+
+    log "Injected CN bypass: ${count_v4} IPv4 + ${count_v6} IPv6 CIDRs into nftables"
+}
+
 # ─── Node import ─────────────────────────────────────────────────────────────
 
 import_nodes() {
@@ -121,7 +219,7 @@ setup_routing() {
     node_count=$(echo "$node_list" | wc -w)
     log "Writing UCI routing rules for ${node_count} nodes..."
 
-    # ── Clean up all previous np_ sections ───────────────────────────────────
+    # ── Clean up all previous np_ sections ───────────────────────────────
     for sec in np_proxy \
                np_dns_direct np_dns_proxy \
                np_dns_rule_cn \
@@ -132,7 +230,7 @@ setup_routing() {
         hp_del "$sec"
     done
 
-    # ── Routing node: urltest group with all imported nodes ───────────────────
+    # ── Routing node: urltest group with all imported nodes ───────────────
     hp_set "np_proxy=routing_node"
     hp_set "np_proxy.enabled=1"
     hp_set "np_proxy.node=urltest"
@@ -143,7 +241,7 @@ setup_routing() {
     hp_set "np_proxy.urltest_interval=180"   # strToTime adds 's' suffix → "180s" = 3 minutes
     hp_set "np_proxy.urltest_tolerance=50"
 
-    # ── DNS servers ───────────────────────────────────────────────────────────
+    # ── DNS servers ───────────────────────────────────────────────────────
     hp_set "np_dns_direct=dns_server"
     hp_set "np_dns_direct.enabled=1"
     hp_set "np_dns_direct.address=223.5.5.5"        # Alibaba DNS — for CN domains
@@ -154,14 +252,14 @@ setup_routing() {
     hp_set "np_dns_proxy.address=8.8.8.8"           # Google DNS — via proxy to avoid pollution
     hp_set "np_dns_proxy.outbound=np_proxy"
 
-    # ── DNS rules ─────────────────────────────────────────────────────────────
+    # ── DNS rules ─────────────────────────────────────────────────────────
     # CN domains → direct DNS (223.5.5.5), everything else → proxy DNS (8.8.8.8)
     hp_set "np_dns_rule_cn=dns_rule"
     hp_set "np_dns_rule_cn.enabled=1"
     hp_add_list "np_dns_rule_cn.rule_set=np_rs_cn_site"
     hp_set "np_dns_rule_cn.server=np_dns_direct"
 
-    # ── Remote rule sets ──────────────────────────────────────────────────────
+    # ── Remote rule sets ──────────────────────────────────────────────────
     # Ads
     hp_set "np_rs_ads=ruleset"
     hp_set "np_rs_ads.enabled=1"
@@ -198,25 +296,21 @@ setup_routing() {
     hp_set "np_rs_disney.outbound=direct-out"
     hp_set "np_rs_disney.update_interval=1d"
 
-    # China sites (geosite-cn)
+    # China sites — local .srs built from HomeProxy's china_list.txt (no CDN cold-start)
     hp_set "np_rs_cn_site=ruleset"
     hp_set "np_rs_cn_site.enabled=1"
-    hp_set "np_rs_cn_site.type=remote"
+    hp_set "np_rs_cn_site.type=local"
     hp_set "np_rs_cn_site.format=binary"
-    hp_set "np_rs_cn_site.url=https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs"
-    hp_set "np_rs_cn_site.outbound=direct-out"
-    hp_set "np_rs_cn_site.update_interval=1d"
+    hp_set "np_rs_cn_site.path=/etc/homeproxy/np_cn_site.srs"
 
-    # China IPs (geoip-cn)
+    # China IPs — local .srs built from HomeProxy's china_ip4/ip6.txt
     hp_set "np_rs_cn_ip=ruleset"
     hp_set "np_rs_cn_ip.enabled=1"
-    hp_set "np_rs_cn_ip.type=remote"
+    hp_set "np_rs_cn_ip.type=local"
     hp_set "np_rs_cn_ip.format=binary"
-    hp_set "np_rs_cn_ip.url=https://cdn.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs"
-    hp_set "np_rs_cn_ip.outbound=direct-out"
-    hp_set "np_rs_cn_ip.update_interval=1d"
+    hp_set "np_rs_cn_ip.path=/etc/homeproxy/np_cn_ip.srs"
 
-    # ── Routing rules (processed top-to-bottom) ───────────────────────────────
+    # ── Routing rules (processed top-to-bottom) ───────────────────────────
 
     # 1. Private / LAN → direct
     hp_set "np_rule_private=routing_rule"
@@ -250,13 +344,16 @@ setup_routing() {
     hp_set "np_rule_streaming.outbound=np_proxy"
 
     # 5. China → direct
+    #    NOTE: CN IP traffic is already bypassed at the nftables layer
+    #    (inject_cn_bypass). This sing-box rule acts as a secondary safety
+    #    net for domain-based matching when routing_mark works correctly.
     hp_set "np_rule_cn=routing_rule"
     hp_set "np_rule_cn.enabled=1"
     hp_add_list "np_rule_cn.rule_set=np_rs_cn_site"
     hp_add_list "np_rule_cn.rule_set=np_rs_cn_ip"
     hp_set "np_rule_cn.outbound=direct-out"
 
-    # ── Global HomeProxy settings ─────────────────────────────────────────────
+    # ── Global HomeProxy settings ─────────────────────────────────────────
 
     # Switch to custom routing mode
     hp_set "config.routing_mode=custom"
@@ -265,8 +362,13 @@ setup_routing() {
     hp_set "routing.default_outbound=np_proxy"
     hp_set "routing.sniff_override=1"
 
-    # DNS global: default server = proxy DNS (8.8.8.8 via proxy)
-    hp_set "dns.default_server=np_dns_proxy"
+    # DNS global: default server = direct DNS (223.5.5.5)
+    # MUST be direct — HomeProxy redirects all dnsmasq queries to sing-box in
+    # custom mode. If the default DNS goes via proxy, DNS fails while the proxy
+    # is still starting up (urltest not complete), taking down the entire network.
+    # 223.5.5.5 is reliable from China and returns clean results for CN domains.
+    # Non-CN domains may get slightly different IPs but routing still works.
+    hp_set "dns.default_server=np_dns_direct"
 
     # Enable LAN traffic interception — without this HomeProxy generates
     # empty firewall rules and no traffic is ever proxied
@@ -316,17 +418,27 @@ do_sync() {
         return 1
     fi
 
-    # Step 2: write routing rules
+    # Step 2: build local CN rule-sets from HomeProxy resources
+    build_local_rulesets
+
+    # Step 3: write routing rules
     if ! setup_routing; then
         set_cfg last_status "error"
         set_cfg last_error "路由规则写入失败，请查看日志"
         return 1
     fi
 
-    # Step 3: reload HomeProxy to apply everything
+    # Step 4: reload HomeProxy to apply everything
     log "Reloading HomeProxy..."
     /etc/init.d/homeproxy restart
-    log "HomeProxy reloaded — sync complete"
+
+    # Step 5: inject CN IP CIDRs into nftables direct-bypass sets
+    # Must run AFTER homeproxy restart — fw4 reload clears the sets.
+    # Brief sleep to let HomeProxy finish writing nftables rules.
+    sleep 2
+    inject_cn_bypass
+
+    log "Sync complete"
 
     set_cfg last_sync "$(date '+%Y-%m-%d %H:%M:%S')"
     set_cfg last_status "success"
