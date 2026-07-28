@@ -287,7 +287,7 @@ export class SubscriptionsService {
       externalNodes: { include: { externalNode: true } },
     };
 
-    let sub: { ownerId: string; nodes: SubscriptionNode[]; externalNodes: { externalNode: { name: string; protocol: string; address: string; port: number; transport: string | null; tls: string; sni: string | null; path: string | null; uuid: string | null; password: string | null; method: string | null } }[] } | null = null;
+    let sub: { ownerId: string; nodes: SubscriptionNode[]; externalNodes: { externalNode: { name: string; protocol: string; address: string; port: number; transport: string | null; tls: string; sni: string | null; path: string | null; uuid: string | null; password: string | null; method: string | null; realityPublicKey: string | null; shortId: string | null; xhttpMode: string | null; xhttpHost: string | null; xhttpExtra: string | null } }[] } | null = null;
 
     if (by.shareToken) {
       const share = await this.prisma.subscriptionShare.findUnique({
@@ -310,7 +310,7 @@ export class SubscriptionsService {
       result.push({
         name: node.name,
         protocol: node.protocol,
-        host: node.domain ?? node.server.ip,
+        host: node.tls === 'REALITY' ? node.server.ip : (node.domain ?? node.server.ip),
         port: node.listenPort,
         transport: node.transport,
         tls: node.tls,
@@ -319,12 +319,17 @@ export class SubscriptionsService {
       });
     }
 
-    for (const { externalNode: en } of sub.externalNodes as { externalNode: { name: string; protocol: string; address: string; port: number; transport: string | null; tls: string; sni: string | null; path: string | null; uuid: string | null; password: string | null; method: string | null; realityPublicKey: string | null } }[]) {
+    for (const { externalNode: en } of sub.externalNodes) {
       const credentials: Record<string, string> = {};
       if (en.uuid) credentials.uuid = en.uuid;
       if (en.password) credentials.password = en.password;
       if (en.method) credentials.method = en.method;
       if (en.realityPublicKey) credentials.realityPublicKey = en.realityPublicKey;
+      if (en.shortId) credentials.shortId = en.shortId;
+      if (en.path) credentials.path = en.path;
+      if (en.xhttpMode) credentials.xhttpMode = en.xhttpMode;
+      if (en.xhttpHost) credentials.xhttpHost = en.xhttpHost;
+      if (en.xhttpExtra) credentials.xhttpExtra = en.xhttpExtra;
       result.push({
         name: en.name,
         protocol: en.protocol,

@@ -4,6 +4,8 @@
  * Also handles Base64-encoded subscription content (multi-line URIs).
  */
 
+import { parseXhttpExtra, parseXhttpHost, parseXhttpMode } from '../nodes/protocols/xhttp';
+
 export interface ExternalNodeData {
   name: string;
   protocol: string;
@@ -15,6 +17,10 @@ export interface ExternalNodeData {
   transport?: string;
   tls: string;
   realityPublicKey?: string;
+  shortId?: string;
+  xhttpMode?: string;
+  xhttpHost?: string;
+  xhttpExtra?: string;
   sni?: string;
   path?: string;
   rawUri: string;
@@ -35,6 +41,37 @@ function parseName(fragment: string | null): string {
   return safeDecodeURIComponent(fragment) || '导入节点';
 }
 
+function parseHostPort(value: string): { address: string; port: number } | null {
+  let address: string;
+  let portText: string;
+
+  if (value.startsWith('[')) {
+    const closingBracket = value.indexOf(']');
+    if (closingBracket <= 1 || value[closingBracket + 1] !== ':') return null;
+    address = value.slice(1, closingBracket);
+    portText = value.slice(closingBracket + 2);
+  } else {
+    const colonIdx = value.lastIndexOf(':');
+    if (colonIdx <= 0) return null;
+    address = value.slice(0, colonIdx);
+    portText = value.slice(colonIdx + 1);
+  }
+
+  const port = Number(portText);
+  if (!address || !Number.isInteger(port) || port < 1 || port > 65535) return null;
+  return { address, port };
+}
+
+function parseTransport(value: string): string | undefined {
+  switch (value.toLowerCase()) {
+    case 'ws': return 'WS';
+    case 'grpc': return 'GRPC';
+    case 'quic': return 'QUIC';
+    case 'xhttp': return 'XHTTP';
+    default: return undefined;
+  }
+}
+
 function parseVmess(uri: string): ExternalNodeData | null {
   try {
     const b64 = uri.slice('vmess://'.length);
@@ -44,7 +81,15 @@ function parseVmess(uri: string): ExternalNodeData | null {
 
     const net = String(json.net ?? 'tcp');
     const tls = json.tls === 'tls' ? 'TLS' : json.tls === 'reality' ? 'REALITY' : 'NONE';
-    const transport = net === 'ws' ? 'WS' : net === 'grpc' ? 'GRPC' : net === 'quic' ? 'QUIC' : undefined;
+    const transport = parseTransport(net);
+    const isXhttp = transport === 'XHTTP';
+    const xhttpMode = isXhttp ? parseXhttpMode(String(json.mode ?? 'auto')) : undefined;
+    if (isXhttp && !xhttpMode) return null;
+    const xhttpHost = isXhttp ? parseXhttpHost(String(json.host ?? '')) : undefined;
+    const xhttpExtra = isXhttp && json.extra !== undefined
+      ? (typeof json.extra === 'string' ? json.extra : JSON.stringify(json.extra))
+      : undefined;
+    if (isXhttp) parseXhttpExtra(xhttpExtra);
 
     return {
       name: String(json.ps ?? json.add),
@@ -54,7 +99,12 @@ function parseVmess(uri: string): ExternalNodeData | null {
       uuid: String(json.id ?? ''),
       transport,
       tls,
-      sni: String(json.sni ?? json.host ?? ''),
+      xhttpMode: xhttpMode ?? undefined,
+      xhttpHost,
+      xhttpExtra,
+      sni: json.sni !== undefined
+        ? String(json.sni)
+        : (isXhttp ? undefined : String(json.host ?? '')),
       path: String(json.path ?? ''),
       rawUri: uri,
     };
@@ -78,26 +128,37 @@ function parseVless(uri: string): ExternalNodeData | null {
     const uuid = atIdx >= 0 ? hostPart.slice(0, atIdx) : '';
     const hostPort = atIdx >= 0 ? hostPart.slice(atIdx + 1) : hostPart;
 
-    const colonIdx = hostPort.lastIndexOf(':');
-    const address = colonIdx >= 0 ? hostPort.slice(0, colonIdx) : hostPort;
-    const port = colonIdx >= 0 ? Number(hostPort.slice(colonIdx + 1)) : 0;
-    if (!address || isNaN(port)) return null;
+    const parsedHost = parseHostPort(hostPort);
+    if (!parsedHost) return null;
 
     const security = query.get('security') ?? '';
     const tls = security === 'tls' ? 'TLS' : security === 'reality' ? 'REALITY' : 'NONE';
-    const netType = query.get('type') ?? 'tcp';
-    const transport = netType === 'ws' ? 'WS' : netType === 'grpc' ? 'GRPC' : netType === 'quic' ? 'QUIC' : undefined;
+    const transport = parseTransport(query.get('type') ?? 'tcp');
+    const isXhttp = transport === 'XHTTP';
+    const xhttpMode = isXhttp ? parseXhttpMode(query.get('mode')) : undefined;
+    if (isXhttp && !xhttpMode) return null;
+
+    let xhttpHost: string | undefined;
+    const xhttpExtra = isXhttp ? query.get('extra') ?? undefined : undefined;
+    if (isXhttp) {
+      xhttpHost = parseXhttpHost(query.get('host'));
+      parseXhttpExtra(xhttpExtra);
+    }
 
     return {
       name: parseName(fragment),
       protocol: 'VLESS',
-      address,
-      port,
+      address: parsedHost.address,
+      port: parsedHost.port,
       uuid,
       transport,
       tls,
       realityPublicKey: query.get('pbk') ?? undefined,
-      sni: query.get('sni') ?? query.get('host') ?? '',
+      shortId: query.get('sid') ?? undefined,
+      xhttpMode: xhttpMode ?? undefined,
+      xhttpHost,
+      xhttpExtra,
+      sni: query.get('sni') ?? (isXhttp ? undefined : query.get('host') ?? ''),
       path: query.get('path') ?? query.get('serviceName') ?? '',
       rawUri: uri,
     };
@@ -127,9 +188,10 @@ function parseShadowsocks(uri: string): ExternalNodeData | null {
       const colonIdx = decoded.indexOf(':');
       method = colonIdx >= 0 ? decoded.slice(0, colonIdx) : decoded;
       password = colonIdx >= 0 ? decoded.slice(colonIdx + 1) : '';
-      const hpColon = hostPort.lastIndexOf(':');
-      address = hpColon >= 0 ? hostPort.slice(0, hpColon) : hostPort;
-      port = hpColon >= 0 ? Number(hostPort.slice(hpColon + 1)) : 0;
+      const parsedHost = parseHostPort(hostPort);
+      if (!parsedHost) return null;
+      address = parsedHost.address;
+      port = parsedHost.port;
     } else {
       // Legacy: ss://BASE64(method:password@host:port)
       const decoded = safeDecodeBase64(main);
@@ -139,12 +201,11 @@ function parseShadowsocks(uri: string): ExternalNodeData | null {
       const atIdx2 = rest.lastIndexOf('@');
       password = atIdx2 >= 0 ? rest.slice(0, atIdx2) : rest;
       const hostPort = atIdx2 >= 0 ? rest.slice(atIdx2 + 1) : '';
-      const hpColon = hostPort.lastIndexOf(':');
-      address = hpColon >= 0 ? hostPort.slice(0, hpColon) : hostPort;
-      port = hpColon >= 0 ? Number(hostPort.slice(hpColon + 1)) : 0;
+      const parsedHost = parseHostPort(hostPort);
+      if (!parsedHost) return null;
+      address = parsedHost.address;
+      port = parsedHost.port;
     }
-
-    if (!address || isNaN(port)) return null;
 
     return {
       name: parseName(fragment),
@@ -175,24 +236,30 @@ function parseTrojan(uri: string): ExternalNodeData | null {
     const atIdx = hostPart.lastIndexOf('@');
     const password = atIdx >= 0 ? hostPart.slice(0, atIdx) : '';
     const hostPort = atIdx >= 0 ? hostPart.slice(atIdx + 1) : hostPart;
-    const colonIdx = hostPort.lastIndexOf(':');
-    const address = colonIdx >= 0 ? hostPort.slice(0, colonIdx) : hostPort;
-    const port = colonIdx >= 0 ? Number(hostPort.slice(colonIdx + 1)) : 0;
-    if (!address || isNaN(port)) return null;
+    const parsedHost = parseHostPort(hostPort);
+    if (!parsedHost) return null;
 
     const security = query.get('security') ?? 'tls';
     const tls = security === 'none' ? 'NONE' : 'TLS';
-    const netType = query.get('type') ?? 'tcp';
-    const transport = netType === 'ws' ? 'WS' : netType === 'grpc' ? 'GRPC' : undefined;
+    const transport = parseTransport(query.get('type') ?? 'tcp');
+    const isXhttp = transport === 'XHTTP';
+    const xhttpMode = isXhttp ? parseXhttpMode(query.get('mode')) : undefined;
+    if (isXhttp && !xhttpMode) return null;
+    const xhttpHost = isXhttp ? parseXhttpHost(query.get('host')) : undefined;
+    const xhttpExtra = isXhttp ? query.get('extra') ?? undefined : undefined;
+    if (isXhttp) parseXhttpExtra(xhttpExtra);
 
     return {
       name: parseName(fragment),
       protocol: 'TROJAN',
-      address,
-      port,
+      address: parsedHost.address,
+      port: parsedHost.port,
       password,
       transport,
       tls,
+      xhttpMode: xhttpMode ?? undefined,
+      xhttpHost,
+      xhttpExtra,
       sni: query.get('sni') ?? '',
       path: query.get('path') ?? '',
       rawUri: uri,
@@ -217,16 +284,14 @@ function parseHysteria2(uri: string): ExternalNodeData | null {
     const atIdx = hostPart.lastIndexOf('@');
     const password = atIdx >= 0 ? hostPart.slice(0, atIdx) : '';
     const hostPort = atIdx >= 0 ? hostPart.slice(atIdx + 1) : hostPart;
-    const colonIdx = hostPort.lastIndexOf(':');
-    const address = colonIdx >= 0 ? hostPort.slice(0, colonIdx) : hostPort;
-    const port = colonIdx >= 0 ? Number(hostPort.slice(colonIdx + 1)) : 0;
-    if (!address || isNaN(port)) return null;
+    const parsedHost = parseHostPort(hostPort);
+    if (!parsedHost) return null;
 
     return {
       name: parseName(fragment),
       protocol: 'HYSTERIA2',
-      address,
-      port,
+      address: parsedHost.address,
+      port: parsedHost.port,
       password,
       tls: 'TLS',
       sni: query.get('sni') ?? '',

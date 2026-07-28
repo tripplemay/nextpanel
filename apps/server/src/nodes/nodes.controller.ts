@@ -258,10 +258,11 @@ export class NodesController {
   @Sse(':id/deploy-stream')
   @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @ApiOperation({ summary: 'Stream deploy logs via SSE' })
-  deployStream(
+  async deployStream(
     @Param('id') id: string,
     @CurrentUser() user: { id: string },
-  ): Observable<MessageEvent> {
+  ): Promise<Observable<MessageEvent>> {
+    await this.nodesService.findOne(id, user.id);
     // SSE endpoints cannot use AuditInterceptor — write audit log manually
     const correlationId = randomUUID();
     void this.auditService.log({
@@ -277,10 +278,11 @@ export class NodesController {
   @Sse(':id/delete-stream')
   @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @ApiOperation({ summary: 'Stream undeploy logs and delete node via SSE' })
-  deleteStream(
+  async deleteStream(
     @Param('id') id: string,
     @CurrentUser() user: { id: string },
-  ): Observable<MessageEvent> {
+  ): Promise<Observable<MessageEvent>> {
+    await this.nodesService.findOne(id, user.id);
     // SSE endpoints cannot use AuditInterceptor — write audit log manually
     const correlationId = randomUUID();
     void this.auditService.log({

@@ -2,8 +2,8 @@
  * CertRenewalScheduler — daily job that renews expiring Let's Encrypt
  * wildcard certificates and pushes them to affected node servers.
  *
- * Only nodes with: transport=TCP, tls=TLS, source=AUTO, domain≠null
- * are managed here (those use real LE certs, not self-signed).
+ * Manages AUTO nodes that use real Let's Encrypt certificates: TCP+TLS,
+ * plus TUIC and AnyTLS whose TLS policy always requires a trusted cert.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -29,25 +29,28 @@ export class CertRenewalScheduler {
   async renewExpiredCerts(): Promise<void> {
     this.logger.log('Starting daily cert renewal check...');
 
-    // Find all TCP+TLS AUTO nodes that use LE certs
+    // Find all AUTO nodes whose deployment path uses a managed LE cert.
     const nodes = await this.prisma.node.findMany({
       where: {
-        transport: 'TCP',
         tls: 'TLS',
         source: 'AUTO',
         domain: { not: null },
-        enabled: true,
+        OR: [
+          { transport: 'TCP' },
+          { protocol: { in: ['TUIC', 'ANYTLS'] } },
+        ],
       },
       select: { id: true, userId: true, domain: true },
     });
 
     if (nodes.length === 0) {
-      this.logger.log('No VLESS+TCP+TLS AUTO nodes found, skipping');
+      this.logger.log('No managed TLS nodes found, skipping');
       return;
     }
 
     // Group by userId + baseDomain to avoid redundant renewals
-    const renewed = new Set<string>(); // tracks which baseDomains were renewed this run
+    const checked = new Set<string>();
+    const renewed = new Set<string>();
 
     for (const node of nodes) {
       const baseDomain = node.domain!.split('.').slice(1).join('.');
@@ -62,18 +65,18 @@ export class CertRenewalScheduler {
 
         const log = (msg: string) => this.logger.log(`[${node.id}] ${msg}`);
 
-        // Only renew cert once per baseDomain per run
-        if (!renewed.has(renewalKey)) {
+        // Check each wildcard once per run. Certificate delivery is intentionally
+        // independent of didRenew so a failed prior push (or acme.sh cron renewal)
+        // is retried on every scheduler run.
+        if (!checked.has(renewalKey)) {
           const didRenew = await this.certService.renewWildcardCert(cf.apiToken, baseDomain, log);
+          checked.add(renewalKey);
           if (didRenew) renewed.add(renewalKey);
         }
 
-        // If cert was renewed, push to this node and restart
-        if (renewed.has(renewalKey)) {
-          this.logger.log(`Pushing renewed cert to node ${node.id}...`);
-          await this.nodeDeploy.refreshCert(node.id);
-          this.logger.log(`Node ${node.id} cert refreshed`);
-        }
+        this.logger.log(`Syncing managed cert to node ${node.id}...`);
+        await this.nodeDeploy.refreshCert(node.id);
+        this.logger.log(`Node ${node.id} cert refreshed`);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.error(`Cert renewal failed for node ${node.id}: ${msg}`);

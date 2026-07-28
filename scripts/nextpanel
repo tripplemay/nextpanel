@@ -87,7 +87,7 @@ cmd_status() {
     DOMAIN=$(grep 'server_name' "$DOMAIN_CONF" | head -1 | awk '{print $2}' | tr -d ';')
     if [ "$DOMAIN" != "_" ] && [ -d "/etc/letsencrypt/live/$DOMAIN" ]; then
       EXPIRY=$(openssl x509 -enddate -noout -in "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" 2>/dev/null | cut -d= -f2)
-      echo "  SSL 证书：$DOMAIN（到期时间 $EXPIRY）"
+      echo "  SSL 证书：${DOMAIN}（到期时间 ${EXPIRY}）"
     fi
   fi
   echo ""
@@ -108,7 +108,7 @@ cmd_update() {
   BRANCH="${1:-main}"
 
   echo ""
-  info "正在更新 NextPanel（分支：$BRANCH）..."
+  info "正在更新 NextPanel（分支：${BRANCH}）..."
   echo ""
 
   # 步骤 1：备份数据库
@@ -152,14 +152,23 @@ cmd_update() {
   unset NODE_OPTIONS NEXT_TELEMETRY_DISABLED
   ok "编译构建完成"
 
-  # 步骤 5：数据库迁移
+  # 步骤 5：停止写入并执行数据库迁移。旧进程必须在清理历史明文
+  # ConfigSnapshot 前退出，否则升级窗口内仍可能写回旧格式。
+  info "正在暂停后端写入..."
+  pm2 stop nextpanel-server > /dev/null 2>&1
+  ok "后端写入已暂停"
+
   info "正在执行数据库迁移..."
   cd "$APP_DIR/apps/server"
   MIGRATE_OUTPUT=$(pnpm exec prisma migrate deploy 2>&1) || {
     echo "$MIGRATE_OUTPUT"
-    fail "数据库迁移失败"
+    fail "数据库迁移失败；后端保持停止以避免以不兼容 schema 写入，请修复后重试更新"
   }
   ok "数据库迁移完成"
+
+  # 新后端只写加密快照，可在后续较慢的测试内核升级期间恢复服务。
+  pm2 restart nextpanel-server > /dev/null 2>&1
+  ok "新后端已启动"
 
   # 步骤 6：更新 CLI 工具
   if [ -f "$APP_DIR/scripts/nextpanel" ]; then
@@ -168,7 +177,18 @@ cmd_update() {
     ok "CLI 工具已更新"
   fi
 
-  # 步骤 7：重启服务
+  # 步骤 7：校验并升级面板本机的节点测试内核
+  if [ -f "$APP_DIR/scripts/proxy-core-utils.sh" ]; then
+    # shellcheck source=proxy-core-utils.sh
+    source "$APP_DIR/scripts/proxy-core-utils.sh"
+    if ! ensure_proxy_test_cores; then
+      warn "部分节点测试内核未就绪；对应协议的面板连通性测试不可用"
+    fi
+  else
+    warn "未找到节点测试内核安装脚本，跳过版本检查"
+  fi
+
+  # 步骤 8：重启服务
   info "正在重启服务..."
   cd "$APP_DIR"
   pm2 restart ecosystem.config.cjs > /dev/null 2>&1

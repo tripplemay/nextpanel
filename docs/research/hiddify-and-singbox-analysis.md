@@ -1,6 +1,26 @@
-# Hiddify 客户端与 sing-box 引擎分析报告
+# Hiddify 客户端与 sing-box 引擎分析报告（历史快照）
 
 > 日期：2026-04-03
+>
+> **状态说明（2026-07-27）：** 本文保留为当时的调研和决策记录，正文中的“当前”“未来”等表述均以 2026-04-03 为基准，不代表现行实现。NextPanel 后续采用了 Xray + sing-box 混合架构并新增 XHTTP、TUIC v5、AnyTLS；最新能力以项目 README 和代码为准。
+
+## 当前实现更新（2026-07-27）
+
+- NextPanel 现有 8 个托管预设。Xray 承载 VLESS/VMess（包括 VLESS + XHTTP + REALITY），sing-box 承载 Hysteria2、TUIC v5、AnyTLS；并未整体迁移到单一引擎。
+- 连通性测试按服务端实现分流：Xray 客户端验证 VLESS/VMess，sing-box 客户端验证 Hysteria2/TUIC/AnyTLS，二者均通过临时本地 SOCKS 代理执行端到端 HTTP 请求。
+- TUIC/AnyTLS 要求 active Cloudflare Zone，并使用 DNS-only A 记录与受信任的 Let's Encrypt 证书；测试客户端保持证书和主机名校验。XHTTP + REALITY 不要求域名证书。
+- 当前提供 4 种订阅格式；新协议的实际导出范围如下，不能再笼统称为“全部格式完全兼容”。
+
+| 格式 | XHTTP + REALITY | TUIC v5 | AnyTLS |
+|------|:---------------:|:-------:|:------:|
+| V2Ray Base64 | 支持 | 不输出 | 支持 |
+| Mihomo / Clash YAML | 支持 | 支持 | 支持 |
+| sing-box JSON | 不输出 | 支持 | 支持 |
+| HomeProxy JSON | 不输出 | 支持 | 支持 |
+
+---
+
+## 以下为 2026-04-03 原始报告
 
 ## 一、Hiddify 客户端概览
 
@@ -17,7 +37,7 @@
 ### 协议支持
 支持 30+ 协议：VLESS、VMess、Trojan、Shadowsocks、Hysteria2、TUIC、Reality、gRPC、WebSocket、QUIC、ShadowTLS、SSH、ECH 等。
 
-与 NextPanel 的 5 个协议预设（VLESS+REALITY、VLESS+WS+TLS、VLESS+TCP+TLS、Hysteria2、VMess+TCP）完全兼容。
+与当时 NextPanel 的 5 个协议预设（VLESS+REALITY、VLESS+WS+TLS、VLESS+TCP+TLS、Hysteria2、VMess+TCP）完全兼容。
 
 ---
 
@@ -117,7 +137,7 @@
 | sing-box JSON | 完全兼容 | 原生格式，推荐使用 |
 
 ### 协议兼容
-NextPanel 的 5 个预设在 Hiddify 全部可用。
+截至报告日期，NextPanel 的 5 个预设在 Hiddify 全部可用。
 
 ### 推荐导入格式
 sing-box JSON — Hiddify 底层就是 sing-box，直接使用无需转换，兼容性最好。
@@ -127,7 +147,7 @@ sing-box JSON — Hiddify 底层就是 sing-box，直接使用无需转换，兼
 ## 八、sing-box 作为服务端引擎的分析
 
 ### 现状
-NextPanel 当前使用 Xray 作为主要服务端引擎，仅 Hysteria2 使用 sing-box。
+截至报告日期，NextPanel 使用 Xray 作为主要服务端引擎，仅 Hysteria2 使用 sing-box。
 
 ### 服务端性能对比
 
@@ -148,7 +168,7 @@ NextPanel 当前使用 Xray 作为主要服务端引擎，仅 Hysteria2 使用 s
 - 协议头解析（VLESS 头极小，开销可忽略）
 
 ### 是否值得切换
-**当前不建议切换**。理由：
+**当时不建议整体切换**。理由：
 1. 速度无提升 — 吞吐量持平，切换引擎不会带来可感知的加速
 2. REALITY 是 Xray 原创 — Xray 实现是参考标准，sing-box 是兼容实现
 3. 改动量大 — 需重写配置生成器、部署逻辑、流量统计接口

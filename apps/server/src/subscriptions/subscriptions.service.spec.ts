@@ -45,7 +45,10 @@ interface MockSub {
     name: string; protocol: string; address: string; port: number;
     transport: string | null; tls: string; sni: string | null;
     path: string | null; uuid: string | null; password: string | null;
-    method: string | null;
+    method: string | null; realityPublicKey: string | null;
+    shortId: string | null;
+    xhttpMode: string | null; xhttpHost: string | null;
+    xhttpExtra: string | null;
   }}>;
 }
 
@@ -130,6 +133,26 @@ describe('SubscriptionsService – generateContent', () => {
     const decoded = Buffer.from(result, 'base64').toString();
     expect(decoded).toContain('cdn.example.com');
     expect(decoded).not.toContain('1.2.3.4');
+  });
+
+  it('uses the server IP for REALITY while keeping the domain as SNI', async () => {
+    const sub = makeSubWithNode('VLESS', {});
+    sub.nodes[0].node.domain = 'www.google.com';
+    sub.nodes[0].node.transport = 'XHTTP';
+    sub.nodes[0].node.tls = 'REALITY';
+    (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue(sub);
+    (mockNodes.getCredentials as jest.Mock).mockResolvedValue({
+      uuid: 'u1',
+      realityPublicKey: 'public-key',
+      shortId: '0123456789abcdef',
+      path: '/api',
+    });
+
+    const result = await svc.generateContent('tok');
+    const uri = new URL(Buffer.from(result, 'base64').toString().trim());
+
+    expect(uri.hostname).toBe('1.2.3.4');
+    expect(uri.searchParams.get('sni')).toBe('www.google.com');
   });
 });
 
@@ -295,6 +318,27 @@ function makeExternalNode(protocol: string) {
       uuid: protocol === 'VLESS' ? 'ext-uuid' : null,
       password: protocol === 'TROJAN' ? 'ext-pass' : null,
       method: null,
+      realityPublicKey: null,
+      shortId: null,
+      xhttpMode: null,
+      xhttpHost: null,
+      xhttpExtra: null,
+    },
+  };
+}
+
+function makeExternalXhttpNode() {
+  return {
+    externalNode: {
+      ...makeExternalNode('VLESS').externalNode,
+      transport: 'XHTTP',
+      tls: 'REALITY',
+      path: '/api/v1',
+      realityPublicKey: 'public-key',
+      shortId: '0123456789abcdef',
+      xhttpMode: 'stream-up',
+      xhttpHost: 'edge.example.com',
+      xhttpExtra: '{"xPaddingBytes":"100-1000"}',
     },
   };
 }
@@ -309,12 +353,45 @@ describe('SubscriptionsService – external nodes in content', () => {
     expect(decoded).toContain('vless://');
   });
 
+  it('generateContent retains external XHTTP path and REALITY credentials', async () => {
+    (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue({
+      token: 'tok', ownerId: 'owner-1', nodes: [], externalNodes: [makeExternalXhttpNode()],
+    });
+
+    const result = await svc.generateContent('tok');
+    const decoded = Buffer.from(result, 'base64').toString();
+    const uri = new URL(decoded);
+
+    expect(uri.searchParams.get('type')).toBe('xhttp');
+    expect(uri.searchParams.get('path')).toBe('/api/v1');
+    expect(uri.searchParams.get('host')).toBe('edge.example.com');
+    expect(uri.searchParams.get('mode')).toBe('stream-up');
+    expect(uri.searchParams.get('extra')).toBe('{"xPaddingBytes":"100-1000"}');
+    expect(uri.searchParams.get('pbk')).toBe('public-key');
+    expect(uri.searchParams.get('sid')).toBe('0123456789abcdef');
+  });
+
   it('generateClashContent includes external node in proxies', async () => {
     (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue({
       token: 'tok', ownerId: 'owner-1', name: 'My Sub', nodes: [], externalNodes: [makeExternalNode('VLESS')],
     });
     const result = await svc.generateClashContent('tok');
     expect(result.content).toContain('Ext Node');
+  });
+
+  it('generateClashContent retains external XHTTP and REALITY options', async () => {
+    (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue({
+      token: 'tok', ownerId: 'owner-1', name: 'My Sub', nodes: [], externalNodes: [makeExternalXhttpNode()],
+    });
+
+    const result = await svc.generateClashContent('tok');
+
+    expect(result.content).toContain('network: xhttp');
+    expect(result.content).toContain('path: /api/v1');
+    expect(result.content).toContain('host: edge.example.com');
+    expect(result.content).toContain('mode: stream-up');
+    expect(result.content).toContain('public-key: public-key');
+    expect(result.content).toContain('short-id: "0123456789abcdef"');
   });
 
   it('generateSingboxContent includes external node outbound', async () => {

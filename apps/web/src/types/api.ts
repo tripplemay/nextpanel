@@ -246,6 +246,11 @@ export interface ExternalNode {
   method: string | null;
   transport: string | null;
   tls: string;
+  realityPublicKey: string | null;
+  shortId: string | null;
+  xhttpMode: string | null;
+  xhttpHost: string | null;
+  xhttpExtra: string | null;
   sni: string | null;
   path: string | null;
   rawUri: string | null;

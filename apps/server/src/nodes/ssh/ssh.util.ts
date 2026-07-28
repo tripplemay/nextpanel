@@ -34,11 +34,33 @@ export async function connectSsh(opts: SshConnectOptions): Promise<NodeSSH> {
 }
 
 /** Upload text content to a remote path using base64 encoding. */
-export async function uploadText(ssh: NodeSSH, content: string, remotePath: string): Promise<void> {
+export async function uploadText(
+  ssh: NodeSSH,
+  content: string,
+  remotePath: string,
+  mode = 0o600,
+): Promise<void> {
   const b64 = Buffer.from(content).toString('base64');
   const dir = remotePath.substring(0, remotePath.lastIndexOf('/'));
-  await ssh.execCommand(`mkdir -p ${dir}`);
-  await ssh.execCommand(`echo ${b64} | base64 -d > ${remotePath}`);
+  const modeText = mode.toString(8).padStart(4, '0');
+  if (!/^0[0-7]{3}$/.test(modeText)) throw new Error(`Invalid remote file mode: ${mode}`);
+
+  const mkdir = await ssh.execCommand(`mkdir -p -- ${shellQuote(dir)}`);
+  if ((mkdir.code ?? 0) !== 0) {
+    throw new Error(`Unable to create remote directory ${dir}: ${mkdir.stderr || `exit ${mkdir.code}`}`);
+  }
+
+  const write = await ssh.execCommand(
+    `umask 077; printf '%s' '${b64}' | base64 -d > ${shellQuote(remotePath)} && ` +
+      `chmod ${modeText} -- ${shellQuote(remotePath)}`,
+  );
+  if ((write.code ?? 0) !== 0) {
+    throw new Error(`Unable to write remote file ${remotePath}: ${write.stderr || `exit ${write.code}`}`);
+  }
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
 /** Check whether a remote executable exists. */

@@ -57,6 +57,10 @@ export class ExternalNodesService {
         transport: n.transport,
         tls: n.tls,
         realityPublicKey: n.realityPublicKey,
+        shortId: n.shortId,
+        xhttpMode: n.xhttpMode,
+        xhttpHost: n.xhttpHost,
+        xhttpExtra: n.xhttpExtra,
         sni: n.sni,
         path: n.path,
         rawUri: n.rawUri,
@@ -75,6 +79,12 @@ export class ExternalNodesService {
     if (node.uuid) credentials.uuid = node.uuid;
     if (node.password) credentials.password = node.password;
     if (node.method) credentials.method = node.method;
+    if (node.realityPublicKey) credentials.realityPublicKey = node.realityPublicKey;
+    if (node.shortId) credentials.shortId = node.shortId;
+    if (node.path) credentials.path = node.path;
+    if (node.xhttpMode) credentials.xhttpMode = node.xhttpMode;
+    if (node.xhttpHost) credentials.xhttpHost = node.xhttpHost;
+    if (node.xhttpExtra) credentials.xhttpExtra = node.xhttpExtra;
 
     let result;
     if (node.protocol === 'HYSTERIA2') {

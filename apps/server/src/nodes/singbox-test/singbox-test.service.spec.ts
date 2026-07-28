@@ -78,6 +78,55 @@ describe('SingboxTestService', () => {
 
       expect(cfg.outbounds[0].password).toBe('');
     });
+
+    it('builds a secure TUIC v5 outbound with 0-RTT disabled', () => {
+      const cfg = (service as any).buildClientConfig(
+        {
+          host: '1.2.3.4',
+          port: 443,
+          domain: 'tuic.example.com',
+          credentials: { uuid: 'test-uuid', password: 'secret' },
+        },
+        30400,
+        'TUIC',
+      ) as { outbounds: Array<Record<string, any>> };
+
+      expect(cfg.outbounds[0]).toMatchObject({
+        type: 'tuic',
+        uuid: 'test-uuid',
+        password: 'secret',
+        congestion_control: 'bbr',
+        udp_relay_mode: 'native',
+        zero_rtt_handshake: false,
+        heartbeat: '10s',
+        tls: { enabled: true, insecure: false, server_name: 'tuic.example.com' },
+      });
+    });
+
+    it('builds a secure AnyTLS outbound', () => {
+      const cfg = (service as any).buildClientConfig(
+        {
+          host: '1.2.3.4',
+          port: 443,
+          domain: 'anytls.example.com',
+          credentials: { password: 'secret' },
+        },
+        30500,
+        'ANYTLS',
+      ) as { outbounds: Array<Record<string, any>> };
+
+      expect(cfg.outbounds[0]).toMatchObject({
+        type: 'anytls',
+        password: 'secret',
+        tls: { enabled: true, insecure: false, server_name: 'anytls.example.com' },
+      });
+    });
+
+    it('rejects protocols that sing-box test config does not support', () => {
+      expect(() =>
+        (service as any).buildClientConfig(fakeNode, 30600, 'VMESS'),
+      ).toThrow('does not support connectivity tests');
+    });
   });
 
   // ── testHysteria2 ─────────────────────────────────────────────────────────
@@ -108,7 +157,9 @@ describe('SingboxTestService', () => {
       expect(result.latency).toBe(50);
       expect(result.testedAt).toBeDefined();
       expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-        expect.stringContaining('/tmp/singbox-test-'), expect.any(String), 'utf8',
+        expect.stringContaining('/tmp/singbox-test-'),
+        expect.any(String),
+        { encoding: 'utf8', mode: 0o600 },
       );
       expect(mockFs.rmSync).toHaveBeenCalled();
       expect(mockProc.kill).toHaveBeenCalledWith('SIGKILL');

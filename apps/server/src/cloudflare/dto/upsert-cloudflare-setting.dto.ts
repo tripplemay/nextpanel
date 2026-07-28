@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty } from 'class-validator';
+import { IsString, IsNotEmpty, IsFQDN } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class UpsertCloudflareSettingDto {
@@ -8,7 +8,7 @@ export class UpsertCloudflareSettingDto {
   apiToken: string;
 
   @ApiProperty({ description: 'Root domain managed by this Cloudflare account, e.g. example.com' })
-  @IsString()
+  @IsFQDN({ require_tld: true, allow_underscores: false, allow_trailing_dot: false })
   @IsNotEmpty()
   domain: string;
 

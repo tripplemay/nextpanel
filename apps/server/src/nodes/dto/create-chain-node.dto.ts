@@ -1,15 +1,19 @@
-import { IsString, IsIn } from 'class-validator';
+import { IsString, IsIn, IsNotEmpty, Matches, MaxLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { SUPPORTED_PROTOCOLS, type SupportedProtocol } from '../protocols/presets';
 
 export class CreateChainNodeDto {
   @ApiProperty()
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(128)
+  @Matches(/^[^\r\n]+$/, { message: 'name must not contain line breaks' })
   name: string;
 
-  @ApiProperty()
   @IsString()
-  @IsIn(['VLESS_REALITY', 'VLESS_WS_TLS', 'VLESS_TCP_TLS', 'HYSTERIA2', 'VMESS_TCP'])
-  preset: string;
+  @IsIn(SUPPORTED_PROTOCOLS)
+  @ApiProperty({ enum: SUPPORTED_PROTOCOLS, description: 'Protocol preset key' })
+  preset: SupportedProtocol;
 
   @ApiProperty({ description: 'Entry server ID (user connects here)' })
   @IsString()

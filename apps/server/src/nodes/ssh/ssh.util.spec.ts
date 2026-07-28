@@ -99,12 +99,33 @@ describe('uploadText', () => {
     expect(mkdirCall).toBeDefined();
     expect(mkdirCall![0]).toContain('/etc/myapp');
     expect(writeCall).toBeDefined();
-    expect(writeCall![0]).toContain('> /etc/myapp/config.json');
+    expect(writeCall![0]).toContain("> '/etc/myapp/config.json'");
+    expect(writeCall![0]).toContain("chmod 0600 -- '/etc/myapp/config.json'");
 
     // Verify the base64 payload decodes back to original content
-    const match = writeCall![0].match(/echo (.+) \| base64/);
+    const match = writeCall![0].match(/printf '%s' '([^']+)' \| base64/);
     expect(match).not.toBeNull();
     expect(Buffer.from(match![1], 'base64').toString()).toBe('hello world');
+  });
+
+  it('supports an explicit public-read mode for systemd units', async () => {
+    const ssh = makeMockSsh();
+    await uploadText(ssh, '[Unit]', '/etc/systemd/system/example.service', 0o644);
+
+    expect(ssh.execCommand).toHaveBeenCalledWith(
+      expect.stringContaining("chmod 0644 -- '/etc/systemd/system/example.service'"),
+    );
+  });
+
+  it('throws when the remote write fails', async () => {
+    const ssh = makeMockSsh();
+    (ssh.execCommand as jest.Mock)
+      .mockResolvedValueOnce({ stdout: '', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '', stderr: 'permission denied', code: 1 });
+
+    await expect(
+      uploadText(ssh, 'secret', '/etc/myapp/config.json'),
+    ).rejects.toThrow('Unable to write remote file /etc/myapp/config.json');
   });
 });
 

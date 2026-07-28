@@ -4,15 +4,78 @@ import { REALITY_DEFAULT_SNI } from '../protocols/reality';
 // ─── sing-box ────────────────────────────────────────────────────────────────
 
 export function generateSingBoxConfig(node: NodeInfo, creds: NodeCredentials): string {
+  const isChain = !!(node.chainExitIp && node.chainExitPort && node.chainUuid);
+  const chainReality = isChain ? getChainRealityClient(node) : null;
+  const outbounds: unknown[] = isChain
+    ? [
+        {
+          type: 'vless',
+          tag: 'chain-exit',
+          server: node.chainExitIp,
+          server_port: node.chainExitPort,
+          uuid: node.chainUuid,
+          packet_encoding: 'xudp',
+          ...(chainReality
+            ? {
+                tls: {
+                  enabled: true,
+                  server_name: REALITY_DEFAULT_SNI,
+                  utls: { enabled: true, fingerprint: 'chrome' },
+                  reality: {
+                    enabled: true,
+                    public_key: chainReality.publicKey,
+                    short_id: chainReality.shortId,
+                  },
+                },
+              }
+            : {}),
+        },
+        { type: 'direct', tag: 'direct' },
+      ]
+    : [{ type: 'direct', tag: 'direct' }];
+
+  const config: Record<string, unknown> = {
+    log: { level: 'warn' },
+    inbounds: [singBoxInbound(node, creds)],
+    outbounds,
+  };
+
+  if (isChain) {
+    config.route = {
+      rules: [
+        {
+          inbound: [`in-${node.id}`],
+          action: 'route',
+          outbound: 'chain-exit',
+        },
+      ],
+      final: 'direct',
+    };
+  }
+
   return JSON.stringify(
-    {
-      log: { level: 'warn' },
-      inbounds: [singBoxInbound(node, creds)],
-      outbounds: [{ type: 'direct', tag: 'direct' }],
-    },
+    config,
     null,
     2,
   );
+}
+
+function getChainRealityClient(
+  node: NodeInfo,
+): { publicKey: string; shortId: string } | null {
+  const values = [
+    node.chainRealityPrivateKey,
+    node.chainRealityPublicKey,
+    node.chainShortId,
+  ];
+  const hasAny = values.some((value) => !!value);
+  const hasAll = values.every((value) => !!value);
+  if (hasAny && !hasAll) {
+    throw new Error('Secure chain requires complete REALITY key and short ID credentials');
+  }
+  return hasAll
+    ? { publicKey: node.chainRealityPublicKey!, shortId: node.chainShortId! }
+    : null;
 }
 
 function singBoxInbound(node: NodeInfo, creds: NodeCredentials): unknown {
@@ -45,11 +108,18 @@ function singBoxInbound(node: NodeInfo, creds: NodeCredentials): unknown {
       break;
     case 'HYSTERIA2':
       base.users = [{ password: creds.password ?? '' }];
-      base.tls = {
-        enabled: true,
-        certificate_path: `/etc/nextpanel/certs/${node.id}.crt`,
-        key_path: `/etc/nextpanel/certs/${node.id}.key`,
-      };
+      base.tls = certificateTls(node.id);
+      break;
+    case 'TUIC':
+      base.users = [{ uuid: creds.uuid ?? '', password: creds.password ?? '' }];
+      base.congestion_control = 'bbr';
+      base.zero_rtt_handshake = false;
+      base.heartbeat = '10s';
+      base.tls = certificateTls(node.id);
+      break;
+    case 'ANYTLS':
+      base.users = [{ password: creds.password ?? '' }];
+      base.tls = certificateTls(node.id);
       break;
   }
 
@@ -73,7 +143,7 @@ function singBoxInbound(node: NodeInfo, creds: NodeCredentials): unknown {
         enabled: true,
         handshake: { server: node.domain ?? REALITY_DEFAULT_SNI, server_port: 443 },
         private_key: creds.realityPrivateKey ?? '',
-        short_id: [''],
+        short_id: [creds.shortId ?? ''],
       },
     };
   }
@@ -90,8 +160,18 @@ function singBoxType(protocol: string): string {
     SOCKS5: 'socks',
     HTTP: 'http',
     HYSTERIA2: 'hysteria2',
+    TUIC: 'tuic',
+    ANYTLS: 'anytls',
   };
   return map[protocol] ?? protocol.toLowerCase();
+}
+
+function certificateTls(nodeId: string): Record<string, unknown> {
+  return {
+    enabled: true,
+    certificate_path: `/etc/nextpanel/certs/${nodeId}.crt`,
+    key_path: `/etc/nextpanel/certs/${nodeId}.key`,
+  };
 }
 
 // ─── ss-libev ────────────────────────────────────────────────────────────────

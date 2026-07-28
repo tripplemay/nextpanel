@@ -16,17 +16,23 @@ import * as crypto from 'crypto';
 
 export type SupportedProtocol =
   | 'VLESS_REALITY'
+  | 'VLESS_XHTTP_REALITY'
   | 'VLESS_WS_TLS'
   | 'VLESS_TCP_TLS'
   | 'HYSTERIA2'
+  | 'TUIC_V5'
+  | 'ANYTLS'
   | 'VMESS_TCP';
 
 /** Array form for use in IsIn() validators */
 export const SUPPORTED_PROTOCOLS: SupportedProtocol[] = [
   'VLESS_REALITY',
+  'VLESS_XHTTP_REALITY',
   'VLESS_WS_TLS',
   'VLESS_TCP_TLS',
   'HYSTERIA2',
+  'TUIC_V5',
+  'ANYTLS',
   'VMESS_TCP',
 ];
 
@@ -46,7 +52,7 @@ export interface ProtocolPreset {
   protocol: string;
   /** Prisma Implementation enum value */
   implementation: string;
-  /** Prisma Transport enum value — null for Hysteria2 */
+  /** Prisma Transport enum value — null for protocols with a native transport */
   transport: string | null;
   /** Prisma TlsMode enum value */
   tls: string;
@@ -62,10 +68,13 @@ export interface ProtocolPreset {
    *
    * Port map:
    *   VLESS_REALITY  listen 10000–10999  stats 30000–30999
+   *   VLESS_XHTTP_REALITY listen 443 (fixed)  stats 20443 (fixed)
    *   VLESS_WS_TLS   listen 443 (fixed)  stats 20443 (fixed)
    *   VLESS_TCP_TLS  listen 12000–12999  stats 32000–32999
    *   HYSTERIA2      listen 13000–13999  (no stats — sing-box)
    *   VMESS_TCP      listen 14000–14999  stats 34000–34999
+   *   TUIC_V5        listen 16000–16999  (no stats — sing-box)
+   *   ANYTLS         listen 17000–17999  (no stats — sing-box)
    */
   portBase: number | null;
 }
@@ -85,6 +94,21 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
     tls: 'REALITY',
     fixedPort: null,
     portBase: 10000,
+  },
+  VLESS_XHTTP_REALITY: {
+    label: 'VLESS + XHTTP + REALITY',
+    description: '基于 XHTTP 的新一代抗封锁传输，固定使用推荐的 443 端口',
+    tags: [
+      { text: '极速', color: 'green' },
+      { text: '抗封锁', color: 'red' },
+      { text: '无需域名', color: 'blue' },
+    ],
+    protocol: 'VLESS',
+    implementation: 'XRAY',
+    transport: 'XHTTP',
+    tls: 'REALITY',
+    fixedPort: 443,
+    portBase: null,
   },
   VLESS_WS_TLS: {
     label: 'VLESS + WS + TLS',
@@ -131,6 +155,36 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
     fixedPort: null,
     portBase: 13000,
   },
+  TUIC_V5: {
+    label: 'TUIC v5',
+    description: '基于 QUIC/UDP 的低延迟协议，适合高丢包和移动网络',
+    tags: [
+      { text: '极速', color: 'green' },
+      { text: '低延迟', color: 'cyan' },
+      { text: '需要 CF + 域名', color: 'gold' },
+    ],
+    protocol: 'TUIC',
+    implementation: 'SING_BOX',
+    transport: null,
+    tls: 'TLS',
+    fixedPort: null,
+    portBase: 16000,
+  },
+  ANYTLS: {
+    label: 'AnyTLS',
+    description: '基于 TLS/TCP 的轻量协议，在受限网络中提供稳定连接',
+    tags: [
+      { text: '稳定', color: 'green' },
+      { text: '高安全', color: 'volcano' },
+      { text: '需要 CF + 域名', color: 'gold' },
+    ],
+    protocol: 'ANYTLS',
+    implementation: 'SING_BOX',
+    transport: null,
+    tls: 'TLS',
+    fixedPort: null,
+    portBase: 17000,
+  },
   VMESS_TCP: {
     label: 'VMess + TCP',
     description: '兼容性最广的兜底方案，无需域名或证书，适合老旧客户端',
@@ -164,6 +218,16 @@ export const CREDENTIAL_GENERATORS: Record<
       realityPublicKey,
     };
   },
+  VLESS_XHTTP_REALITY: () => {
+    const { realityPrivateKey, realityPublicKey } = generateX25519Keys();
+    return {
+      uuid: crypto.randomUUID(),
+      realityPrivateKey,
+      realityPublicKey,
+      shortId: crypto.randomBytes(8).toString('hex'),
+      path: `/${crypto.randomBytes(12).toString('base64url')}`,
+    };
+  },
   VLESS_WS_TLS: () => ({
     uuid: crypto.randomUUID(),
   }),
@@ -171,6 +235,13 @@ export const CREDENTIAL_GENERATORS: Record<
     uuid: crypto.randomUUID(),
   }),
   HYSTERIA2: () => ({
+    password: randomPassword(32),
+  }),
+  TUIC_V5: () => ({
+    uuid: crypto.randomUUID(),
+    password: randomPassword(32),
+  }),
+  ANYTLS: () => ({
     password: randomPassword(32),
   }),
   VMESS_TCP: () => ({

@@ -50,14 +50,17 @@ export class XrayTestService {
     const credentials = JSON.parse(
       this.crypto.decrypt(node.credentialsEnc),
     ) as Record<string, string>;
+    const connectionHost = node.tls === 'REALITY'
+      ? node.server.ip
+      : (node.domain ?? node.server.ip);
 
     let result: TestResult;
 
-    // Hysteria2 is not supported by Xray — delegate to sing-box test
-    if (node.protocol === 'HYSTERIA2') {
+    // These protocols are not supported by Xray — delegate to sing-box.
+    if (this.usesSingbox(node.protocol)) {
       result = await this.withSemaphore(() =>
-        this.singboxTest.testHysteria2({
-          host: node.domain ?? node.server.ip,
+        this.singboxTest.testNode(node.protocol, {
+          host: connectionHost,
           port: node.listenPort,
           domain: node.domain,
           credentials,
@@ -69,7 +72,7 @@ export class XrayTestService {
           protocol: node.protocol,
           transport: node.transport,
           tls: node.tls,
-          host: node.domain ?? node.server.ip,
+          host: connectionHost,
           port: node.listenPort,
           domain: node.domain,
           credentials,
@@ -128,7 +131,21 @@ export class XrayTestService {
     domain: string | null;
     credentials: Record<string, string>;
   }): Promise<TestResult> {
+    if (this.usesSingbox(params.protocol)) {
+      return this.withSemaphore(() =>
+        this.singboxTest.testNode(params.protocol, {
+          host: params.host,
+          port: params.port,
+          domain: params.domain,
+          credentials: params.credentials,
+        }),
+      );
+    }
     return this.withSemaphore(() => this.runTest(params));
+  }
+
+  private usesSingbox(protocol: string): boolean {
+    return protocol === 'HYSTERIA2' || protocol === 'TUIC' || protocol === 'ANYTLS';
   }
 
   // ── Core test logic ────────────────────────────────────────────────────────
@@ -160,7 +177,7 @@ export class XrayTestService {
       socksPort,
     );
 
-    fs.writeFileSync(configPath, config, 'utf8');
+    fs.writeFileSync(configPath, config, { encoding: 'utf8', mode: 0o600 });
 
     const xray = this.spawnXray(configPath);
 

@@ -41,7 +41,7 @@ if [ -f /etc/os-release ]; then
   . /etc/os-release
   case "$ID-$VERSION_ID" in
     ubuntu-22.04|ubuntu-24.04|debian-12) ok "检测到 $PRETTY_NAME" ;;
-    *) warn "未经测试的系统：$PRETTY_NAME，继续安装..." ;;
+    *) warn "未经测试的系统：${PRETTY_NAME}，继续安装..." ;;
   esac
 fi
 
@@ -207,7 +207,7 @@ chmod 755 "$LOG_DIR"
 # Pre-flight check: verify git repo is accessible
 info "正在检查代码仓库可访问性..."
 if ! git ls-remote --exit-code "$REPO_URL" HEAD > /dev/null 2>&1; then
-  fail "无法访问代码仓库：$REPO_URL（请检查网络连接或仓库地址）"
+  fail "无法访问代码仓库：${REPO_URL}（请检查网络连接或仓库地址）"
 fi
 ok "代码仓库可访问"
 
@@ -407,34 +407,12 @@ if [ "$MODE" = "DOMAIN" ]; then
   fi
 fi
 
-# ── 步骤 23：安装 Xray 和 sing-box（可选）─────────────────────────────────
+# ── 步骤 23：安装或升级节点测试内核 ──────────────────────────────────────
 
-ARCH=$(uname -m | sed 's/x86_64/64/;s/aarch64/arm64-v8a/')
-if ! command -v xray &>/dev/null; then
-  info "正在安装 Xray 测试客户端..."
-  if curl -fsSL "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${ARCH}.zip" -o /tmp/xray.zip 2>/dev/null; then
-    unzip -oq /tmp/xray.zip xray -d /usr/local/bin/ 2>/dev/null && chmod +x /usr/local/bin/xray
-    rm -f /tmp/xray.zip
-    ok "Xray 已安装"
-  else
-    warn "Xray 安装失败（可选组件，节点连通性测试将不可用）"
-  fi
-fi
-
-SB_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-if ! command -v sing-box &>/dev/null; then
-  info "正在安装 sing-box 测试客户端..."
-  SB_TAG=$(curl -sf "https://api.github.com/repos/SagerNet/sing-box/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed 's/.*"\(v[^"]*\)".*/\1/')
-  if [ -n "$SB_TAG" ]; then
-    if curl -fsSL "https://github.com/SagerNet/sing-box/releases/download/${SB_TAG}/sing-box-${SB_TAG#v}-linux-${SB_ARCH}.tar.gz" -o /tmp/sb.tar.gz 2>/dev/null; then
-      tar xzf /tmp/sb.tar.gz -C /tmp/ 2>/dev/null
-      mv /tmp/sing-box-*/sing-box /usr/local/bin/sing-box 2>/dev/null && chmod +x /usr/local/bin/sing-box
-      rm -rf /tmp/sb.tar.gz /tmp/sing-box-*/
-      ok "sing-box 已安装"
-    else
-      warn "sing-box 安装失败（可选组件，Hysteria2 测试将不可用）"
-    fi
-  fi
+# shellcheck source=proxy-core-utils.sh
+source "$APP_DIR/scripts/proxy-core-utils.sh"
+if ! ensure_proxy_test_cores; then
+  warn "部分节点测试内核未就绪；服务端部署仍可用，但对应协议的面板连通性测试不可用"
 fi
 
 # ── 步骤 24：配置日志轮转 ────────────────────────────────────────────────

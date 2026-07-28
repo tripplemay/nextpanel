@@ -7,14 +7,15 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
   const proxyInbound = {
     tag: `in-${node.id}`,
     port: node.listenPort,
-    listen: '0.0.0.0',
+    listen: '::',
     protocol: xrayProtocol(node.protocol),
-    settings: xraySettings(node.protocol, creds, node.tls),
+    settings: xraySettings(node.protocol, creds, node.tls, node.transport),
     streamSettings: xrayStreamSettings(node.id, node.transport, node.tls, node.domain, creds),
   };
 
   // Determine outbound: chain exit or direct freedom
   const isChain = !!(node.chainExitIp && node.chainExitPort && node.chainUuid);
+  const chainReality = isChain ? getChainRealityClient(node) : null;
   const outbounds: unknown[] = isChain
     ? [
         {
@@ -29,14 +30,32 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
           },
           streamSettings: {
             network: 'tcp',
-            security: 'none',
+            security: chainReality ? 'reality' : 'none',
+            ...(chainReality
+              ? {
+                  realitySettings: {
+                    serverName: REALITY_DEFAULT_SNI,
+                    fingerprint: 'chrome',
+                    password: chainReality.publicKey,
+                    shortId: chainReality.shortId,
+                  },
+                }
+              : {}),
             sockopt: { tcpKeepAliveInterval: 30 },
           },
+          ...(chainReality
+            ? {
+                mux: {
+                  enabled: true,
+                  concurrency: 8,
+                  xudpConcurrency: 16,
+                  xudpProxyUDP443: 'allow',
+                },
+              }
+            : {}),
         },
       ]
     : [{ protocol: 'freedom', tag: 'direct' }];
-
-  const defaultOutboundTag = isChain ? 'chain-exit' : 'direct';
 
   if (node.statsPort) {
     const routingRules: unknown[] = [
@@ -87,6 +106,24 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
   return JSON.stringify(config, null, 2);
 }
 
+function getChainRealityClient(
+  node: NodeInfo,
+): { publicKey: string; shortId: string } | null {
+  const values = [
+    node.chainRealityPrivateKey,
+    node.chainRealityPublicKey,
+    node.chainShortId,
+  ];
+  const hasAny = values.some((value) => !!value);
+  const hasAll = values.every((value) => !!value);
+  if (hasAny && !hasAll) {
+    throw new Error('Secure chain requires complete REALITY key and short ID credentials');
+  }
+  return hasAll
+    ? { publicKey: node.chainRealityPublicKey!, shortId: node.chainShortId! }
+    : null;
+}
+
 function xrayProtocol(protocol: string): string {
   const map: Record<string, string> = {
     VMESS: 'vmess',
@@ -99,13 +136,23 @@ function xrayProtocol(protocol: string): string {
   return map[protocol] ?? protocol.toLowerCase();
 }
 
-function xraySettings(protocol: string, creds: NodeCredentials, tls?: string): unknown {
+function xraySettings(
+  protocol: string,
+  creds: NodeCredentials,
+  tls?: string,
+  transport?: string | null,
+): unknown {
   switch (protocol) {
     case 'VMESS':
       return { clients: [{ id: creds.uuid ?? '', alterId: 0 }] };
     case 'VLESS':
       return {
-        clients: [{ id: creds.uuid ?? '', flow: tls === 'REALITY' ? REALITY_FLOW : '' }],
+        clients: [
+          {
+            id: creds.uuid ?? '',
+            flow: tls === 'REALITY' && transport !== 'XHTTP' ? REALITY_FLOW : '',
+          },
+        ],
         decryption: 'none',
       };
     case 'TROJAN':
@@ -149,6 +196,12 @@ function xrayStreamSettings(
     base.wsSettings = { path: '/' };
   } else if (network === 'grpc') {
     base.grpcSettings = { serviceName: 'grpc' };
+  } else if (network === 'xhttp') {
+    const path = creds.path ?? '/';
+    base.xhttpSettings = {
+      path: path.startsWith('/') ? path : `/${path}`,
+      mode: 'auto',
+    };
   }
 
   if (tls === 'TLS') {
@@ -168,7 +221,7 @@ function xrayStreamSettings(
       dest: `${domain ?? REALITY_DEFAULT_SNI}:443`,
       serverNames: [domain ?? REALITY_DEFAULT_SNI],
       privateKey: creds.realityPrivateKey ?? '',
-      shortIds: [''],
+      shortIds: [creds.shortId ?? ''],
     };
   } else {
     base.security = 'none';
@@ -180,12 +233,14 @@ function xrayStreamSettings(
 function transportNetwork(transport: string | null): string {
   const map: Record<string, string> = {
     TCP: 'tcp',
+    RAW: 'raw',
     WS: 'ws',
     GRPC: 'grpc',
+    XHTTP: 'xhttp',
   };
   if (transport === 'QUIC') {
     throw new Error(
-      'QUIC transport was removed in Xray 26.x. Change the node transport to TCP, WS, or GRPC.',
+      'QUIC transport was removed in Xray 26.x. Change the node transport to TCP, RAW, WS, GRPC, or XHTTP.',
     );
   }
   return map[transport ?? 'TCP'] ?? 'tcp';

@@ -5,7 +5,11 @@ import { NodeDeployService } from '../nodes/node-deploy.service';
 import { CloudflareService } from '../cloudflare/cloudflare.service';
 import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.service';
 import { IpCheckService } from '../ip-check/ip-check.service';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
+
+jest.mock('../common/database/advisory-lock', () => ({
+  withPostgresAdvisoryLocks: (_keys: string[], work: () => Promise<unknown>) => work(),
+}));
 
 // Mock node-ssh before importing ServersService
 const mockConnect = jest.fn().mockResolvedValue(undefined);
@@ -32,6 +36,9 @@ import { connectSsh } from '../nodes/ssh/ssh.util';
 const mockConnectSsh = connectSsh as jest.Mock;
 
 const mockPrisma = {
+  $transaction: jest.fn(async (work: (tx: { $queryRawUnsafe: jest.Mock }) => unknown) =>
+    work({ $queryRawUnsafe: jest.fn().mockResolvedValue([]) }),
+  ),
   server: {
     create: jest.fn(),
     findMany: jest.fn(),
@@ -43,6 +50,7 @@ const mockPrisma = {
   },
   node: {
     findMany: jest.fn().mockResolvedValue([]),
+    findFirst: jest.fn().mockResolvedValue(null),
   },
 } as unknown as PrismaService;
 
@@ -181,6 +189,83 @@ describe('ServersService', () => {
 
       await expect(svc.update('bad', {} as any, 'user-id-1')).rejects.toThrow(NotFoundException);
     });
+
+    it('rejects an IP change while a managed DNS node exists', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ id: 'node-1' });
+
+      const update = svc.update('srv-1', { ip: '5.6.7.8' } as any, 'user-id-1');
+      await expect(update).rejects.toBeInstanceOf(BadRequestException);
+      await expect(update).rejects.toThrow('存在 Cloudflare 托管 DNS 节点');
+
+      expect(mockPrisma.node.findFirst).toHaveBeenCalledWith({
+        where: {
+          serverId: 'srv-1',
+          cfDnsRecordId: { not: null },
+        },
+        select: { id: true },
+      });
+      expect(mockPrisma.server.update).not.toHaveBeenCalled();
+    });
+
+    it('allows an IP change when no managed DNS node exists', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.server.update as jest.Mock).mockResolvedValue({
+        ...fakeServer,
+        ip: '5.6.7.8',
+      });
+
+      await svc.update('srv-1', { ip: '5.6.7.8' } as any, 'user-id-1');
+
+      expect(mockPrisma.server.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ ip: '5.6.7.8' }) }),
+      );
+    });
+
+    it('rejects an IP change when the server is a chain entry', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.node.findFirst as jest.Mock)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'chain-1', serverId: 'srv-1', exitServerId: 'exit-1' });
+
+      const update = svc.update('srv-1', { ip: '5.6.7.8' } as any, 'user-id-1');
+      await expect(update).rejects.toBeInstanceOf(BadRequestException);
+      await expect(update).rejects.toThrow('先迁移或重建相关链节点');
+
+      expect(mockPrisma.server.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects an IP change when the server is a chain exit', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.node.findFirst as jest.Mock)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'chain-1', serverId: 'entry-1', exitServerId: 'srv-1' });
+
+      const update = svc.update('srv-1', { ip: '5.6.7.8' } as any, 'user-id-1');
+      await expect(update).rejects.toBeInstanceOf(BadRequestException);
+      await expect(update).rejects.toThrow('REALITY 目标地址或防火墙源 IP 失效');
+
+      expect(mockPrisma.node.findFirst).toHaveBeenCalledWith({
+        where: {
+          OR: [
+            { serverId: 'srv-1', exitServerId: { not: null } },
+            { exitServerId: 'srv-1' },
+          ],
+        },
+        select: { id: true },
+      });
+      expect(mockPrisma.server.update).not.toHaveBeenCalled();
+    });
+
+    it('does not query managed DNS nodes when the IP is unchanged', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+
+      await svc.update('srv-1', { ip: fakeServer.ip } as any, 'user-id-1');
+
+      expect(mockPrisma.node.findFirst).not.toHaveBeenCalled();
+    });
   });
 
   describe('remove', () => {
@@ -289,7 +374,7 @@ describe('ServersService', () => {
       expect(mockPrisma.server.delete).toHaveBeenCalledWith({ where: { id: 'srv-1' } });
     });
 
-    it('still deletes the server when a chain-exit node undeploy fails (non-fatal)', async () => {
+    it('sets the server to ERROR and aborts deletion when a chain node undeploy fails', async () => {
       (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
       (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
       (mockPrisma.server.delete as jest.Mock).mockResolvedValue(fakeServer);
@@ -300,10 +385,15 @@ describe('ServersService', () => {
       await svc.remove('srv-1', 'user-id-1');
       await flushPromises();
 
-      // A chain-exit cleanup failure must NOT block this server's deletion or set ERROR
-      expect(mockPrisma.server.delete).toHaveBeenCalledWith({ where: { id: 'srv-1' } });
-      expect(mockPrisma.server.update).not.toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ status: 'ERROR' }) }),
+      expect(mockPrisma.server.delete).not.toHaveBeenCalled();
+      expect(mockPrisma.server.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'srv-1' },
+          data: expect.objectContaining({
+            status: 'ERROR',
+            deleteError: expect.stringContaining('entry server unreachable'),
+          }),
+        }),
       );
     });
   });

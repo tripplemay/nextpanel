@@ -7,6 +7,7 @@
  */
 
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { isIP } from 'net';
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
 
@@ -28,7 +29,7 @@ export class CloudflareService {
   private readonly logger = new Logger(CloudflareService.name);
 
   /**
-   * Create a DNS A record pointing subdomain → ip.
+   * Create an A or AAAA record pointing subdomain to an IP address.
    * proxied=true (default) routes through CF CDN; proxied=false is DNS-only (direct IP).
    * Returns the newly created DNS record ID.
    */
@@ -39,9 +40,12 @@ export class CloudflareService {
     ip: string,
     proxied = true,
   ): Promise<string> {
+    const ipVersion = isIP(ip);
+    if (ipVersion === 0) throw new BadRequestException(`Invalid DNS record IP address: ${ip}`);
+    const recordType = ipVersion === 6 ? 'AAAA' : 'A';
     const url = `${CF_API}/zones/${zoneId}/dns_records`;
     const body = JSON.stringify({
-      type: 'A',
+      type: recordType,
       name: subdomain,
       content: ip,
       proxied,
@@ -62,7 +66,7 @@ export class CloudflareService {
       throw new BadRequestException(`Cloudflare API error: ${msg}`);
     }
 
-    this.logger.log(`Created DNS A record ${subdomain} → ${ip} (id=${data.result.id})`);
+    this.logger.log(`Created DNS ${recordType} record ${subdomain} → ${ip} (id=${data.result.id})`);
     return data.result.id;
   }
 

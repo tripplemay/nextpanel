@@ -11,6 +11,7 @@ import { connectSsh } from '../nodes/ssh/ssh.util';
 import { CreateServerDto } from './dto/create-server.dto';
 import { UpdateServerDto } from './dto/update-server.dto';
 import { RestoreCredentialsDto } from './dto/restore-credentials.dto';
+import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
 
 @Injectable()
 export class ServersService {
@@ -74,7 +75,38 @@ export class ServersService {
   }
 
   async update(id: string, dto: UpdateServerDto, userId: string) {
-    await this.findOne(id, userId);
+    const existing = await this.findOne(id, userId);
+    if (dto.ip !== undefined && dto.ip !== existing.ip) {
+      const [managedDnsNode, chainNode] = await Promise.all([
+        this.prisma.node.findFirst({
+          where: {
+            serverId: id,
+            cfDnsRecordId: { not: null },
+          },
+          select: { id: true },
+        }),
+        this.prisma.node.findFirst({
+          where: {
+            OR: [
+              { serverId: id, exitServerId: { not: null } },
+              { exitServerId: id },
+            ],
+          },
+          select: { id: true },
+        }),
+      ]);
+      if (managedDnsNode) {
+        throw new BadRequestException(
+          '该服务器存在 Cloudflare 托管 DNS 节点，请先删除或迁移这些节点后再修改 IP，避免 DNS 继续指向旧 IP',
+        );
+      }
+      if (chainNode) {
+        throw new BadRequestException(
+          '该服务器正在被链式节点用作入口或出口，请先迁移或重建相关链节点后再修改 IP，避免 REALITY 目标地址或防火墙源 IP 失效',
+        );
+      }
+    }
+
     const data: Record<string, unknown> = { ...dto };
     if (dto.sshAuth) {
       data.sshAuthEnc = this.crypto.encrypt(dto.sshAuth);
@@ -93,12 +125,14 @@ export class ServersService {
    * run in the background so the browser can safely close without affecting the outcome.
    */
   async remove(id: string, userId: string) {
-    await this.findOne(id, userId);
+    await this.withDatabaseLocks([serverPortLock(id)], async () => {
+      await this.findOne(id, userId);
 
-    // Mark as DELETING immediately and clear any previous error
-    await this.prisma.server.update({
-      where: { id },
-      data: { status: 'DELETING', deleteError: null },
+      // Creation paths take the same lock and re-check this state before insert.
+      await this.prisma.server.update({
+        where: { id },
+        data: { status: 'DELETING', deleteError: null },
+      });
     });
 
     // Fire-and-forget: SSH cleanup then DB delete
@@ -137,17 +171,17 @@ export class ServersService {
     // SSH cleanup per node — collect failures
     const failures: { nodeName: string; error: string }[] = [];
 
-    await Promise.allSettled(
-      nodes.map(async (node) => {
-        try {
-          await this.nodeDeploy.undeploy(node.id);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.logger.warn(`Server ${id}: undeploy of node ${node.id} failed: ${msg}`);
-          failures.push({ nodeName: node.name, error: msg });
-        }
-      }),
-    );
+    // Every node on this server shares the same server-core lock. Process them
+    // sequentially so deletion cannot consume one lock connection per waiter.
+    for (const node of nodes) {
+      try {
+        await this.nodeDeploy.undeploy(node.id);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Server ${id}: undeploy of node ${node.id} failed: ${msg}`);
+        failures.push({ nodeName: node.name, error: msg });
+      }
+    }
 
     if (failures.length > 0) {
       await this.prisma.server.update({
@@ -161,19 +195,30 @@ export class ServersService {
       return;
     }
 
-    // Best-effort: tear down chain nodes that exit through this server from their
-    // entry servers. These live on OTHER servers, so a failure here must NOT block
-    // this server's deletion — the DB records are removed by the FK cascade regardless.
-    await Promise.allSettled(
-      chainExitNodes.map(async (node) => {
-        try {
-          await this.nodeDeploy.undeploy(node.id);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.logger.warn(`Server ${id}: chain-exit node ${node.id} undeploy failed (non-fatal): ${msg}`);
-        }
-      }),
-    );
+    // Tear down chain nodes that exit through this server from their entry
+    // servers. Deleting their DB records while entry-side processes remain live
+    // would orphan deployments, so failures must block the server deletion.
+    for (const node of chainExitNodes) {
+      try {
+        await this.nodeDeploy.undeploy(node.id);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Server ${id}: chain-exit node ${node.id} undeploy failed: ${msg}`);
+        failures.push({ nodeName: node.name, error: msg });
+      }
+    }
+
+    if (failures.length > 0) {
+      await this.prisma.server.update({
+        where: { id },
+        data: {
+          status: 'ERROR',
+          deleteError: JSON.stringify(failures),
+        },
+      });
+      this.logger.warn(`Server ${id}: deletion failed for ${failures.length} chain node(s)`);
+      return;
+    }
 
     // All SSH cleanups succeeded — clean up Cloudflare DNS (best-effort).
     // Includes chain-exit nodes: the FK cascade will delete their records, so we
@@ -198,6 +243,10 @@ export class ServersService {
     await this.prisma.server.delete({ where: { id } }).catch((err) => {
       this.logger.error(`Server ${id}: DB delete failed: ${err instanceof Error ? err.message : String(err)}`);
     });
+  }
+
+  private async withDatabaseLocks<T>(keys: string[], work: () => Promise<T>): Promise<T> {
+    return withPostgresAdvisoryLocks(keys, work);
   }
 
   async checkIp(ip: string, userId: string): Promise<{ exists: boolean }> {
@@ -574,4 +623,8 @@ export class ServersService {
       updatedAt: true,
     } as const;
   }
+}
+
+function serverPortLock(serverId: string): string {
+  return `nextpanel:server-ports:${serverId}`;
 }

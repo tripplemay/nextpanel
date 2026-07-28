@@ -7,13 +7,24 @@ import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.ser
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { CreateNodeDto } from './dto/create-node.dto';
 
+jest.mock('../common/database/advisory-lock', () => ({
+  withPostgresAdvisoryLocks: (_keys: string[], work: () => Promise<unknown>) => work(),
+}));
+
 const mockPrisma = {
+  $transaction: jest.fn(async (work: (tx: { $queryRawUnsafe: jest.Mock }) => unknown) =>
+    work({ $queryRawUnsafe: jest.fn().mockResolvedValue([]) }),
+  ),
   node: {
     create: jest.fn(),
     findMany: jest.fn(),
     findFirst: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
+  },
+  server: {
+    findFirst: jest.fn(),
+    findUnique: jest.fn(),
   },
 } as unknown as PrismaService;
 
@@ -47,10 +58,57 @@ const fakeNode = {
   status: 'RUNNING', enabled: true, createdAt: new Date(), updatedAt: new Date(),
 };
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  (mockDeploy.deploy as jest.Mock).mockResolvedValue({ success: true, log: '' });
+  (mockDeploy.undeploy as jest.Mock).mockResolvedValue(undefined);
+  (mockDeploy.toggleService as jest.Mock).mockResolvedValue(undefined);
+  (mockCfService.createARecord as jest.Mock).mockResolvedValue('cf-record-id');
+  (mockCfService.deleteRecord as jest.Mock).mockResolvedValue(undefined);
+  (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue(null);
+  (mockCfSettings.verify as jest.Mock).mockResolvedValue({ valid: true, zoneStatus: 'active' });
+  (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(null);
+  (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue({ id: 'srv-1' });
+  (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]);
+});
 
 describe('NodesService', () => {
   describe('create', () => {
+    it('rejects a server that does not belong to the current user', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(null);
+
+      await expect(svc.create({
+        serverId: 'other-server',
+        name: 'Unauthorized',
+        protocol: 'VMESS',
+        listenPort: 10086,
+        credentials: { uuid: 'abc' },
+      } as any, 'user-id-1')).rejects.toThrow('Server other-server not found');
+
+      expect(mockPrisma.node.create).not.toHaveBeenCalled();
+      expect(mockDeploy.deploy).not.toHaveBeenCalled();
+    });
+
+    it('rejects creation when deletion starts before the locked re-check', async () => {
+      (mockPrisma.server.findFirst as jest.Mock)
+        .mockResolvedValueOnce({ id: 'srv-1', status: 'ONLINE' })
+        .mockResolvedValueOnce({ id: 'srv-1', status: 'DELETING' });
+
+      await expect(svc.create({
+        serverId: 'srv-1',
+        name: 'Too late',
+        protocol: 'VMESS',
+        implementation: 'XRAY',
+        transport: 'TCP',
+        tls: 'NONE',
+        listenPort: 10086,
+        credentials: { uuid: 'abc' },
+      } as any, 'user-id-1')).rejects.toThrow('服务器正在删除');
+
+      expect(mockPrisma.node.create).not.toHaveBeenCalled();
+      expect(mockDeploy.deploy).not.toHaveBeenCalled();
+    });
+
     it('encrypts credentials and triggers deploy', async () => {
       (mockPrisma.node.create as jest.Mock).mockResolvedValue(fakeNode);
       const dto: CreateNodeDto = {
@@ -78,6 +136,119 @@ describe('NodesService', () => {
       await svc.create(dto, 'user-id-1');
       const data = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
       expect(data.tls).toBe('NONE');
+    });
+
+    it('defaults the full VLESS XHTTP REALITY shape and credentials', async () => {
+      (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-xhttp' });
+
+      await svc.create({
+        serverId: 'srv-1',
+        name: 'XHTTP',
+        protocol: 'VLESS',
+        transport: 'XHTTP',
+        listenPort: 443,
+        credentials: {},
+      } as any, 'user-id-1');
+
+      const data = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'REALITY',
+        listenPort: 443,
+      });
+      const credentials = JSON.parse(
+        (mockCrypto.encrypt as jest.Mock).mock.calls[0][0],
+      ) as Record<string, string>;
+      expect(credentials.uuid).toMatch(/^[0-9a-f-]{36}$/i);
+      expect(credentials.realityPrivateKey).toBeTruthy();
+      expect(credentials.realityPublicKey).toBeTruthy();
+      expect(credentials.shortId).toMatch(/^[0-9a-f]{16}$/);
+      expect(credentials.path).toMatch(/^\/[A-Za-z0-9_-]+$/);
+    });
+
+    it('rejects VLESS XHTTP on a non-standard port', async () => {
+      await expect(svc.create({
+        serverId: 'srv-1', name: 'XHTTP', protocol: 'VLESS', transport: 'XHTTP',
+        listenPort: 8443, credentials: {},
+      } as any, 'user-id-1')).rejects.toThrow('必须监听 443 端口');
+      expect(mockPrisma.node.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [{ id: 'existing', listenPort: 443, statsPort: null, implementation: 'SING_BOX' }, 443],
+      [{ id: 'existing', listenPort: 2443, statsPort: 20443, implementation: 'XRAY' }, 20443],
+    ])('rejects a manual node whose listen/stats port conflicts', async (existing, conflict) => {
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([{
+        ...existing,
+        serverId: 'srv-1',
+        exitServerId: null,
+        exitPort: null,
+      }]);
+      await expect(svc.create({
+        serverId: 'srv-1', name: 'Manual', protocol: 'VMESS', implementation: 'XRAY',
+        listenPort: 443, credentials: {},
+      } as any, 'user-id-1')).rejects.toThrow(`服务器端口 ${conflict}`);
+      expect(mockPrisma.node.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects XHTTP on a non-VLESS protocol', async () => {
+      await expect(svc.create({
+        serverId: 'srv-1', name: 'Bad XHTTP', protocol: 'VMESS', transport: 'XHTTP',
+        listenPort: 11000, credentials: {},
+      } as any, 'user-id-1')).rejects.toThrow('XHTTP 传输仅支持 VLESS 协议');
+      expect(mockPrisma.node.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects removed Xray QUIC transport with a migration hint', async () => {
+      await expect(svc.create({
+        serverId: 'srv-1', name: 'Legacy QUIC', protocol: 'VLESS', transport: 'QUIC',
+        listenPort: 1443, credentials: {},
+      } as any, 'user-id-1')).rejects.toThrow('迁移到 VLESS + XHTTP + REALITY 或 TUIC v5');
+      expect(mockPrisma.node.create).not.toHaveBeenCalled();
+    });
+
+    it('creates manual TUIC with managed DNS and generated credentials', async () => {
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
+      });
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({ ip: '1.2.3.4' });
+      (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-tuic' });
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-tuic' });
+
+      await svc.create({
+        serverId: 'srv-1', name: 'TUIC', protocol: 'TUIC', listenPort: 16000, credentials: {},
+      } as any, 'user-id-1');
+
+      const data = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        protocol: 'TUIC', implementation: 'SING_BOX', transport: null, tls: 'TLS',
+        domain: null, source: 'AUTO',
+      });
+      const credentials = JSON.parse(
+        (mockCrypto.encrypt as jest.Mock).mock.calls[0][0],
+      ) as Record<string, string>;
+      expect(credentials.uuid).toMatch(/^[0-9a-f-]{36}$/i);
+      expect(credentials.password).toHaveLength(32);
+      expect(mockCfService.createARecord).toHaveBeenCalledWith(
+        'cf-token', 'zone-1', expect.stringContaining('example.com'), '1.2.3.4', false,
+      );
+    });
+
+    it('rolls back a manual AnyTLS node when managed DNS creation fails', async () => {
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
+      });
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({ ip: '1.2.3.4' });
+      (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-anytls' });
+      (mockPrisma.node.delete as jest.Mock).mockResolvedValue({});
+      (mockCfService.createARecord as jest.Mock).mockRejectedValue(new Error('dns failed'));
+
+      await expect(svc.create({
+        serverId: 'srv-1', name: 'AnyTLS', protocol: 'ANYTLS', listenPort: 17000, credentials: {},
+      } as any, 'user-id-1')).rejects.toThrow('dns failed');
+
+      expect(mockPrisma.node.delete).toHaveBeenCalledWith({ where: { id: 'node-anytls' } });
+      expect(mockDeploy.deploy).not.toHaveBeenCalled();
     });
   });
 
@@ -127,6 +298,444 @@ describe('NodesService', () => {
       (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(null);
       await expect(svc.update('bad', {} as any, 'user-id-1')).rejects.toThrow(NotFoundException);
     });
+
+    it('defaults credentials and shape when updating a node to XHTTP', async () => {
+      const existing = { ...fakeNode, credentialsEnc: 'enc:{"uuid":"existing-uuid"}' };
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(existing);
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({ ...existing, transport: 'XHTTP' });
+
+      await svc.update('node-1', {
+        protocol: 'VLESS', transport: 'XHTTP', listenPort: 443,
+      } as any, 'user-id-1');
+
+      const data = (mockPrisma.node.update as jest.Mock).mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'REALITY',
+        listenPort: 443,
+      });
+      const credentials = JSON.parse(
+        (mockCrypto.encrypt as jest.Mock).mock.calls[0][0],
+      ) as Record<string, string>;
+      expect(credentials.uuid).toBe('existing-uuid');
+      expect(credentials.shortId).toMatch(/^[0-9a-f]{16}$/);
+      expect(credentials.path).toMatch(/^\//);
+    });
+
+    it('adds managed DNS atomically when updating a node to AnyTLS', async () => {
+      const existing = {
+        ...fakeNode,
+        cfDnsRecordId: null,
+        credentialsEnc: 'enc:{}',
+      };
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(existing);
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
+      });
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({ ip: '1.2.3.4' });
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({ ...existing, protocol: 'ANYTLS' });
+
+      await svc.update('node-1', {
+        protocol: 'ANYTLS',
+      } as any, 'user-id-1');
+
+      const data = (mockPrisma.node.update as jest.Mock).mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        protocol: 'ANYTLS',
+        implementation: 'SING_BOX',
+        transport: null,
+        tls: 'TLS',
+        source: 'AUTO',
+        domain: 'np-node-1.example.com',
+        cfDnsRecordId: 'cf-record-id',
+      });
+      expect(mockPrisma.server.findUnique).toHaveBeenCalledWith({
+        where: { id: 'srv-1' }, select: { ip: true },
+      });
+      const credentials = JSON.parse(
+        (mockCrypto.encrypt as jest.Mock).mock.calls[0][0],
+      ) as Record<string, string>;
+      expect(credentials.password).toHaveLength(32);
+    });
+
+    it('replaces an existing proxied record when entering TUIC', async () => {
+      const existing = {
+        ...fakeNode,
+        protocol: 'VLESS',
+        implementation: 'XRAY',
+        transport: 'WS',
+        tls: 'TLS',
+        domain: 'np-node-1.example.com',
+        cfDnsRecordId: 'proxied-record-id',
+        credentialsEnc: 'enc:{"uuid":"existing-uuid"}',
+      };
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(existing);
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
+      });
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({ ip: '1.2.3.4' });
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({ ...existing, protocol: 'TUIC' });
+
+      await svc.update('node-1', { protocol: 'TUIC' } as any, 'user-id-1');
+
+      const transitionDomain = (mockCfService.createARecord as jest.Mock).mock.calls[0][2];
+      expect(transitionDomain).toMatch(/^np-node-1-[0-9a-f]{6}\.example\.com$/);
+      expect(mockCfService.createARecord).toHaveBeenCalledWith(
+        'cf-token', 'zone-1', transitionDomain, '1.2.3.4', false,
+      );
+      const data = (mockPrisma.node.update as jest.Mock).mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        protocol: 'TUIC',
+        implementation: 'SING_BOX',
+        transport: null,
+        tls: 'TLS',
+        domain: transitionDomain,
+        cfDnsRecordId: 'cf-record-id',
+      });
+      expect(mockCfService.deleteRecord).toHaveBeenCalledWith(
+        'cf-token', 'zone-1', 'proxied-record-id',
+      );
+    });
+
+    it('keeps the old record and removes the new record when a managed transition fails', async () => {
+      const existing = {
+        ...fakeNode,
+        protocol: 'VLESS',
+        implementation: 'XRAY',
+        transport: 'WS',
+        tls: 'TLS',
+        domain: 'np-node-1.example.com',
+        cfDnsRecordId: 'proxied-record-id',
+        credentialsEnc: 'enc:{"uuid":"existing-uuid"}',
+      };
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(existing);
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
+      });
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({ ip: '1.2.3.4' });
+      (mockPrisma.node.update as jest.Mock).mockRejectedValue(new Error('database failed'));
+
+      await expect(
+        svc.update('node-1', { protocol: 'ANYTLS' } as any, 'user-id-1'),
+      ).rejects.toThrow('database failed');
+
+      expect(mockCfService.deleteRecord).toHaveBeenCalledTimes(1);
+      expect(mockCfService.deleteRecord).toHaveBeenCalledWith(
+        'cf-token', 'zone-1', 'cf-record-id',
+      );
+      expect(mockCfService.deleteRecord).not.toHaveBeenCalledWith(
+        'cf-token', 'zone-1', 'proxied-record-id',
+      );
+    });
+
+    it('retires a legacy TLS DNS record only after switching to XHTTP succeeds', async () => {
+      const existing = {
+        ...fakeNode,
+        protocol: 'VLESS',
+        implementation: 'XRAY',
+        transport: 'WS',
+        tls: 'TLS',
+        listenPort: 8443,
+        domain: 'np-node-1.example.com',
+        cfDnsRecordId: 'old-record-id',
+        credentialsEnc: 'enc:{"uuid":"existing-uuid"}',
+      };
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(existing);
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({
+        ...existing, transport: 'XHTTP', tls: 'REALITY', listenPort: 443,
+      });
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
+      });
+
+      await svc.update('node-1', {
+        protocol: 'VLESS', transport: 'XHTTP', listenPort: 443,
+      } as any, 'user-id-1');
+
+      expect((mockPrisma.node.update as jest.Mock).mock.calls[0][0].data).toMatchObject({
+        transport: 'XHTTP', tls: 'REALITY', domain: null, cfDnsRecordId: null,
+      });
+      expect(mockDeploy.deploy).toHaveBeenCalled();
+      expect(mockCfService.deleteRecord).toHaveBeenCalledWith(
+        'cf-token', 'zone-1', 'old-record-id',
+      );
+    });
+
+    it('restores a legacy TLS hostname and DNS id when XHTTP deployment fails', async () => {
+      const existing = {
+        ...fakeNode,
+        protocol: 'VLESS',
+        implementation: 'XRAY',
+        transport: 'WS',
+        tls: 'TLS',
+        listenPort: 8443,
+        domain: 'np-node-1.example.com',
+        cfDnsRecordId: 'old-record-id',
+        credentialsEnc: 'enc:{"uuid":"existing-uuid"}',
+      };
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(existing);
+      (mockPrisma.node.update as jest.Mock)
+        .mockResolvedValueOnce({ ...existing, transport: 'XHTTP', tls: 'REALITY' })
+        .mockResolvedValueOnce(existing);
+      (mockDeploy.deploy as jest.Mock).mockResolvedValue({
+        success: false, log: 'xray failed to start',
+      });
+
+      await expect(svc.update('node-1', {
+        protocol: 'VLESS', transport: 'XHTTP', listenPort: 443,
+      } as any, 'user-id-1')).rejects.toThrow('节点部署失败，已恢复原配置');
+
+      expect((mockPrisma.node.update as jest.Mock).mock.calls[1][0].data).toMatchObject({
+        transport: 'WS', tls: 'TLS', listenPort: 8443,
+        domain: 'np-node-1.example.com', cfDnsRecordId: 'old-record-id',
+      });
+      expect(mockCfService.deleteRecord).not.toHaveBeenCalled();
+    });
+
+    it('restores the database and keeps the old DNS record when AnyTLS deployment fails', async () => {
+      const existing = {
+        ...fakeNode,
+        cfDnsRecordId: 'proxied-record-id',
+        domain: 'np-node-1.example.com',
+        credentialsEnc: 'enc:{"uuid":"existing-uuid"}',
+        source: 'MANUAL',
+      };
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(existing);
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
+      });
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({ ip: '1.2.3.4' });
+      (mockPrisma.node.update as jest.Mock)
+        .mockResolvedValueOnce({ ...existing, protocol: 'ANYTLS' })
+        .mockResolvedValueOnce(existing);
+      (mockDeploy.deploy as jest.Mock).mockResolvedValue({
+        success: false,
+        log: 'sing-box failed to start',
+      });
+
+      await expect(
+        svc.update('node-1', { protocol: 'ANYTLS' } as any, 'user-id-1'),
+      ).rejects.toThrow('节点部署失败，已恢复原配置');
+
+      expect(mockDeploy.deploy).toHaveBeenCalledWith(
+        'node-1', undefined, undefined, undefined,
+        {
+          forceRollback: false,
+          skipAdvisoryLock: true,
+          previousFirewall: { port: 10086, protocol: 'VMESS' },
+        },
+      );
+      expect(mockPrisma.node.update).toHaveBeenCalledTimes(2);
+      expect((mockPrisma.node.update as jest.Mock).mock.calls[1][0]).toMatchObject({
+        where: { id: 'node-1' },
+        data: {
+          protocol: 'VMESS',
+          implementation: 'XRAY',
+          transport: 'TCP',
+          tls: 'NONE',
+          domain: 'np-node-1.example.com',
+          cfDnsRecordId: 'proxied-record-id',
+          credentialsEnc: 'enc:{"uuid":"existing-uuid"}',
+          source: 'MANUAL',
+        },
+      });
+      expect(mockCfService.deleteRecord).toHaveBeenCalledWith(
+        'cf-token', 'zone-1', 'cf-record-id',
+      );
+      expect(mockCfService.deleteRecord).not.toHaveBeenCalledWith(
+        'cf-token', 'zone-1', 'proxied-record-id',
+      );
+    });
+
+    it('does not claim database compensation when remote rollback failed', async () => {
+      const existing = {
+        ...fakeNode,
+        cfDnsRecordId: 'proxied-record-id',
+        domain: 'np-node-1.example.com',
+        credentialsEnc: 'enc:{"uuid":"existing-uuid"}',
+      };
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(existing);
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
+      });
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({ ip: '1.2.3.4' });
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({ ...existing, protocol: 'ANYTLS' });
+      (mockDeploy.deploy as jest.Mock).mockResolvedValue({
+        success: false,
+        rollbackFailed: true,
+        log: 'backups retained at /etc/nextpanel/node.rollback',
+      });
+
+      await expect(
+        svc.update('node-1', { protocol: 'ANYTLS' } as any, 'user-id-1'),
+      ).rejects.toThrow('远程旧配置未能恢复');
+
+      expect(mockPrisma.node.update).toHaveBeenCalledTimes(1);
+      expect(mockCfService.deleteRecord).not.toHaveBeenCalled();
+    });
+
+    it('removes a pending DNS record when an AnyTLS update fails', async () => {
+      const existing = {
+        ...fakeNode,
+        cfDnsRecordId: null,
+        credentialsEnc: 'enc:{}',
+      };
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(existing);
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
+      });
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({ ip: '1.2.3.4' });
+      (mockPrisma.node.update as jest.Mock).mockRejectedValue(new Error('database failed'));
+
+      await expect(
+        svc.update('node-1', { protocol: 'ANYTLS' } as any, 'user-id-1'),
+      ).rejects.toThrow('database failed');
+
+      expect(mockCfService.deleteRecord).toHaveBeenCalledWith(
+        'cf-token', 'zone-1', 'cf-record-id',
+      );
+      expect(mockPrisma.node.delete).not.toHaveBeenCalled();
+    });
+
+    it('clears managed DNS when updating away from TUIC', async () => {
+      const existing = {
+        ...fakeNode,
+        protocol: 'TUIC',
+        implementation: 'SING_BOX',
+        transport: null,
+        tls: 'TLS',
+        domain: 'np-node-1.example.com',
+        cfDnsRecordId: 'old-record-id',
+        credentialsEnc: 'enc:{"uuid":"old","password":"old"}',
+      };
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(existing);
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({ ...fakeNode, protocol: 'VMESS' });
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
+      });
+
+      await svc.update('node-1', {
+        protocol: 'VMESS', implementation: 'XRAY', transport: 'TCP', tls: 'NONE',
+        credentials: { uuid: 'new-uuid' },
+      } as any, 'user-id-1');
+
+      const data = (mockPrisma.node.update as jest.Mock).mock.calls[0][0].data;
+      expect(data).toMatchObject({ domain: null, cfDnsRecordId: null });
+      expect(mockCfService.deleteRecord).toHaveBeenCalledWith(
+        'cf-token', 'zone-1', 'old-record-id',
+      );
+    });
+
+    it('restores TUIC and keeps its DNS record when a legacy replacement fails', async () => {
+      const existing = {
+        ...fakeNode,
+        protocol: 'TUIC',
+        implementation: 'SING_BOX',
+        transport: null,
+        tls: 'TLS',
+        domain: 'np-node-1.example.com',
+        cfDnsRecordId: 'old-record-id',
+        credentialsEnc: 'enc:{"uuid":"old","password":"old"}',
+        source: 'AUTO',
+      };
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(existing);
+      (mockPrisma.node.update as jest.Mock)
+        .mockResolvedValueOnce({ ...fakeNode, protocol: 'VMESS' })
+        .mockResolvedValueOnce(existing);
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
+      });
+      (mockDeploy.deploy as jest.Mock).mockResolvedValue({
+        success: false,
+        log: 'xray failed to start',
+      });
+
+      await expect(svc.update('node-1', {
+        protocol: 'VMESS', implementation: 'XRAY', transport: 'TCP', tls: 'NONE',
+        credentials: { uuid: 'new-uuid' },
+      } as any, 'user-id-1')).rejects.toThrow('节点部署失败，已恢复原配置');
+
+      expect(mockDeploy.deploy).toHaveBeenCalledWith(
+        'node-1', undefined, undefined, undefined,
+        {
+          forceRollback: true,
+          skipAdvisoryLock: true,
+          previousFirewall: { port: 10086, protocol: 'TUIC' },
+        },
+      );
+      expect(mockPrisma.node.update).toHaveBeenCalledTimes(2);
+      expect((mockPrisma.node.update as jest.Mock).mock.calls[1][0].data).toMatchObject({
+        protocol: 'TUIC',
+        implementation: 'SING_BOX',
+        transport: null,
+        tls: 'TLS',
+        domain: 'np-node-1.example.com',
+        cfDnsRecordId: 'old-record-id',
+        credentialsEnc: 'enc:{"uuid":"old","password":"old"}',
+      });
+      expect(mockCfService.deleteRecord).not.toHaveBeenCalledWith(
+        'cf-token', 'zone-1', 'old-record-id',
+      );
+    });
+
+    it('rejects moving an existing managed TLS node to another server', async () => {
+      const existing = {
+        ...fakeNode,
+        serverId: 'srv-1',
+        protocol: 'TUIC',
+        implementation: 'SING_BOX',
+        transport: null,
+        tls: 'TLS',
+        domain: 'np-node-1.example.com',
+        cfDnsRecordId: 'record-id',
+        credentialsEnc: 'enc:{"uuid":"old","password":"old"}',
+      };
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(existing);
+
+      await expect(
+        svc.update('node-1', { serverId: 'srv-2' } as any, 'user-id-1'),
+      ).rejects.toThrow(
+        '节点不支持在更新时更换服务器，请在目标服务器上创建新节点',
+      );
+
+      expect(mockCfSettings.verify).not.toHaveBeenCalled();
+      expect(mockCfService.createARecord).not.toHaveBeenCalled();
+      expect(mockPrisma.node.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects moving to another server while entering a modern protocol', async () => {
+      const existing = {
+        ...fakeNode,
+        serverId: 'srv-1',
+        credentialsEnc: 'enc:{"uuid":"old"}',
+      };
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(existing);
+
+      await expect(svc.update('node-1', {
+        serverId: 'srv-2',
+        protocol: 'VLESS',
+        transport: 'XHTTP',
+      } as any, 'user-id-1')).rejects.toThrow(
+        '节点不支持在更新时更换服务器',
+      );
+
+      expect(mockPrisma.node.update).not.toHaveBeenCalled();
+      expect(mockDeploy.deploy).not.toHaveBeenCalled();
+    });
+
+    it('rejects changing serverId for legacy nodes as well', async () => {
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({
+        ...fakeNode,
+        serverId: 'srv-1',
+        credentialsEnc: 'enc:{"uuid":"old"}',
+      });
+
+      await expect(
+        svc.update('node-1', { serverId: 'srv-2' } as any, 'user-id-1'),
+      ).rejects.toThrow('节点不支持在更新时更换服务器');
+
+      expect(mockPrisma.node.update).not.toHaveBeenCalled();
+      expect(mockDeploy.deploy).not.toHaveBeenCalled();
+    });
   });
 
   describe('remove', () => {
@@ -134,7 +743,7 @@ describe('NodesService', () => {
       (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(fakeNode);
       (mockPrisma.node.delete as jest.Mock).mockResolvedValue(fakeNode);
       await svc.remove('node-1', 'user-id-1');
-      expect(mockDeploy.undeploy).toHaveBeenCalledWith('node-1');
+      expect(mockDeploy.undeploy).toHaveBeenCalledWith('node-1', { skipAdvisoryLock: true });
       expect(mockPrisma.node.delete).toHaveBeenCalledWith({ where: { id: 'node-1' } });
     });
   });
@@ -259,6 +868,16 @@ describe('NodesService', () => {
   });
 
   describe('createFromPreset', () => {
+    it('rejects a preset deployment to another user\'s server', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(null);
+
+      await expect(svc.createFromPreset('user-1', {
+        serverId: 'other-server', name: 'Unauthorized', preset: 'VLESS_REALITY',
+      })).rejects.toThrow('Server other-server not found');
+
+      expect(mockPrisma.node.create).not.toHaveBeenCalled();
+    });
+
     it('creates node with auto-generated credentials for VLESS_REALITY', async () => {
       (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]); // no existing ports
       (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-preset' });
@@ -284,6 +903,7 @@ describe('NodesService', () => {
     });
 
     it('uses fixed port 443 for VLESS_WS_TLS', async () => {
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-ws' });
       (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-ws' });
 
@@ -295,6 +915,89 @@ describe('NodesService', () => {
 
       const createData = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
       expect(createData.listenPort).toBe(443);
+    });
+
+    it('creates VLESS_XHTTP_REALITY on recommended port 443 with complete credentials', async () => {
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-xhttp' });
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'node-xhttp' });
+
+      await svc.createFromPreset('user-1', {
+        serverId: 'srv-1', name: 'XHTTP Node', preset: 'VLESS_XHTTP_REALITY',
+      });
+
+      const createData = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
+      expect(createData).toMatchObject({
+        protocol: 'VLESS',
+        implementation: 'XRAY',
+        transport: 'XHTTP',
+        tls: 'REALITY',
+        listenPort: 443,
+      });
+      const credentials = JSON.parse(
+        (mockCrypto.encrypt as jest.Mock).mock.calls[0][0],
+      ) as Record<string, string>;
+      expect(credentials.uuid).toBeTruthy();
+      expect(credentials.realityPrivateKey).toBeTruthy();
+      expect(credentials.realityPublicKey).toBeTruthy();
+      expect(credentials.shortId).toMatch(/^[0-9a-f]{16}$/);
+      expect(credentials.path).toMatch(/^\//);
+      expect(mockCfSettings.verify).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [{ listenPort: 443, statsPort: null }, 443],
+      [{ listenPort: 10000, statsPort: 20443 }, 20443],
+    ])('rejects fixed port 443 when server port %s conflicts', async (existingNode, conflict) => {
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([{
+        ...existingNode,
+        serverId: 'srv-1',
+        implementation: 'XRAY',
+        exitServerId: null,
+        exitPort: null,
+      }]);
+
+      await expect(svc.createFromPreset('user-1', {
+        serverId: 'srv-1', name: 'XHTTP Node', preset: 'VLESS_XHTTP_REALITY',
+      })).rejects.toThrow(
+        `固定端口 443 无法使用：服务器端口 ${conflict} 已被其他节点占用`,
+      );
+
+      expect(mockPrisma.node.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['TUIC_V5', 'TUIC', 16000, true],
+      ['ANYTLS', 'ANYTLS', 17000, false],
+    ])('creates %s with DNS-only Cloudflare and protocol credentials', async (
+      preset, protocol, listenPort, hasUuid,
+    ) => {
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: `node-${protocol}` });
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ ...fakeNode, id: `node-${protocol}` });
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
+      });
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({ ip: '1.2.3.4' });
+
+      await svc.createFromPreset('user-1', {
+        serverId: 'srv-1', name: `${protocol} Node`, preset: preset as any,
+      });
+
+      const createData = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
+      expect(createData).toMatchObject({
+        protocol, implementation: 'SING_BOX', transport: null, tls: 'TLS', listenPort,
+      });
+      const credentials = JSON.parse(
+        (mockCrypto.encrypt as jest.Mock).mock.calls[0][0],
+      ) as Record<string, string>;
+      expect(credentials.password).toHaveLength(32);
+      if (hasUuid) expect(credentials.uuid).toMatch(/^[0-9a-f-]{36}$/i);
+      else expect(credentials.uuid).toBeUndefined();
+      expect(mockCfService.createARecord).toHaveBeenCalledWith(
+        'cf-token', 'zone-1', expect.stringContaining('example.com'), '1.2.3.4', false,
+      );
     });
   });
 
@@ -334,6 +1037,27 @@ describe('NodesService', () => {
       const uri = await svc.getShareLink('node-1', 'user-id-1');
       expect(uri).toContain('cdn.example.com');
       expect(uri).not.toContain('1.2.3.4');
+    });
+
+    it('uses server IP as connection host for REALITY and keeps domain as SNI', async () => {
+      const realityNode = {
+        ...fakeNode,
+        protocol: 'VLESS',
+        transport: 'XHTTP',
+        tls: 'REALITY',
+        domain: 'disguise.example.com',
+        server: { ip: '1.2.3.4' },
+      };
+      (mockPrisma.node.findFirst as jest.Mock)
+        .mockResolvedValueOnce(realityNode)
+        .mockResolvedValueOnce({
+          credentialsEnc: 'enc:{"uuid":"u1","realityPublicKey":"pub","shortId":"0123456789abcdef"}',
+        });
+
+      const uri = await svc.getShareLink('node-1', 'user-id-1');
+      expect(uri).toContain('@1.2.3.4:');
+      expect(uri).toContain('sni=disguise.example.com');
+      expect(uri).not.toContain('@disguise.example.com:');
     });
   });
 
@@ -378,7 +1102,11 @@ describe('NodesService', () => {
 
       const result = await svc.toggle('node-1', 'user-id-1');
 
-      expect(mockDeploy.toggleService).toHaveBeenCalledWith('node-1', false);
+      expect(mockDeploy.toggleService).toHaveBeenCalledWith(
+        'node-1',
+        false,
+        { skipAdvisoryLock: true },
+      );
       expect(mockPrisma.node.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ enabled: false, status: 'STOPPED' }) }),
       );
@@ -391,7 +1119,11 @@ describe('NodesService', () => {
 
       await svc.toggle('node-1', 'user-id-1');
 
-      expect(mockDeploy.toggleService).toHaveBeenCalledWith('node-1', true);
+      expect(mockDeploy.toggleService).toHaveBeenCalledWith(
+        'node-1',
+        true,
+        { skipAdvisoryLock: true },
+      );
       expect(mockPrisma.node.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ enabled: true, status: 'RUNNING' }) }),
       );
@@ -455,7 +1187,7 @@ describe('NodesService', () => {
         apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
       });
       const mockServer = { ip: '1.2.3.4' };
-      (mockPrisma as any).server = { findUnique: jest.fn().mockResolvedValue(mockServer) };
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(mockServer);
       (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
 
       await svc.createFromPreset('user-1', { serverId: 'srv-1', name: 'WS Node', preset: 'VLESS_WS_TLS' });
@@ -480,6 +1212,73 @@ describe('NodesService', () => {
       await expect(
         svc.createFromPreset('user-1', { serverId: 'srv-1', name: 'WS Node', preset: 'VLESS_WS_TLS' }),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('createChainNode — modern protocol DNS', () => {
+    it('provisions a DNS-only record to the entry server for TUIC', async () => {
+      (mockPrisma.server.findFirst as jest.Mock)
+        .mockResolvedValueOnce({ id: 'entry-1', ip: '10.0.0.1', sshAuthEnc: 'entry-auth' })
+        .mockResolvedValueOnce({ id: 'exit-1', ip: '10.0.0.2', sshAuthEnc: 'exit-auth' });
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({ ip: '10.0.0.1' });
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'chain-tuic' });
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'chain-tuic' });
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
+      });
+
+      await svc.createChainNode('user-1', {
+        name: 'Chain TUIC',
+        preset: 'TUIC_V5',
+        entryServerId: 'entry-1',
+        exitServerId: 'exit-1',
+      });
+
+      const createData = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
+      expect(createData).toMatchObject({
+        serverId: 'entry-1',
+        exitServerId: 'exit-1',
+        protocol: 'TUIC',
+        listenPort: 16000,
+        exitPort: 15000,
+      });
+      const chainCredentials = JSON.parse(
+        (mockCrypto.encrypt as jest.Mock).mock.calls[1][0],
+      ) as Record<string, string>;
+      expect(chainCredentials.uuid).toMatch(/^[0-9a-f-]{36}$/i);
+      expect(chainCredentials.realityPrivateKey).toBeTruthy();
+      expect(chainCredentials.realityPublicKey).toBeTruthy();
+      expect(chainCredentials.shortId).toMatch(/^[0-9a-f]{16}$/);
+      expect(createData.chainCredEnc).toBe(`enc:${JSON.stringify(chainCredentials)}`);
+      expect(mockCfService.createARecord).toHaveBeenCalledWith(
+        'cf-token', 'zone-1', expect.stringContaining('example.com'), '10.0.0.1', false,
+      );
+    });
+
+    it('rolls back a chain node when AnyTLS DNS provisioning fails', async () => {
+      (mockPrisma.server.findFirst as jest.Mock)
+        .mockResolvedValueOnce({ id: 'entry-1', ip: '10.0.0.1', sshAuthEnc: 'entry-auth' })
+        .mockResolvedValueOnce({ id: 'exit-1', ip: '10.0.0.2', sshAuthEnc: 'exit-auth' });
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({ ip: '10.0.0.1' });
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'chain-anytls' });
+      (mockPrisma.node.delete as jest.Mock).mockResolvedValue({});
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
+        apiToken: 'cf-token', domain: 'example.com', zoneId: 'zone-1',
+      });
+      (mockCfService.createARecord as jest.Mock).mockRejectedValue(new Error('dns failed'));
+
+      await expect(svc.createChainNode('user-1', {
+        name: 'Chain AnyTLS',
+        preset: 'ANYTLS',
+        entryServerId: 'entry-1',
+        exitServerId: 'exit-1',
+      })).rejects.toThrow('dns failed');
+
+      expect(mockPrisma.node.delete).toHaveBeenCalledWith({ where: { id: 'chain-anytls' } });
+      expect(mockPrisma.node.findFirst).not.toHaveBeenCalled();
     });
   });
 });

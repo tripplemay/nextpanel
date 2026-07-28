@@ -68,6 +68,10 @@ export interface NodeCredentials {
   password?: string;
   method?: string; // for Shadowsocks
   username?: string; // for SOCKS5/HTTP
+  realityPrivateKey?: string;
+  realityPublicKey?: string;
+  shortId?: string;
+  path?: string;
 }
 
 export interface NodeDto {

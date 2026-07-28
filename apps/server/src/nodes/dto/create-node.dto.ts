@@ -7,6 +7,10 @@ import {
   Min,
   Max,
   IsObject,
+  IsNotEmpty,
+  Matches,
+  MaxLength,
+  IsFQDN,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Protocol, Implementation, Transport, TlsMode } from '@prisma/client';
@@ -41,6 +45,16 @@ export class NodeCredentialsDto {
   @IsString()
   @IsOptional()
   realityPublicKey?: string;
+
+  @ApiPropertyOptional({ description: 'REALITY short ID (auto-generated for XHTTP if omitted)' })
+  @IsString()
+  @IsOptional()
+  shortId?: string;
+
+  @ApiPropertyOptional({ description: 'XHTTP request path (auto-generated if omitted)' })
+  @IsString()
+  @IsOptional()
+  path?: string;
 }
 
 export class CreateNodeDto {
@@ -50,6 +64,9 @@ export class CreateNodeDto {
 
   @ApiProperty()
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(128)
+  @Matches(/^[^\r\n]+$/, { message: 'name must not contain line breaks' })
   name: string;
 
   @ApiProperty({ enum: Protocol })
@@ -78,7 +95,7 @@ export class CreateNodeDto {
   listenPort: number;
 
   @ApiPropertyOptional()
-  @IsString()
+  @IsFQDN({ require_tld: true, allow_underscores: false, allow_trailing_dot: false })
   @IsOptional()
   domain?: string;
 

@@ -162,6 +162,8 @@ model Node {
   subscriptionNodes SubscriptionNode[]
 
   @@index([userId])
+  @@unique([serverId, listenPort])
+  @@unique([exitServerId, exitPort])
 }
 
 enum Protocol {
@@ -172,6 +174,8 @@ enum Protocol {
   SOCKS5
   HTTP
   HYSTERIA2
+  TUIC
+  ANYTLS
 }
 
 enum Implementation {
@@ -186,6 +190,7 @@ enum Transport {
   WS
   GRPC
   QUIC
+  XHTTP
 }
 
 enum TlsMode {
@@ -213,7 +218,7 @@ model ConfigSnapshot {
   node      Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
   nodeId    String
   version   Int
-  /// Full rendered config content
+  /// AES-GCM encrypted rendered config content
   content   String
   checksum  String
   /// Full deployment log text (newline-separated)
@@ -292,6 +297,10 @@ model ExternalNode {
   transport        String?
   tls              String    @default("NONE")
   realityPublicKey String?
+  shortId          String?
+  xhttpMode        String?
+  xhttpHost        String?
+  xhttpExtra       String?
   sni              String?
   path             String?
   rawUri           String?

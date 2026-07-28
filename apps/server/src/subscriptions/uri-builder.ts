@@ -15,6 +15,7 @@ export interface NodeExportInfo {
 }
 
 import { REALITY_DEFAULT_SNI, REALITY_FLOW } from '../nodes/protocols/reality';
+import { parseXhttpExtra, parseXhttpHost, parseXhttpMode } from '../nodes/protocols/xhttp';
 
 // ─── Share URI (vmess://, vless://, etc.) ────────────────────────────────────
 
@@ -22,9 +23,15 @@ export function buildShareUri(node: NodeExportInfo): string | null {
   const { protocol, host, port, name, transport, tls, domain, credentials: creds } = node;
   const tag = encodeURIComponent(name);
   const net = toClashNet(transport);
+  const authorityHost = formatUriHost(host);
 
   switch (protocol) {
     case 'VMESS': {
+      const xhttpMode = net === 'xhttp' ? requireXhttpMode(creds.xhttpMode) : '';
+      const xhttpHost = net === 'xhttp' ? parseXhttpHost(creds.xhttpHost) : undefined;
+      if (net === 'xhttp' && creds.xhttpExtra !== undefined) {
+        parseXhttpExtra(creds.xhttpExtra);
+      }
       const obj: Record<string, string> = {
         v: '2',
         ps: name,
@@ -35,8 +42,10 @@ export function buildShareUri(node: NodeExportInfo): string | null {
         scy: 'auto',
         net,
         type: 'none',
-        host: domain ?? '',
-        path: net === 'ws' ? '/' : net === 'grpc' ? 'grpc' : '',
+        host: net === 'xhttp' ? (xhttpHost ?? '') : (domain ?? ''),
+        path: net === 'ws' ? '/' : net === 'grpc' ? 'grpc' : net === 'xhttp' ? normalizeXhttpPath(creds.path) : '',
+        ...(net === 'xhttp' ? { mode: xhttpMode } : {}),
+        ...(net === 'xhttp' && creds.xhttpExtra !== undefined ? { extra: creds.xhttpExtra } : {}),
         tls: tls === 'TLS' ? 'tls' : tls === 'REALITY' ? 'reality' : '',
         sni: domain ?? '',
       };
@@ -45,24 +54,25 @@ export function buildShareUri(node: NodeExportInfo): string | null {
 
     case 'VLESS': {
       const params = new URLSearchParams({ encryption: 'none' });
-      if (tls === 'REALITY') params.set('flow', REALITY_FLOW);
-      addTransportParams(params, net, domain);
+      // XHTTP does not support the Vision flow used by raw TCP REALITY nodes.
+      if (tls === 'REALITY' && net !== 'xhttp') params.set('flow', REALITY_FLOW);
+      addTransportParams(params, net, domain, creds);
       addTlsParams(params, tls, domain, creds);
-      return `vless://${creds.uuid ?? ''}@${host}:${port}?${params.toString()}#${tag}`;
+      return `vless://${creds.uuid ?? ''}@${authorityHost}:${port}?${params.toString()}#${tag}`;
     }
 
     case 'TROJAN': {
       const params = new URLSearchParams();
-      addTransportParams(params, net, domain);
+      addTransportParams(params, net, domain, creds);
       addTlsParams(params, tls, domain, creds);
       const qs = params.toString();
-      return `trojan://${creds.password ?? ''}@${host}:${port}${qs ? '?' + qs : ''}#${tag}`;
+      return `trojan://${creds.password ?? ''}@${authorityHost}:${port}${qs ? '?' + qs : ''}#${tag}`;
     }
 
     case 'SHADOWSOCKS': {
       const method = creds.method ?? 'aes-256-gcm';
       const userInfo = Buffer.from(`${method}:${creds.password ?? ''}`).toString('base64');
-      return `ss://${userInfo}@${host}:${port}#${tag}`;
+      return `ss://${userInfo}@${authorityHost}:${port}#${tag}`;
     }
 
     case 'HYSTERIA2': {
@@ -70,14 +80,25 @@ export function buildShareUri(node: NodeExportInfo): string | null {
       const params = new URLSearchParams();
       if (domain) params.set('sni', domain);
       const qs = params.toString();
-      return `hy2://${encodeURIComponent(creds.password ?? '')}@${host}:${port}${qs ? '?' + qs : ''}#${tag}`;
+      return `hy2://${encodeURIComponent(creds.password ?? '')}@${authorityHost}:${port}${qs ? '?' + qs : ''}#${tag}`;
     }
 
+    case 'TUIC':
+      // TUIC has no interoperable URI standard; use structured subscriptions.
+      return null;
+
+    case 'ANYTLS':
+      {
+        const params = new URLSearchParams({ insecure: '0' });
+        if (domain) params.set('sni', domain);
+        return `anytls://${encodeURIComponent(creds.password ?? '')}@${authorityHost}:${port}/?${params.toString()}#${tag}`;
+      }
+
     case 'SOCKS5':
-      return `socks5://${host}:${port}#${tag}`;
+      return `socks5://${authorityHost}:${port}#${tag}`;
 
     case 'HTTP':
-      return `http://${host}:${port}#${tag}`;
+      return `http://${authorityHost}:${port}#${tag}`;
 
     default:
       return null;
@@ -88,6 +109,8 @@ export function buildShareUri(node: NodeExportInfo): string | null {
 
 export function buildClashProxy(node: NodeExportInfo): string | null {
   const { protocol, host, port, name, transport, tls, domain, credentials: creds } = node;
+  // Mihomo currently implements XHTTP only for VLESS outbounds.
+  if (transport === 'XHTTP' && protocol !== 'VLESS') return null;
   const net = toClashNet(transport);
   const tlsEnabled = tls === 'TLS' || tls === 'REALITY';
   const sni = tls === 'REALITY' ? (domain ?? REALITY_DEFAULT_SNI) : (domain ?? '');
@@ -121,12 +144,14 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       } else if (net === 'grpc') {
         lines.push(`    grpc-opts:`);
         lines.push(`      grpc-service-name: grpc`);
+      } else if (net === 'xhttp') {
+        addClashXhttpOptions(lines, creds);
       }
       if (tls === 'REALITY') {
         lines.push(`    client-fingerprint: chrome`);
         lines.push(`    reality-opts:`);
         lines.push(`      public-key: ${creds.realityPublicKey ?? ''}`);
-        lines.push(`      short-id: ""`);
+        lines.push(`      short-id: ${yamlQuotedString(creds.shortId ?? '')}`);
       }
       break;
     }
@@ -138,7 +163,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       add('uuid', creds.uuid ?? '');
       add('udp', true);
       add('network', net);
-      if (tls === 'REALITY') add('flow', REALITY_FLOW);
+      if (tls === 'REALITY' && net !== 'xhttp') add('flow', REALITY_FLOW);
       if (tlsEnabled) add('tls', true);
       if (sni) add('servername', sni);
       if (net === 'ws') {
@@ -147,12 +172,14 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       } else if (net === 'grpc') {
         lines.push(`    grpc-opts:`);
         lines.push(`      grpc-service-name: grpc`);
+      } else if (net === 'xhttp') {
+        addClashXhttpOptions(lines, creds);
       }
       if (tls === 'REALITY') {
         lines.push(`    client-fingerprint: chrome`);
         lines.push(`    reality-opts:`);
         lines.push(`      public-key: ${creds.realityPublicKey ?? ''}`);
-        lines.push(`      short-id: ""`);
+        lines.push(`      short-id: ${yamlQuotedString(creds.shortId ?? '')}`);
       }
       break;
     }
@@ -172,6 +199,8 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       } else if (net === 'grpc') {
         lines.push(`    grpc-opts:`);
         lines.push(`      grpc-service-name: grpc`);
+      } else if (net === 'xhttp') {
+        addClashXhttpOptions(lines, creds);
       }
       break;
     }
@@ -194,6 +223,32 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       add('udp', true);
       if (domain) add('sni', domain);
       add('skip-cert-verify', true);
+      break;
+    }
+
+    case 'TUIC': {
+      add('type', 'tuic');
+      add('server', host);
+      add('port', port);
+      add('uuid', creds.uuid ?? '');
+      add('password', creds.password ?? '');
+      add('udp', true);
+      add('udp-relay-mode', 'native');
+      add('congestion-controller', 'bbr');
+      add('reduce-rtt', false);
+      if (domain) add('sni', domain);
+      add('skip-cert-verify', false);
+      break;
+    }
+
+    case 'ANYTLS': {
+      add('type', 'anytls');
+      add('server', host);
+      add('port', port);
+      add('password', creds.password ?? '');
+      add('udp', true);
+      if (domain) add('sni', domain);
+      add('skip-cert-verify', false);
       break;
     }
 
@@ -227,6 +282,11 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
 
 export function buildSingboxOutbound(node: NodeExportInfo): Record<string, unknown> | null {
   const { protocol, host, port, name, transport, tls, domain, credentials: creds } = node;
+
+  // sing-box has no XHTTP transport implementation. Exporting this node as a
+  // plain VLESS/TCP outbound would silently create a broken, misleading config.
+  if (transport === 'XHTTP') return null;
+
   const tlsObj = buildSingboxTls(tls, domain, creds);
   const transportObj = buildSingboxTransport(transport);
 
@@ -300,6 +360,30 @@ export function buildSingboxOutbound(node: NodeExportInfo): Record<string, unkno
         tls: { enabled: true, insecure: true, ...(domain ? { server_name: domain } : {}) },
       };
 
+    case 'TUIC':
+      return {
+        type: 'tuic',
+        tag: name,
+        server: host,
+        server_port: port,
+        uuid: creds.uuid ?? '',
+        password: creds.password ?? '',
+        congestion_control: 'bbr',
+        udp_relay_mode: 'native',
+        zero_rtt_handshake: false,
+        tls: buildVerifiedSingboxTls(domain),
+      };
+
+    case 'ANYTLS':
+      return {
+        type: 'anytls',
+        tag: name,
+        server: host,
+        server_port: port,
+        password: creds.password ?? '',
+        tls: buildVerifiedSingboxTls(domain),
+      };
+
     case 'HTTP':
       return {
         type: 'http',
@@ -317,17 +401,36 @@ export function buildSingboxOutbound(node: NodeExportInfo): Record<string, unkno
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function toClashNet(transport: string | null): string {
-  const map: Record<string, string> = { WS: 'ws', GRPC: 'grpc', QUIC: 'quic', TCP: 'tcp' };
+  const map: Record<string, string> = { WS: 'ws', GRPC: 'grpc', QUIC: 'quic', TCP: 'tcp', XHTTP: 'xhttp' };
   return map[transport ?? 'TCP'] ?? 'tcp';
 }
 
-function addTransportParams(params: URLSearchParams, net: string, domain: string | null) {
+function formatUriHost(host: string): string {
+  if (host.startsWith('[') && host.endsWith(']')) return host;
+  return host.includes(':') ? `[${host}]` : host;
+}
+
+function addTransportParams(
+  params: URLSearchParams,
+  net: string,
+  domain: string | null,
+  creds: Record<string, string>,
+) {
   params.set('type', net);
   if (net === 'ws') {
     params.set('path', '/');
     if (domain) params.set('host', domain);
   } else if (net === 'grpc') {
     params.set('serviceName', 'grpc');
+  } else if (net === 'xhttp') {
+    params.set('path', normalizeXhttpPath(creds.path));
+    const xhttpHost = parseXhttpHost(creds.xhttpHost);
+    if (xhttpHost) params.set('host', xhttpHost);
+    params.set('mode', requireXhttpMode(creds.xhttpMode));
+    if (creds.xhttpExtra !== undefined) {
+      parseXhttpExtra(creds.xhttpExtra);
+      params.set('extra', creds.xhttpExtra);
+    }
   }
 }
 
@@ -343,12 +446,181 @@ function addTlsParams(
   } else if (tls === 'REALITY') {
     params.set('security', 'reality');
     params.set('pbk', creds.realityPublicKey ?? '');
-    params.set('sid', '');
+    params.set('sid', creds.shortId ?? '');
     params.set('fp', 'chrome');
     // sni must match serverNames in the Xray server config; default to www.google.com
     params.set('sni', domain ?? REALITY_DEFAULT_SNI);
   } else {
     params.set('security', 'none');
+  }
+}
+
+function buildVerifiedSingboxTls(domain: string | null): Record<string, unknown> {
+  return {
+    enabled: true,
+    insecure: false,
+    ...(domain ? { server_name: domain } : {}),
+  };
+}
+
+function normalizeXhttpPath(path: string | undefined): string {
+  const normalized = path?.trim() || '/';
+  return normalized.startsWith('/') ? normalized : `/${normalized}`;
+}
+
+function requireXhttpMode(mode: string | undefined): string {
+  const parsed = parseXhttpMode(mode);
+  if (!parsed) throw new Error(`Unsupported XHTTP mode: ${mode}`);
+  return parsed;
+}
+
+function addClashXhttpOptions(
+  lines: string[],
+  creds: Record<string, string>,
+): void {
+  const mode = requireXhttpMode(creds.xhttpMode);
+  const xhttpHost = parseXhttpHost(creds.xhttpHost);
+  lines.push(`    xhttp-opts:`);
+  lines.push(`      path: ${yamlScalar(normalizeXhttpPath(creds.path))}`);
+  if (xhttpHost) lines.push(`      host: ${yamlScalar(xhttpHost)}`);
+  lines.push(`      mode: ${yamlScalar(mode)}`);
+
+  const extra = parseXhttpExtra(creds.xhttpExtra);
+  if (extra) appendClashYamlObject(lines, mapXhttpExtraForMihomo(extra), 6);
+}
+
+function mapXhttpExtraForMihomo(extra: Record<string, unknown>): Record<string, unknown> {
+  const mapped: Record<string, unknown> = {};
+  const scalarFields: Record<string, string> = {
+    noGRPCHeader: 'no-grpc-header',
+    xPaddingBytes: 'x-padding-bytes',
+    xPaddingObfsMode: 'x-padding-obfs-mode',
+    xPaddingKey: 'x-padding-key',
+    xPaddingHeader: 'x-padding-header',
+    xPaddingPlacement: 'x-padding-placement',
+    xPaddingMethod: 'x-padding-method',
+    uplinkHttpMethod: 'uplink-http-method',
+    sessionIDPlacement: 'session-placement',
+    sessionPlacement: 'session-placement',
+    sessionIDKey: 'session-key',
+    sessionKey: 'session-key',
+    sessionIDTable: 'session-table',
+    sessionIDLength: 'session-length',
+    seqPlacement: 'seq-placement',
+    seqKey: 'seq-key',
+    uplinkDataPlacement: 'uplink-data-placement',
+    uplinkDataKey: 'uplink-data-key',
+    uplinkChunkSize: 'uplink-chunk-size',
+    scMaxEachPostBytes: 'sc-max-each-post-bytes',
+    scMinPostsIntervalMs: 'sc-min-posts-interval-ms',
+  };
+  const supported = new Set([...Object.keys(scalarFields), 'xmux', 'downloadSettings']);
+  const unknown = Object.keys(extra).filter((key) => !supported.has(key));
+  if (unknown.length > 0) {
+    throw new Error(`Unsupported Mihomo XHTTP extra fields: ${unknown.join(', ')}`);
+  }
+
+  for (const [source, target] of Object.entries(scalarFields)) {
+    const value = extra[source];
+    if (value !== undefined && value !== '') mapped[target] = value;
+  }
+
+  const reuse = mapXhttpReuseSettings(asObject(extra.xmux));
+  if (Object.keys(reuse).length > 0) mapped['reuse-settings'] = reuse;
+
+  const download = mapXhttpDownloadSettings(asObject(extra.downloadSettings));
+  if (Object.keys(download).length > 0) mapped['download-settings'] = download;
+  return mapped;
+}
+
+function mapXhttpReuseSettings(xmux: Record<string, unknown>): Record<string, unknown> {
+  const mapped: Record<string, unknown> = {};
+  const fields: Record<string, string> = {
+    maxConnections: 'max-connections',
+    maxConcurrency: 'max-concurrency',
+    cMaxReuseTimes: 'c-max-reuse-times',
+    hMaxRequestTimes: 'h-max-request-times',
+    hMaxReusableSecs: 'h-max-reusable-secs',
+    hKeepAlivePeriod: 'h-keep-alive-period',
+  };
+  for (const [source, target] of Object.entries(fields)) {
+    const value = xmux[source];
+    if (value !== undefined && value !== '') mapped[target] = value;
+  }
+  return mapped;
+}
+
+function mapXhttpDownloadSettings(settings: Record<string, unknown>): Record<string, unknown> {
+  if (Object.keys(settings).length === 0) return {};
+  const mapped: Record<string, unknown> = {};
+  if (typeof settings.address === 'string' && settings.address) mapped.server = settings.address;
+  if (typeof settings.port === 'number') mapped.port = settings.port;
+  const security = typeof settings.security === 'string' ? settings.security.toLowerCase() : '';
+  if (security === 'tls' || security === 'reality') mapped.tls = true;
+
+  const tlsSettings = asObject(settings.tlsSettings);
+  if (typeof tlsSettings.serverName === 'string' && tlsSettings.serverName) {
+    mapped.servername = tlsSettings.serverName;
+  }
+  if (typeof tlsSettings.fingerprint === 'string' && tlsSettings.fingerprint) {
+    mapped['client-fingerprint'] = tlsSettings.fingerprint;
+  }
+  if (Array.isArray(tlsSettings.alpn)) mapped.alpn = tlsSettings.alpn;
+  if (tlsSettings.allowInsecure === true) mapped['skip-cert-verify'] = true;
+
+  if (security === 'reality') {
+    const reality = asObject(settings.realitySettings);
+    const realityOpts: Record<string, unknown> = {};
+    if (typeof reality.publicKey === 'string' && reality.publicKey) {
+      realityOpts['public-key'] = reality.publicKey;
+    }
+    if (typeof reality.shortId === 'string' && reality.shortId) {
+      realityOpts['short-id'] = reality.shortId;
+    }
+    if (Object.keys(realityOpts).length > 0) mapped['reality-opts'] = realityOpts;
+  }
+
+  const xhttp = asObject(settings.xhttpSettings);
+  for (const key of ['path', 'host'] as const) {
+    if (typeof xhttp[key] === 'string' && xhttp[key]) mapped[key] = xhttp[key];
+  }
+  if (asObject(xhttp.headers) && Object.keys(asObject(xhttp.headers)).length > 0) {
+    mapped.headers = asObject(xhttp.headers);
+  }
+  const nestedReuse = mapXhttpReuseSettings(asObject(asObject(xhttp.extra).xmux));
+  if (Object.keys(nestedReuse).length > 0) mapped['reuse-settings'] = nestedReuse;
+  return mapped;
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function appendClashYamlObject(
+  lines: string[],
+  value: Record<string, unknown>,
+  indent: number,
+  skip = new Set<string>(),
+): void {
+  const prefix = ' '.repeat(indent);
+  for (const [rawKey, item] of Object.entries(value)) {
+    if (skip.has(rawKey)) continue;
+    const key = rawKey.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+    if (!/^[a-z0-9][a-z0-9_-]*$/.test(key)) {
+      throw new Error(`Invalid Mihomo XHTTP option key: ${rawKey}`);
+    }
+    if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
+      lines.push(`${prefix}${key}:`);
+      appendClashYamlObject(lines, item as Record<string, unknown>, indent + 2);
+    } else if (Array.isArray(item)) {
+      lines.push(`${prefix}${key}: ${JSON.stringify(item)}`);
+    } else if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
+      lines.push(`${prefix}${key}: ${yamlScalar(item)}`);
+    } else if (item === null) {
+      lines.push(`${prefix}${key}: null`);
+    }
   }
 }
 
@@ -367,7 +639,7 @@ function buildSingboxTls(
       reality: {
         enabled: true,
         public_key: creds.realityPublicKey ?? '',
-        short_id: '',
+        short_id: creds.shortId ?? '',
       },
       utls: { enabled: true, fingerprint: 'chrome' },
     };
@@ -393,10 +665,14 @@ function yamlScalar(v: string | number | boolean): string {
   if (typeof v === 'number' || typeof v === 'boolean') return String(v);
   if (v === '') return '""';
   // Quote if contains YAML special characters
-  if (/[:{}\[\],#&*?|<>=!%@`'"\\]/.test(v) || /^\s|\s$/.test(v)) {
-    return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  if (/[\u0000-\u001f\u007f]|[:{}\[\],#&*?|<>=!%@`'"\\]/.test(v) || /^\s|\s$/.test(v)) {
+    return JSON.stringify(v);
   }
   return v;
+}
+
+function yamlQuotedString(value: string): string {
+  return JSON.stringify(value);
 }
 
 // ─── Full Sing-box subscription JSON ─────────────────────────────────────────
@@ -406,20 +682,34 @@ export function buildFullSingboxConfig(nodes: NodeExportInfo[]): string {
     .map((n) => buildSingboxOutbound(n))
     .filter((o): o is Record<string, unknown> => o !== null);
 
+  assertNoUnsupportedOnlySubscription(nodes, outbounds);
+
   const proxyTags = outbounds.map((o) => o.tag as string);
 
   const config = {
     log: { level: 'info' },
     dns: {
       servers: [
-        { tag: 'proxy-dns', address: 'https://8.8.8.8/dns-query', detour: '🚀 节点选择' },
-        { tag: 'direct-dns', address: 'https://223.5.5.5/dns-query', detour: 'direct' },
-        { tag: 'block-dns', address: 'rcode://success' },
+        {
+          type: 'https',
+          tag: 'proxy-dns',
+          server: '8.8.8.8',
+          tls: { enabled: true, server_name: 'dns.google' },
+          detour: '🚀 节点选择',
+        },
+        {
+          type: 'https',
+          tag: 'direct-dns',
+          server: '223.5.5.5',
+          tls: { enabled: true, server_name: 'dns.alidns.com' },
+          detour: 'direct',
+        },
       ],
       rules: [
-        { rule_set: ['geosite-category-ads-all'], server: 'block-dns' },
-        { rule_set: ['geosite-cn'], server: 'direct-dns' },
+        { rule_set: ['geosite-category-ads-all'], action: 'predefined', rcode: 'NOERROR' },
+        { rule_set: ['geosite-cn'], action: 'route', server: 'direct-dns' },
       ],
+      final: 'proxy-dns',
       strategy: 'prefer_ipv4',
     },
     outbounds: [
@@ -440,21 +730,21 @@ export function buildFullSingboxConfig(nodes: NodeExportInfo[]): string {
         default: proxyTags.length > 0 ? '⚡ 自动选择' : 'direct',
       },
       { type: 'direct', tag: 'direct' },
-      { type: 'block', tag: 'block' },
-      { type: 'dns', tag: 'dns-out' },
     ],
     route: {
+      default_domain_resolver: { server: 'direct-dns', strategy: 'prefer_ipv4' },
       rule_set: [
         { tag: 'geosite-cn', type: 'remote', format: 'binary', url: 'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs' },
         { tag: 'geoip-cn', type: 'remote', format: 'binary', url: 'https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs' },
         { tag: 'geosite-category-ads-all', type: 'remote', format: 'binary', url: 'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads-all.srs' },
       ],
       rules: [
-        { protocol: 'dns', outbound: 'dns-out' },
-        { rule_set: ['geosite-category-ads-all'], outbound: 'block' },
-        { rule_set: ['geosite-cn'], outbound: 'direct' },
-        { rule_set: ['geoip-cn'], outbound: 'direct' },
-        { ip_is_private: true, outbound: 'direct' },
+        { action: 'sniff' },
+        { protocol: 'dns', action: 'hijack-dns' },
+        { rule_set: ['geosite-category-ads-all'], action: 'reject' },
+        { rule_set: ['geosite-cn'], action: 'route', outbound: 'direct' },
+        { rule_set: ['geoip-cn'], action: 'route', outbound: 'direct' },
+        { ip_is_private: true, action: 'route', outbound: 'direct' },
       ],
       final: '🚀 节点选择',
       auto_detect_interface: true,
@@ -567,6 +857,8 @@ export function buildHomeProxyConfig(nodes: NodeExportInfo[]): string {
     .map((n) => buildSingboxOutbound(n))
     .filter((o): o is Record<string, unknown> => o !== null);
 
+  assertNoUnsupportedOnlySubscription(nodes, outbounds);
+
   const proxyTags = outbounds.map((o) => o.tag as string);
   const hasNodes = proxyTags.length > 0;
   const fallback = hasNodes ? proxyTags : ['direct'];
@@ -577,30 +869,32 @@ export function buildHomeProxyConfig(nodes: NodeExportInfo[]): string {
     dns: {
       servers: [
         // Resolver for bootstrap (no detour — prevents circular dependency)
-        { tag: 'dns-local', address: '223.5.5.5', detour: 'direct' },
+        { type: 'udp', tag: 'dns-local', server: '223.5.5.5', detour: 'direct' },
         // CN domains: DoH via Alibaba, always direct
         {
+          type: 'https',
           tag: 'dns-direct',
-          address: 'https://223.5.5.5/dns-query',
-          address_resolver: 'dns-local',
+          server: '223.5.5.5',
+          tls: { enabled: true, server_name: 'dns.alidns.com' },
           detour: 'direct',
         },
         // Foreign domains: DNS over TLS via 1.1.1.1, routed through proxy
-        { tag: 'dns-proxy', address: 'tls://1.1.1.1', detour: '🚀 节点选择' },
-        // Ad domains: refused
-        { tag: 'dns-block', address: 'rcode://refused' },
+        {
+          type: 'tls',
+          tag: 'dns-proxy',
+          server: '1.1.1.1',
+          tls: { enabled: true, server_name: 'cloudflare-dns.com' },
+          detour: '🚀 节点选择',
+        },
       ],
       rules: [
-        // Bootstrap: proxy server address resolution must bypass the proxy itself
-        { outbound: 'any', server: 'dns-local' },
         // Block ads at DNS level
-        { rule_set: ['geosite-category-ads-all'], server: 'dns-block' },
+        { rule_set: ['geosite-category-ads-all'], action: 'predefined', rcode: 'REFUSED' },
         // CN domains use domestic DNS
-        { rule_set: ['geosite-cn'], server: 'dns-direct' },
+        { rule_set: ['geosite-cn'], action: 'route', server: 'dns-direct' },
       ],
       final: 'dns-proxy',
       strategy: 'prefer_ipv4',
-      independent_cache: true,
     },
 
     inbounds: [
@@ -610,9 +904,6 @@ export function buildHomeProxyConfig(nodes: NodeExportInfo[]): string {
         tag: 'tproxy-in',
         listen: '::',
         listen_port: 7895,
-        sniff: true,
-        sniff_override_destination: true,
-        domain_strategy: 'prefer_ipv4',
       },
       {
         // HTTP/SOCKS5 proxy for devices that don't support tproxy
@@ -620,8 +911,6 @@ export function buildHomeProxyConfig(nodes: NodeExportInfo[]): string {
         tag: 'mixed-in',
         listen: '::',
         listen_port: 7890,
-        sniff: true,
-        domain_strategy: 'prefer_ipv4',
       },
     ],
 
@@ -639,43 +928,49 @@ export function buildHomeProxyConfig(nodes: NodeExportInfo[]): string {
         type: 'selector',
         tag: '🚀 节点选择',
         outbounds: hasNodes ? ['⚡ 自动选择', ...proxyTags] : ['direct'],
-        default: '⚡ 自动选择',
+        default: hasNodes ? '⚡ 自动选择' : 'direct',
       },
       {
         type: 'selector',
         tag: '🎬 流媒体',
         outbounds: hasNodes ? ['🚀 节点选择', '⚡ 自动选择', ...proxyTags] : ['direct'],
-        default: '🚀 节点选择',
+        default: hasNodes ? '🚀 节点选择' : 'direct',
       },
       {
         type: 'selector',
         tag: '🤖 AI 服务',
         outbounds: hasNodes ? ['🚀 节点选择', '⚡ 自动选择', ...proxyTags] : ['direct'],
-        default: '🚀 节点选择',
+        default: hasNodes ? '🚀 节点选择' : 'direct',
       },
       { type: 'direct', tag: 'direct' },
-      { type: 'block', tag: 'block' },
-      { type: 'dns', tag: 'dns-out' },
     ],
 
     route: {
       rules: [
-        // DNS traffic must go through the DNS outbound
-        { protocol: 'dns', outbound: 'dns-out' },
+        // Replaces the removed per-inbound domain_strategy and sniff fields.
+        { inbound: ['tproxy-in', 'mixed-in'], action: 'resolve', strategy: 'prefer_ipv4' },
+        { inbound: ['tproxy-in', 'mixed-in'], action: 'sniff' },
+        // DNS traffic is handled by the built-in DNS module.
+        { protocol: 'dns', action: 'hijack-dns' },
         // LAN / private IPs always go direct
-        { ip_is_private: true, outbound: 'direct' },
+        { ip_is_private: true, action: 'route', outbound: 'direct' },
         // Block ads
-        { rule_set: ['geosite-category-ads-all'], outbound: 'block' },
+        { rule_set: ['geosite-category-ads-all'], action: 'reject' },
         // AI services — inline domain rules (no external rule_set file needed)
         {
           domain_suffix: AI_DOMAIN_SUFFIX,
           domain: AI_DOMAIN_EXACT,
+          action: 'route',
           outbound: '🤖 AI 服务',
         },
         // Streaming services
-        { rule_set: ['geosite-netflix', 'geosite-youtube', 'geosite-disneyplus'], outbound: '🎬 流媒体' },
+        {
+          rule_set: ['geosite-netflix', 'geosite-youtube', 'geosite-disneyplus'],
+          action: 'route',
+          outbound: '🎬 流媒体',
+        },
         // China domains and IPs — direct
-        { rule_set: ['geosite-cn', 'geoip-cn'], outbound: 'direct' },
+        { rule_set: ['geosite-cn', 'geoip-cn'], action: 'route', outbound: 'direct' },
       ],
       rule_set: HOMEPROXY_RULE_SETS.map((rs) => ({
         tag: rs.tag,
@@ -686,6 +981,7 @@ export function buildHomeProxyConfig(nodes: NodeExportInfo[]): string {
         update_interval: '1d',
       })),
       final: '🚀 节点选择',
+      default_domain_resolver: { server: 'dns-local', strategy: 'prefer_ipv4' },
       auto_detect_interface: true,
     },
   };
@@ -693,11 +989,20 @@ export function buildHomeProxyConfig(nodes: NodeExportInfo[]): string {
   return JSON.stringify(config, null, 2);
 }
 
+function assertNoUnsupportedOnlySubscription(
+  nodes: NodeExportInfo[],
+  outbounds: Record<string, unknown>[],
+): void {
+  if (nodes.length > 0 && outbounds.length === 0) {
+    throw new Error('sing-box does not support XHTTP; use the Mihomo subscription');
+  }
+}
+
 // ─── Hiddify deep link ──────────────────────────────────────────────────────
 
 /** Build Hiddify deep link from a subscription URL */
 export function buildHiddifyDeepLink(subscriptionUrl: string): string {
-  return `hiddify://import/${Buffer.from(subscriptionUrl).toString('base64')}`;
+  return `hiddify://import/${subscriptionUrl}`;
 }
 
 // ─── Full Clash / Mihomo subscription YAML ───────────────────────────────────
@@ -722,6 +1027,9 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
   for (const node of nodes) {
     const yaml = buildClashProxy(node);
     if (yaml !== null) proxyEntries.push({ name: node.name, yaml });
+  }
+  if (nodes.length > 0 && proxyEntries.length === 0) {
+    throw new Error('Mihomo supports XHTTP only with VLESS; no compatible nodes remain');
   }
 
   const nodeNames = proxyEntries.map((e) => e.name);

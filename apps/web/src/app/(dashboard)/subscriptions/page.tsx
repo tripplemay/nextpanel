@@ -25,28 +25,32 @@ interface SubFormat {
   key: string;
   label: string;
   url: string;
-  /** Hiddify: the actual subscription URL (deep link is in url, this is the fallback V2Ray link) */
+  /** Hiddify: the actual sing-box subscription URL; `url` is the app deep link. */
   extra?: string;
 }
 
-function getFormats(token: string): SubFormat[] {
-  const base = `${window.location.origin}/api/subscriptions/link/${token}`;
+function buildFormats(base: string): SubFormat[] {
+  const singboxUrl = `${base}/singbox`;
   return [
-    { key: 'hiddify', label: 'Hiddify（推荐）', url: `hiddify://import/${base}#NextPanel`, extra: base },
-    { key: 'clash', label: 'Clash', url: `${base}/clash` },
+    {
+      key: 'hiddify',
+      label: 'Hiddify（推荐）',
+      url: `hiddify://import/${singboxUrl}#NextPanel`,
+      extra: singboxUrl,
+    },
+    { key: 'clash', label: 'Clash / Mihomo', url: `${base}/clash` },
+    { key: 'singbox', label: 'Sing-box JSON', url: singboxUrl },
     { key: 'homeproxy', label: 'HomeProxy (OpenWrt)', url: `${base}/homeproxy` },
-    { key: 'v2ray', label: '通用', url: base },
+    { key: 'v2ray', label: 'V2Ray / Xray Base64', url: base },
   ];
 }
 
+function getFormats(token: string): SubFormat[] {
+  return buildFormats(`${window.location.origin}/api/subscriptions/link/${token}`);
+}
+
 function getShareFormats(shareToken: string): SubFormat[] {
-  const base = `${window.location.origin}/api/subscriptions/share/${shareToken}`;
-  return [
-    { key: 'hiddify', label: 'Hiddify（推荐）', url: `hiddify://import/${base}#NextPanel`, extra: base },
-    { key: 'clash', label: 'Clash', url: `${base}/clash` },
-    { key: 'homeproxy', label: 'HomeProxy (OpenWrt)', url: `${base}/homeproxy` },
-    { key: 'v2ray', label: '通用', url: base },
-  ];
+  return buildFormats(`${window.location.origin}/api/subscriptions/share/${shareToken}`);
 }
 
 function buildNodeRows(sub: Subscription) {
@@ -567,9 +571,10 @@ export default function SubscriptionsPage() {
 }
 
 const FORMAT_DESCRIPTIONS: Record<string, string> = {
-  clash: '通用 Clash / Mihomo 配置（mixed-port: 7890），适配 Clash Verge、Clash for Windows、ClashX、Mihomo Party 等所有 Clash 内核客户端，包含规则分流（广告屏蔽、流媒体、AI 服务、国内直连）',
-  v2ray: '适合 v2rayN、Shadowrocket 等客户端',
-  homeproxy: '适合 OpenWrt 路由器上的 HomeProxy 插件，包含完整分流规则（广告屏蔽、AI 服务、流媒体、国内直连）',
+  clash: '支持 VLESS XHTTP、TUIC 和 AnyTLS，适配 Clash Verge、Mihomo Party 等 Mihomo 内核客户端，并包含广告屏蔽、流媒体、AI 服务和国内直连规则。',
+  singbox: '适合 sing-box 原生客户端及 Hiddify，支持 TUIC 和 AnyTLS。sing-box 暂不支持 XHTTP，因此不会包含 XHTTP 节点。',
+  v2ray: '适合支持分享链接的客户端。包含 VLESS XHTTP 和官方 AnyTLS URI；TUIC 暂无统一分享 URI，因此不会出现在此格式中。',
+  homeproxy: '适合 OpenWrt 上的 HomeProxy，支持 TUIC 和 AnyTLS，并包含完整分流规则。sing-box 暂不支持 XHTTP，因此不会包含 XHTTP 节点。',
 };
 
 function LinkTabs({ formats }: { formats: SubFormat[] }) {
@@ -598,7 +603,7 @@ function LinkTabs({ formats }: { formats: SubFormat[] }) {
         children: f.key === 'hiddify' ? (
           <Space direction="vertical" style={{ width: '100%' }} size={16}>
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              推荐使用 Hiddify 客户端，全平台免费开源。支持 iOS / Android / Windows / macOS / Linux。
+              Hiddify 支持 iOS、Android、Windows、macOS 和 Linux。本入口使用 sing-box JSON，支持 TUIC 和 AnyTLS；sing-box 暂不支持 XHTTP，因此不会包含 XHTTP 节点。
             </Typography.Text>
             <div style={{ textAlign: 'center' }}>
               <HiddifyImportButton url={f.url} />

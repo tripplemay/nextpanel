@@ -27,13 +27,20 @@ export class SingboxTestService {
   private readonly logger = new Logger(SingboxTestService.name);
 
   async testHysteria2(node: SingboxNodeInfo): Promise<TestResult> {
+    return this.testNode('HYSTERIA2', node);
+  }
+
+  async testNode(protocol: string, node: SingboxNodeInfo): Promise<TestResult> {
     const testedAt = new Date().toISOString();
     const id = crypto.randomUUID();
     const configPath = path.join('/tmp', `singbox-test-${id}.json`);
     const socksPort = await this.allocatePort();
 
-    const config = this.buildClientConfig(node, socksPort);
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+    const config = this.buildClientConfig(node, socksPort, protocol);
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
 
     const { proc, ready } = this.spawnSingbox(configPath);
 
@@ -52,19 +59,12 @@ export class SingboxTestService {
 
   // ── Config builder ─────────────────────────────────────────────────────────
 
-  private buildClientConfig(node: SingboxNodeInfo, socksPort: number): unknown {
-    const outbound: Record<string, unknown> = {
-      type: 'hysteria2',
-      tag: 'proxy-out',
-      server: node.host,
-      server_port: node.port,
-      password: node.credentials.password ?? '',
-      tls: {
-        enabled: true,
-        insecure: true,
-        ...(node.domain ? { server_name: node.domain } : {}),
-      },
-    };
+  private buildClientConfig(
+    node: SingboxNodeInfo,
+    socksPort: number,
+    protocol = 'HYSTERIA2',
+  ): unknown {
+    const outbound = this.buildOutbound(protocol, node);
 
     return {
       log: { level: 'error', timestamp: false },
@@ -78,6 +78,50 @@ export class SingboxTestService {
       ],
       outbounds: [outbound],
     };
+  }
+
+  private buildOutbound(protocol: string, node: SingboxNodeInfo): Record<string, unknown> {
+    const tls = {
+      enabled: true,
+      insecure: protocol === 'HYSTERIA2',
+      ...(node.domain ? { server_name: node.domain } : {}),
+    };
+    const common = {
+      tag: 'proxy-out',
+      server: node.host,
+      server_port: node.port,
+    };
+
+    switch (protocol) {
+      case 'HYSTERIA2':
+        return {
+          ...common,
+          type: 'hysteria2',
+          password: node.credentials.password ?? '',
+          tls,
+        };
+      case 'TUIC':
+        return {
+          ...common,
+          type: 'tuic',
+          uuid: node.credentials.uuid ?? '',
+          password: node.credentials.password ?? '',
+          congestion_control: 'bbr',
+          udp_relay_mode: 'native',
+          zero_rtt_handshake: false,
+          heartbeat: '10s',
+          tls,
+        };
+      case 'ANYTLS':
+        return {
+          ...common,
+          type: 'anytls',
+          password: node.credentials.password ?? '',
+          tls,
+        };
+      default:
+        throw new Error(`sing-box does not support connectivity tests for ${protocol}`);
+    }
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────

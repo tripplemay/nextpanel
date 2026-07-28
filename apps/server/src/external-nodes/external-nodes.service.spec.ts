@@ -35,6 +35,11 @@ const fakeNode = {
   method: null,
   transport: 'ws',
   tls: 'TLS',
+  realityPublicKey: null,
+  shortId: null,
+  xhttpMode: null,
+  xhttpHost: null,
+  xhttpExtra: null,
   sni: 'cdn.example.com',
   path: '/ws',
 };
@@ -64,6 +69,37 @@ describe('ExternalNodesService', () => {
       const result = await svc.import('user-1', vlessUri);
       expect(result.success).toBe(1);
       expect(mockPrisma.externalNode.createMany).toHaveBeenCalled();
+    });
+
+    it('persists complete XHTTP REALITY connection parameters', async () => {
+      (mockPrisma.externalNode.createMany as jest.Mock).mockResolvedValue({ count: 1 });
+      const extra = JSON.stringify({ xPaddingBytes: '100-1000' });
+      const query = new URLSearchParams({
+        type: 'xhttp',
+        security: 'reality',
+        path: '/api',
+        host: 'edge.example.com',
+        mode: 'stream-up',
+        extra,
+        pbk: 'public-key',
+        sid: '0123456789abcdef',
+        sni: 'www.google.com',
+      });
+
+      await svc.import('user-1', `vless://some-uuid@1.2.3.4:443?${query}#XHTTP`);
+
+      expect(mockPrisma.externalNode.createMany).toHaveBeenCalledWith({
+        data: [expect.objectContaining({
+          transport: 'XHTTP',
+          tls: 'REALITY',
+          path: '/api',
+          xhttpHost: 'edge.example.com',
+          xhttpMode: 'stream-up',
+          xhttpExtra: extra,
+          realityPublicKey: 'public-key',
+          shortId: '0123456789abcdef',
+        })],
+      });
     });
 
     it('fetches URL when text starts with https://', async () => {
@@ -131,8 +167,20 @@ describe('ExternalNodesService', () => {
       );
     });
 
-    it('passes credentials correctly (uuid, password, method)', async () => {
-      const nodeWithAll = { ...fakeNode, password: 'pw', method: 'aes-256-gcm' };
+    it('passes all protocol credentials and XHTTP path to the connectivity test', async () => {
+      const nodeWithAll = {
+        ...fakeNode,
+        password: 'pw',
+        method: 'aes-256-gcm',
+        transport: 'XHTTP',
+        tls: 'REALITY',
+        realityPublicKey: 'public-key',
+        shortId: '0123456789abcdef',
+        path: '/api',
+        xhttpMode: 'stream-one',
+        xhttpHost: 'edge.example.com',
+        xhttpExtra: '{"noSSEHeader":true}',
+      };
       (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(nodeWithAll);
       (mockXrayTest.testWithParams as jest.Mock).mockResolvedValue({ reachable: true, latency: 10, testedAt: new Date().toISOString() });
       (mockPrisma.externalNode.update as jest.Mock).mockResolvedValue(nodeWithAll);
@@ -140,7 +188,17 @@ describe('ExternalNodesService', () => {
       await svc.test('en-1', 'user-1');
 
       const call = (mockXrayTest.testWithParams as jest.Mock).mock.calls[0][0];
-      expect(call.credentials).toMatchObject({ uuid: 'some-uuid', password: 'pw', method: 'aes-256-gcm' });
+      expect(call.credentials).toEqual({
+        uuid: 'some-uuid',
+        password: 'pw',
+        method: 'aes-256-gcm',
+        realityPublicKey: 'public-key',
+        shortId: '0123456789abcdef',
+        path: '/api',
+        xhttpMode: 'stream-one',
+        xhttpHost: 'edge.example.com',
+        xhttpExtra: '{"noSSEHeader":true}',
+      });
     });
   });
 

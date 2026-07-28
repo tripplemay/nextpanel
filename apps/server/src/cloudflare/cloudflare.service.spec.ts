@@ -52,6 +52,29 @@ describe('CloudflareService', () => {
         }),
       );
     });
+
+    it('creates an AAAA record for an IPv6 server', async () => {
+      mockFetch({
+        success: true,
+        errors: [],
+        result: { id: 'rec-v6', name: 'v6.example.com', content: '2001:db8::1' },
+      });
+
+      await svc.createARecord(
+        'token',
+        'zone-1',
+        'v6.example.com',
+        '2001:db8::1',
+        false,
+      );
+
+      const request = (fetch as jest.Mock).mock.calls[0][1] as { body: string };
+      expect(JSON.parse(request.body)).toMatchObject({
+        type: 'AAAA',
+        content: '2001:db8::1',
+        proxied: false,
+      });
+    });
   });
 
   describe('deleteRecord', () => {

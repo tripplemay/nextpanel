@@ -7,7 +7,7 @@ jest.mock('child_process', () => ({
 }));
 
 // ── Mock NodeSSH ───────────────────────────────────────────────────────────────
-const mockSshExecCommand = jest.fn().mockResolvedValue({ stdout: '', stderr: '' });
+const mockSshExecCommand = jest.fn().mockResolvedValue({ stdout: '', stderr: '', code: 0 });
 const mockPutFile = jest.fn().mockResolvedValue(undefined);
 const mockSsh = {
   execCommand: mockSshExecCommand,
@@ -18,7 +18,7 @@ const svc = new CertService();
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockSshExecCommand.mockResolvedValue({ stdout: '', stderr: '' });
+  mockSshExecCommand.mockResolvedValue({ stdout: '', stderr: '', code: 0 });
   mockPutFile.mockResolvedValue(undefined);
 });
 
@@ -74,27 +74,173 @@ describe('CertService', () => {
   });
 
   describe('pushCertToNode', () => {
-    it('creates remote directory, uploads cert and key', async () => {
+    it('validates, backs up, and atomically activates a changed certificate pair', async () => {
+      mockSshExecCommand.mockImplementation(async (command: string) => {
+        if (command.startsWith("test -f '/etc/nextpanel/certs/node-123.crt' &&")) {
+          return { stdout: '', stderr: '', code: 1 };
+        }
+        if (command === "test -f '/etc/nextpanel/certs/node-123.crt'" ||
+            command === "test -f '/etc/nextpanel/certs/node-123.key'") {
+          return { stdout: '', stderr: '', code: 1 };
+        }
+        return { stdout: '', stderr: '', code: 0 };
+      });
       const logs: string[] = [];
-      await svc.pushCertToNode(mockSsh, 'node-123', 'example.com', (l) => logs.push(l));
+      const update = await svc.pushCertToNode(
+        mockSsh,
+        'node-123',
+        'example.com',
+        (l) => logs.push(l),
+      );
+      expect(update.changed).toBe(true);
 
-      expect(mockSshExecCommand).toHaveBeenCalledWith('mkdir -p /etc/nextpanel/certs');
+      expect(mockSshExecCommand).toHaveBeenCalledWith(
+        "mkdir -p -- '/etc/nextpanel/certs' && chmod 0755 '/etc/nextpanel/certs'",
+      );
       expect(mockPutFile).toHaveBeenCalledTimes(2);
-      // First putFile is cert, second is key
       const [certSrc, certDst] = mockPutFile.mock.calls[0];
       const [keySrc, keyDst] = mockPutFile.mock.calls[1];
-      expect(certDst).toBe('/etc/nextpanel/certs/node-123.crt');
-      expect(keyDst).toBe('/etc/nextpanel/certs/node-123.key');
+      expect(certDst).toMatch(/^\/etc\/nextpanel\/certs\/node-123\.crt\.next-/);
+      expect(keyDst).toMatch(/^\/etc\/nextpanel\/certs\/node-123\.key\.next-/);
       expect(certSrc).toContain('fullchain.cer');
       expect(keySrc).toContain('*.example.com.key');
+      expect(mockPutFile).toHaveBeenNthCalledWith(
+        1,
+        expect.any(String),
+        expect.stringMatching(/^\/etc\/nextpanel\/certs\/node-123\.crt\.next-/),
+        null,
+        { mode: 0o644 },
+      );
+      expect(mockPutFile).toHaveBeenNthCalledWith(
+        2,
+        expect.any(String),
+        expect.stringMatching(/^\/etc\/nextpanel\/certs\/node-123\.key\.next-/),
+        null,
+        { mode: 0o600 },
+      );
+      const commands = mockSshExecCommand.mock.calls.map((call) => call[0] as string);
+      expect(commands.some((command) =>
+        command.includes('openssl x509 -noout') && command.includes(String(certDst)),
+      )).toBe(true);
+      expect(commands.some((command) =>
+        command.startsWith('failed=0;') && command.includes('mv -f --') &&
+        command.includes("chmod 0600 '/etc/nextpanel/certs/node-123.key'"),
+      )).toBe(true);
+      expect(commands.some((command) =>
+        command.includes("openssl x509 -noout -in '/etc/nextpanel/certs/node-123.crt'"),
+      )).toBe(true);
+      expect(logs.some((line) => line.includes('retaining rollback pair'))).toBe(true);
+      await update.commit();
+      expect(logs.some((line) => line.includes('deployed to'))).toBe(true);
     });
 
-    it('logs progress messages', async () => {
+    it('returns unchanged without replacing the installed files', async () => {
       const logs: string[] = [];
-      await svc.pushCertToNode(mockSsh, 'node-abc', 'test.com', (l) => logs.push(l));
 
-      expect(logs.some((l) => l.includes('Pushing LE cert'))).toBe(true);
-      expect(logs.some((l) => l.includes('deployed to'))).toBe(true);
+      const update = await svc.pushCertToNode(
+        mockSsh,
+        'node-123',
+        'example.com',
+        (line) => logs.push(line),
+      );
+      expect(update.changed).toBe(false);
+
+      const commands = mockSshExecCommand.mock.calls.map((call) => call[0] as string);
+      expect(commands.some((command) => command.includes('mv -f --'))).toBe(false);
+      expect(logs.some((line) => line.includes('already current'))).toBe(true);
+    });
+
+    it('keeps the previous pair until the caller commits and can roll it back', async () => {
+      mockSshExecCommand.mockImplementation(async (command: string) => {
+        if (command.startsWith("test -f '/etc/nextpanel/certs/node-123.crt' &&")) {
+          return { stdout: '', stderr: '', code: 1 };
+        }
+        return { stdout: '', stderr: '', code: 0 };
+      });
+
+      const update = await svc.pushCertToNode(
+        mockSsh,
+        'node-123',
+        'example.com',
+        jest.fn(),
+      );
+      expect(update.changed).toBe(true);
+      const commandsBeforeRollback = mockSshExecCommand.mock.calls.map(
+        (call) => String(call[0]),
+      );
+      expect(commandsBeforeRollback.some(
+        (command) => command.startsWith('rm -f --') && command.includes('.rollback-'),
+      )).toBe(false);
+
+      await expect(update.rollback()).resolves.toBe(true);
+      expect(mockSshExecCommand.mock.calls.some(
+        (call) => String(call[0]).startsWith('failed=0;') &&
+          String(call[0]).includes('cp -p --') && String(call[0]).includes('.rollback-'),
+      )).toBe(true);
+    });
+
+    it('rejects an invalid uploaded certificate pair before replacing active files', async () => {
+      mockSshExecCommand.mockImplementation(async (command: string) => {
+        if (command.includes('openssl x509 -noout')) {
+          return { stdout: '', stderr: 'key mismatch', code: 1 };
+        }
+        return { stdout: '', stderr: '', code: 0 };
+      });
+
+      await expect(
+        svc.pushCertToNode(mockSsh, 'node-123', 'example.com', jest.fn()),
+      ).rejects.toThrow('do not form a valid pair');
+
+      expect(mockSshExecCommand.mock.calls.some(
+        (call) => String(call[0]).includes('mv -f --'),
+      )).toBe(false);
+    });
+
+    it('restores the previous pair when atomic activation fails', async () => {
+      const logs: string[] = [];
+      mockSshExecCommand.mockImplementation(async (command: string) => {
+        if (command.startsWith("test -f '/etc/nextpanel/certs/node-123.crt' &&")) {
+          return { stdout: '', stderr: '', code: 1 };
+        }
+        if (command.startsWith('failed=0;') && command.includes('mv -f --')) {
+          return { stdout: '', stderr: 'permission denied', code: 1 };
+        }
+        return { stdout: '', stderr: '', code: 0 };
+      });
+
+      await expect(
+        svc.pushCertToNode(mockSsh, 'node-123', 'example.com', (line) => logs.push(line)),
+      ).rejects.toThrow('Failed to atomically activate');
+
+      const commands = mockSshExecCommand.mock.calls.map((call) => call[0] as string);
+      const restore = commands.find((command) =>
+        command.startsWith('failed=0;') && command.includes('cp -p --') &&
+        command.includes('.rollback-'),
+      );
+      expect(restore).toContain("'/etc/nextpanel/certs/node-123.crt'");
+      expect(restore).toContain("'/etc/nextpanel/certs/node-123.key'");
+      expect(logs.join('\n')).toContain('Previous TLS certificate restored');
+    });
+
+    it('retains exact backup paths when activation and rollback both fail', async () => {
+      const logs: string[] = [];
+      mockSshExecCommand.mockImplementation(async (command: string) => {
+        if (command.startsWith("test -f '/etc/nextpanel/certs/node-123.crt' &&")) {
+          return { stdout: '', stderr: '', code: 1 };
+        }
+        if (command.startsWith('failed=0;')) {
+          return { stdout: '', stderr: 'disk failure', code: 1 };
+        }
+        return { stdout: '', stderr: '', code: 0 };
+      });
+
+      await expect(
+        svc.pushCertToNode(mockSsh, 'node-123', 'example.com', (line) => logs.push(line)),
+      ).rejects.toThrow('Failed to atomically activate');
+
+      expect(logs.join('\n')).toMatch(
+        /backups retained at \/etc\/nextpanel\/certs\/node-123\.crt\.rollback-[\w-]+ and \/etc\/nextpanel\/certs\/node-123\.key\.rollback-[\w-]+/,
+      );
     });
   });
 

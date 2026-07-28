@@ -58,31 +58,6 @@ jobs:
             command -v pnpm >/dev/null 2>&1 || npm install -g pnpm@10
             command -v pm2  >/dev/null 2>&1 || npm install -g pm2
 
-            # ── 连通性测试客户端 Xray（幂等）──────────────────────────────
-            if ! command -v xray &>/dev/null; then
-              echo ">>> 安装 Xray 测试客户端..."
-              (
-                apt-get install -y unzip 2>/dev/null || true
-                ARCH=$(uname -m | sed 's/x86_64/64/;s/aarch64/arm64-v8a/')
-                curl -fL --max-time 60 "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${ARCH}.zip" -o /tmp/xray.zip
-                unzip -o /tmp/xray.zip xray -d /usr/local/bin/ && chmod +x /usr/local/bin/xray && rm /tmp/xray.zip
-                echo ">>> Xray installed: $(xray version | head -1)"
-              ) || echo ">>> WARNING: Xray 安装失败，跳过。"
-            fi
-            # ── 连通性测试客户端 sing-box（幂等）─────────────────────────
-            if ! command -v sing-box &>/dev/null; then
-              echo ">>> 安装 sing-box 测试客户端..."
-              (
-                apt-get install -y unzip 2>/dev/null || true
-                ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-                SB_TAG=$(curl -sf --max-time 15 "https://api.github.com/repos/SagerNet/sing-box/releases/latest" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-                curl -fL --max-time 120 "https://github.com/SagerNet/sing-box/releases/download/${SB_TAG}/sing-box-${SB_TAG#v}-linux-${ARCH}.tar.gz" -o /tmp/sing-box.tar.gz
-                tar xzf /tmp/sing-box.tar.gz -C /tmp/ && mv /tmp/sing-box-*/sing-box /usr/local/bin/sing-box && chmod +x /usr/local/bin/sing-box
-                rm -rf /tmp/sing-box.tar.gz /tmp/sing-box-*/
-                echo ">>> sing-box installed: $(sing-box version | head -1)"
-              ) || echo ">>> WARNING: sing-box 安装失败，跳过。"
-            fi
-
             cd $APP_DIR
             export NODE_OPTIONS="--max-old-space-size=2048"
             export NEXT_TELEMETRY_DISABLED=1
@@ -92,8 +67,40 @@ jobs:
             pnpm -r --workspace-concurrency=1 build
             unset NODE_OPTIONS NEXT_TELEMETRY_DISABLED
 
+            # 旧后端必须在迁移清理历史明文 ConfigSnapshot 前停止写入。
+            echo ">>> Pausing backend writes before migration..."
+            if pm2 describe nextpanel-server > /dev/null 2>&1; then
+              pm2 stop nextpanel-server
+            fi
+
             cd $APP_DIR/apps/server
-            pnpm exec prisma migrate deploy
+            if ! MIGRATE_OUTPUT=$(pnpm exec prisma migrate deploy 2>&1); then
+              echo "$MIGRATE_OUTPUT"
+              echo ">>> Migration failed; backend remains stopped to prevent incompatible writes." >&2
+              exit 1
+            fi
+            echo "$MIGRATE_OUTPUT"
+
+            # 新后端只写加密快照；先恢复 API，再执行较慢的测试内核检查。
+            cd $APP_DIR
+            if pm2 describe nextpanel-server > /dev/null 2>&1; then
+              pm2 restart nextpanel-server --update-env
+            else
+              pm2 start $APP_DIR/ecosystem.config.cjs --only nextpanel-server
+            fi
+
+            if [ -f "$APP_DIR/scripts/proxy-core-utils.sh" ]; then
+              apt-get install -y unzip 2>/dev/null || true
+              info() { echo ">>> $*"; }
+              ok() { echo ">>> $*"; }
+              warn() { echo ">>> WARNING: $*"; }
+              source "$APP_DIR/scripts/proxy-core-utils.sh"
+              if ! ensure_proxy_test_cores; then
+                echo ">>> WARNING: Some proxy test cores are unavailable; related connectivity tests will be disabled."
+              fi
+            else
+              echo ">>> WARNING: Proxy core installer is missing; skipping version checks."
+            fi
 
             # 重启（端口/环境来自 ecosystem.config.cjs：server 3201 / web 3200）
             pm2 delete nextpanel-server nextpanel-web 2>/dev/null || true

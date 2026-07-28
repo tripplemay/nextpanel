@@ -1,4 +1,8 @@
-import { generateConfig, getBinaryCommand } from './config-generator';
+import {
+  generateChainExitConfig,
+  generateConfig,
+  getBinaryCommand,
+} from './config-generator';
 import type { NodeInfo, NodeCredentials } from './config-generator';
 
 const baseNode: NodeInfo = {
@@ -56,6 +60,54 @@ describe('generateConfig', () => {
     const node = { ...baseNode, implementation: null };
     const json = JSON.parse(generateConfig(node, baseCreds));
     expect(json.log.loglevel).toBe('warning');
+  });
+});
+
+// ── Chain exit config ────────────────────────────────────────────────────────
+
+describe('generateChainExitConfig', () => {
+  const args = ['node-1', 15001, 'chain-uuid', '198.51.100.10'] as const;
+
+  it('uses REALITY for a new secure chain exit', () => {
+    const cfg = JSON.parse(
+      generateChainExitConfig(...args, {
+        privateKey: 'chain-private-key',
+        shortId: '0123456789abcdef',
+      }),
+    );
+
+    expect(cfg.inbounds[0].streamSettings).toEqual({
+      network: 'tcp',
+      security: 'reality',
+      realitySettings: {
+        target: 'addons.mozilla.org:443',
+        serverNames: ['addons.mozilla.org'],
+        privateKey: 'chain-private-key',
+        shortIds: ['0123456789abcdef'],
+      },
+      sockopt: { tcpKeepAliveInterval: 30 },
+    });
+    expect(cfg.routing.rules[0]).toEqual({
+      type: 'field',
+      source: ['198.51.100.10'],
+      outboundTag: 'direct',
+    });
+    expect(cfg.inbounds[0].listen).toBe('::');
+  });
+
+  it('preserves plaintext VLESS for legacy chains without REALITY credentials', () => {
+    const cfg = JSON.parse(generateChainExitConfig(...args));
+    expect(cfg.inbounds[0].streamSettings).toEqual({
+      network: 'tcp',
+      security: 'none',
+      sockopt: { tcpKeepAliveInterval: 30 },
+    });
+  });
+
+  it('rejects incomplete REALITY exit credentials', () => {
+    expect(() =>
+      generateChainExitConfig(...args, { privateKey: 'chain-private-key' } as any),
+    ).toThrow('Secure chain exit requires a REALITY private key and short ID');
   });
 });
 

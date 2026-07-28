@@ -16,6 +16,8 @@ const baseCreds: NodeCredentials = {
   password: 'secret',
   method: 'aes-256-gcm',
   username: 'user1',
+  shortId: '0123456789abcdef',
+  path: '/xhttp-test',
 };
 
 function parse(node: NodeInfo, creds: NodeCredentials = baseCreds) {
@@ -42,9 +44,80 @@ describe('generateXrayConfig – structure', () => {
     expect(cfg.inbounds[0].port).toBe(10080);
   });
 
+  it('listens on the IPv6 wildcard for dual-stack reachability', () => {
+    const cfg = parse(baseNode);
+    expect(cfg.inbounds[0].listen).toBe('::');
+  });
+
   it('outbound is freedom', () => {
     const cfg = parse(baseNode);
     expect(cfg.outbounds[0].protocol).toBe('freedom');
+  });
+});
+
+// ── Chain routing ─────────────────────────────────────────────────────────────
+
+describe('generateXrayConfig – chain routing', () => {
+  const chainNode: NodeInfo = {
+    ...baseNode,
+    chainExitIp: '203.0.113.20',
+    chainExitPort: 15001,
+    chainUuid: 'chain-uuid',
+  };
+
+  it('protects a new chain with REALITY and explicit XUDP mux settings', () => {
+    const cfg = parse({
+      ...chainNode,
+      chainRealityPrivateKey: 'chain-private-key',
+      chainRealityPublicKey: 'chain-public-key',
+      chainShortId: '0123456789abcdef',
+    });
+    const outbound = cfg.outbounds[0];
+
+    expect(outbound.streamSettings).toEqual({
+      network: 'tcp',
+      security: 'reality',
+      realitySettings: {
+        serverName: 'addons.mozilla.org',
+        fingerprint: 'chrome',
+        password: 'chain-public-key',
+        shortId: '0123456789abcdef',
+      },
+      sockopt: { tcpKeepAliveInterval: 30 },
+    });
+    expect(outbound.mux).toEqual({
+      enabled: true,
+      concurrency: 8,
+      xudpConcurrency: 16,
+      xudpProxyUDP443: 'allow',
+    });
+    expect(cfg.routing.rules[0]).toEqual({
+      type: 'field',
+      inboundTag: ['in-n1'],
+      outboundTag: 'chain-exit',
+    });
+    expect(JSON.stringify(cfg)).not.toContain('chain-private-key');
+  });
+
+  it('preserves plaintext VLESS for legacy chains without REALITY credentials', () => {
+    const cfg = parse(chainNode);
+    expect(cfg.outbounds[0].streamSettings.security).toBe('none');
+    expect(cfg.outbounds[0].streamSettings.realitySettings).toBeUndefined();
+    expect(cfg.outbounds[0].mux).toBeUndefined();
+  });
+
+  it('rejects partial REALITY credentials on a chain', () => {
+    expect(() =>
+      parse({
+        ...chainNode,
+        chainRealityPublicKey: 'chain-public-key',
+        chainShortId: '0123456789abcdef',
+      }),
+    ).toThrow('Secure chain requires complete REALITY key and short ID credentials');
+  });
+
+  it('ignores chain-only credentials when chain routing is disabled', () => {
+    expect(() => parse({ ...baseNode, chainRealityPublicKey: 'stale-key' })).not.toThrow();
   });
 });
 
@@ -86,6 +159,16 @@ describe('generateXrayConfig – inbound settings', () => {
   it('VLESS+REALITY 服务端 client 必须包含 flow:xtls-rprx-vision', () => {
     const cfg = parse({ ...baseNode, protocol: 'VLESS', tls: 'REALITY' });
     expect(cfg.inbounds[0].settings.clients[0].flow).toBe('xtls-rprx-vision');
+  });
+
+  it('VLESS+XHTTP+REALITY 服务端 client flow 为空字符串', () => {
+    const cfg = parse({
+      ...baseNode,
+      protocol: 'VLESS',
+      transport: 'XHTTP',
+      tls: 'REALITY',
+    });
+    expect(cfg.inbounds[0].settings.clients[0].flow).toBe('');
   });
 
   it('VLESS+TLS 服务端 client flow 为空字符串', () => {
@@ -193,6 +276,35 @@ describe('generateXrayConfig – streamSettings', () => {
     expect(cfg.inbounds[0].streamSettings.grpcSettings.serviceName).toBe('grpc');
   });
 
+  it('XHTTP transport adds path and auto mode', () => {
+    const cfg = parse({ ...baseNode, transport: 'XHTTP', tls: 'REALITY' });
+    const stream = cfg.inbounds[0].streamSettings;
+    expect(stream.network).toBe('xhttp');
+    expect(stream.xhttpSettings).toEqual({ path: '/xhttp-test', mode: 'auto' });
+  });
+
+  it('XHTTP transport normalizes a path without a leading slash', () => {
+    const cfg = parse(
+      { ...baseNode, transport: 'XHTTP', tls: 'REALITY' },
+      { ...baseCreds, path: 'custom-path' },
+    );
+    expect(cfg.inbounds[0].streamSettings.xhttpSettings.path).toBe('/custom-path');
+  });
+
+  it('XHTTP transport defaults to root path when credentials omit it', () => {
+    const cfg = parse(
+      { ...baseNode, transport: 'XHTTP', tls: 'REALITY' },
+      { uuid: 'uuid', realityPrivateKey: 'private-key' },
+    );
+    expect(cfg.inbounds[0].streamSettings.xhttpSettings.path).toBe('/');
+  });
+
+  it('RAW transport is passed through for current Xray configs', () => {
+    const cfg = parse({ ...baseNode, protocol: 'VLESS', transport: 'RAW', tls: 'REALITY' });
+    expect(cfg.inbounds[0].streamSettings.network).toBe('raw');
+    expect(cfg.inbounds[0].settings.clients[0].flow).toBe('xtls-rprx-vision');
+  });
+
   it('QUIC transport throws — removed in Xray 26.x', () => {
     expect(() => parse({ ...baseNode, transport: 'QUIC', tls: 'NONE' })).toThrow(
       'QUIC transport was removed in Xray 26.x',
@@ -243,6 +355,18 @@ describe('generateXrayConfig – TLS', () => {
   it('REALITY uses empty string for realityPrivateKey when not provided', () => {
     const cfg = parse({ ...baseNode, tls: 'REALITY' }, {});
     expect(cfg.inbounds[0].streamSettings.realitySettings.privateKey).toBe('');
+  });
+
+  it('REALITY uses the credential short ID', () => {
+    const cfg = parse({ ...baseNode, tls: 'REALITY' });
+    expect(cfg.inbounds[0].streamSettings.realitySettings.shortIds).toEqual([
+      '0123456789abcdef',
+    ]);
+  });
+
+  it('REALITY keeps the empty short ID fallback for existing nodes', () => {
+    const cfg = parse({ ...baseNode, tls: 'REALITY' }, {});
+    expect(cfg.inbounds[0].streamSettings.realitySettings.shortIds).toEqual(['']);
   });
 });
 

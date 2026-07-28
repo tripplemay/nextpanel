@@ -10,6 +10,7 @@
  */
 
 import { REALITY_DEFAULT_SNI, REALITY_FLOW } from '../protocols/reality';
+import { parseXhttpExtra, parseXhttpHost, parseXhttpMode } from '../protocols/xhttp';
 
 export interface NodeTestInfo {
   protocol: string;      // VMESS | VLESS | TROJAN | SHADOWSOCKS
@@ -88,8 +89,8 @@ function clientSettings(node: NodeTestInfo): unknown {
               {
                 id: c.uuid ?? '',
                 encryption: 'none',
-                // vision flow required for REALITY
-                flow: tls === 'REALITY' ? REALITY_FLOW : '',
+                // XHTTP multiplexing is incompatible with Vision flow.
+                flow: tls === 'REALITY' && node.transport !== 'XHTTP' ? REALITY_FLOW : '',
               },
             ],
           },
@@ -130,6 +131,17 @@ function clientStreamSettings(node: NodeTestInfo): unknown {
     base.wsSettings = { path: '/', headers: domain ? { Host: domain } : {} };
   } else if (network === 'grpc') {
     base.grpcSettings = { serviceName: 'grpc' };
+  } else if (network === 'xhttp') {
+    const mode = parseXhttpMode(c.xhttpMode);
+    if (!mode) throw new Error(`Unsupported XHTTP mode: ${c.xhttpMode}`);
+    const xhttpHost = parseXhttpHost(c.xhttpHost);
+    const extra = parseXhttpExtra(c.xhttpExtra);
+    base.xhttpSettings = {
+      path: c.path ?? '/',
+      ...(xhttpHost ? { host: xhttpHost } : {}),
+      mode,
+      ...(extra ? { extra } : {}),
+    };
   }
 
   // TLS / REALITY
@@ -144,7 +156,7 @@ function clientStreamSettings(node: NodeTestInfo): unknown {
       serverName: domain ?? REALITY_DEFAULT_SNI,
       fingerprint: 'chrome',
       publicKey: c.realityPublicKey ?? '',
-      shortId: '',
+      shortId: c.shortId ?? '',
     };
   } else {
     base.security = 'none';
@@ -154,6 +166,11 @@ function clientStreamSettings(node: NodeTestInfo): unknown {
 }
 
 function transportNetwork(transport: string | null): string {
-  const map: Record<string, string> = { TCP: 'tcp', WS: 'ws', GRPC: 'grpc' };
+  const map: Record<string, string> = {
+    TCP: 'tcp',
+    WS: 'ws',
+    GRPC: 'grpc',
+    XHTTP: 'xhttp',
+  };
   return map[transport ?? 'TCP'] ?? 'tcp';
 }

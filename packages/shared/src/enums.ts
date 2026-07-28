@@ -5,6 +5,9 @@ export enum Protocol {
   SHADOWSOCKS = 'shadowsocks',
   SOCKS5 = 'socks5',
   HTTP = 'http',
+  HYSTERIA2 = 'hysteria2',
+  TUIC = 'tuic',
+  ANYTLS = 'anytls',
 }
 
 export enum Implementation {
@@ -19,6 +22,7 @@ export enum Transport {
   WS = 'ws',
   GRPC = 'grpc',
   QUIC = 'quic',
+  XHTTP = 'xhttp',
 }
 
 export enum TlsMode {

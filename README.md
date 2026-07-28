@@ -13,7 +13,7 @@
 ### 节点部署
 - 支持协议预设一键部署，无需手动填写参数
 - 部署/删除过程 SSE 实时终端输出
-- 节点连通性测试（Xray E2E 端到端验证），支持批量测试
+- 节点连通性测试：Xray 验证 VLESS/VMess，sing-box 验证 Hysteria2/TUIC/AnyTLS，均通过本地 SOCKS 出口执行 E2E 请求；支持批量测试
 - 流量统计（上传/下载累计）
 - 节点启用/禁用开关
 
@@ -22,10 +22,17 @@
 | 预设 | 实现 | 传输层 | TLS | 说明 |
 |------|------|--------|-----|------|
 | VLESS + REALITY | Xray | TCP | REALITY | 裸 IP 直连，抗识别最强，首选方案 |
+| VLESS + XHTTP + REALITY | Xray | XHTTP | REALITY | 无需域名，固定使用推荐的 443 端口；同一服务器不能同时占用 443 的其他预设 |
 | VLESS + WS + TLS | Xray | WebSocket | TLS | 经 Cloudflare CDN 中转，IP 被封时的保底方案 |
 | VLESS + TCP + TLS | Xray | TCP | TLS | 直连真实 TLS，兼容 Quantumult X 等客户端 |
 | Hysteria2 | sing-box | QUIC | TLS（自签） | 基于 UDP，速度极快 |
+| TUIC v5 | sing-box | QUIC | 可信 TLS | 基于 UDP 的低延迟传输，适合高丢包和移动网络 |
+| AnyTLS | sing-box | TCP | 可信 TLS | TLS 外观的轻量 TCP 协议，适合 UDP 受限网络 |
 | VMess + TCP | Xray | TCP | 无 | 兼容性最广的兜底方案，适合老旧客户端 |
+
+TUIC 和 AnyTLS 创建时要求用户已配置状态为 `active` 的 Cloudflare Zone。面板为直连节点（链式节点则为入口服务器）创建 DNS-only A 记录，签发并自动续期受信任的 Let's Encrypt 通配符证书；DNS 或证书失败会中止部署，不降级为自签证书或跳过证书校验。XHTTP + REALITY 不依赖 Cloudflare 或域名。
+
+新建链式节点的入口到出口链路使用独立的 VLESS + REALITY 凭据，并通过 XUDP 转发 UDP 流量；REALITY 私钥只部署到出口服务器。升级前创建的链式节点继续兼容原有凭据格式，如需启用链路加密需重新创建该链式节点。
 
 ### 外部节点导入
 - 支持粘贴 URI（vmess:// vless:// ss:// trojan:// hysteria2://）
@@ -34,11 +41,24 @@
 - 导入后可测试连通性、加入订阅统一管理
 
 ### 订阅管理
-- 生成三种格式：V2Ray Base64、Clash YAML、Sing-box JSON
+- 生成四种格式：V2Ray Base64、Mihomo/Clash YAML、sing-box JSON、HomeProxy JSON
 - 托管节点与外部节点可混合加入同一订阅
 - 节点列表中以"托管"/"外部"标签区分来源
 - 支持刷新订阅链接（重新生成 token）
 - 导出弹窗含链接复制 + QR 码
+
+新增协议的导出兼容性：
+
+| 格式 / 客户端 | VLESS + XHTTP + REALITY | TUIC v5 | AnyTLS |
+|---------------|:------------------------:|:-------:|:------:|
+| V2Ray Base64 | 支持 | 不输出 | 支持 |
+| Mihomo / Clash YAML | 支持 | 支持 | 支持 |
+| sing-box JSON | 不输出 | 支持 | 支持 |
+| HomeProxy JSON | 不输出 | 支持 | 支持 |
+
+TUIC 尚无稳定统一的分享 URI，因此不会进入 Base64 订阅；AnyTLS 按官方 URI 规范输出并保持 TLS 证书校验。sing-box/HomeProxy 当前不支持 XHTTP 传输，因此会过滤混合订阅中的 XHTTP 节点，并拒绝纯 XHTTP 订阅以防流量意外直连。使用 XHTTP 时推荐 Mihomo，使用 TUIC/AnyTLS 时可选择 Mihomo、sing-box 或 HomeProxy。
+
+> 升级检查：Xray 26.x 已移除旧 QUIC 传输。升级前可执行 `SELECT "id", "name" FROM "Node" WHERE "transport" = 'QUIC';` 盘点存量节点，并将其迁移到 VLESS + XHTTP + REALITY 或 TUIC v5。新建和更新接口会明确拒绝 QUIC。
 
 ### 订阅分享
 - ADMIN/OPERATOR 可将订阅分享给 VIEWER 用户
@@ -95,7 +115,7 @@
 - X-Forwarded-For 真实 IP 记录
 
 ### 其他功能
-- Cloudflare DNS 集成（VLESS+WS+TLS 节点自动创建/清理 DNS 记录）
+- Cloudflare DNS 集成（WS+TLS 使用 CDN 代理；TCP+TLS、TUIC、AnyTLS 使用 DNS-only；自动创建、续期和清理）
 - 邀请码注册（管理员生成，支持自定义码和使用次数限制）
 - 用户管理（角色分配、批量操作）
 - 新用户欢迎引导（WelcomeModal → 添加服务器 → 自动打开 Agent 安装）
@@ -164,6 +184,8 @@ nextpanel domain set panel.example.com
                +-- /*      -->  Next.js 前端 (3400)
 
 被管理服务器  -->  Agent (心跳 + 指标上报)  -->  后端 API
+后端  -- SSH 部署 -->  被管理服务器上的 Xray / sing-box 独立节点服务
+后端  -->  Cloudflare DNS + Let's Encrypt DNS-01（可信 TLS 节点）
 ```
 
 ## 项目结构

@@ -56,6 +56,8 @@ describe('generateSingBoxConfig – inbound types', () => {
     ['SOCKS5', 'socks'],
     ['HTTP', 'http'],
     ['HYSTERIA2', 'hysteria2'],
+    ['TUIC', 'tuic'],
+    ['ANYTLS', 'anytls'],
   ])('maps protocol %s → type %s', (protocol, expectedType) => {
     const cfg = parseSingBox({ ...baseNode, protocol });
     expect(cfg.inbounds[0].type).toBe(expectedType);
@@ -122,6 +124,138 @@ describe('generateSingBoxConfig – credentials', () => {
     const cfg = parseSingBox({ ...baseNode, protocol: 'HYSTERIA2' }, {});
     expect(cfg.inbounds[0].users[0].password).toBe('');
   });
+
+  it('TUIC sets v5 credentials and secure transport defaults', () => {
+    const cfg = parseSingBox({ ...baseNode, protocol: 'TUIC' });
+    const inbound = cfg.inbounds[0];
+    expect(inbound.users).toEqual([{ uuid: 'uuid-sing', password: 'pass-sing' }]);
+    expect(inbound.congestion_control).toBe('bbr');
+    expect(inbound.zero_rtt_handshake).toBe(false);
+    expect(inbound.heartbeat).toBe('10s');
+  });
+
+  it('TUIC sets tls with cert/key paths', () => {
+    const cfg = parseSingBox({ ...baseNode, protocol: 'TUIC' });
+    expect(cfg.inbounds[0].tls).toEqual({
+      enabled: true,
+      certificate_path: '/etc/nextpanel/certs/sb-1.crt',
+      key_path: '/etc/nextpanel/certs/sb-1.key',
+    });
+  });
+
+  it('TUIC uses empty credentials when not provided', () => {
+    const cfg = parseSingBox({ ...baseNode, protocol: 'TUIC' }, {});
+    expect(cfg.inbounds[0].users).toEqual([{ uuid: '', password: '' }]);
+  });
+
+  it('AnyTLS sets password user and tls certificate paths', () => {
+    const cfg = parseSingBox({ ...baseNode, protocol: 'ANYTLS' });
+    expect(cfg.inbounds[0].users).toEqual([{ password: 'pass-sing' }]);
+    expect(cfg.inbounds[0].tls).toEqual({
+      enabled: true,
+      certificate_path: '/etc/nextpanel/certs/sb-1.crt',
+      key_path: '/etc/nextpanel/certs/sb-1.key',
+    });
+  });
+
+  it('AnyTLS uses an empty password when not provided', () => {
+    const cfg = parseSingBox({ ...baseNode, protocol: 'ANYTLS' }, {});
+    expect(cfg.inbounds[0].users).toEqual([{ password: '' }]);
+  });
+});
+
+// ── Chain routing ─────────────────────────────────────────────────────────────
+
+describe('generateSingBoxConfig – chain routing', () => {
+  const chainNode: NodeInfo = {
+    ...baseNode,
+    protocol: 'HYSTERIA2',
+    tls: 'TLS',
+    domain: 'proxy.example.com',
+    chainExitIp: '203.0.113.20',
+    chainExitPort: 15001,
+    chainUuid: 'chain-uuid',
+  };
+
+  it('sends entry inbound traffic through a VLESS XUDP chain outbound', () => {
+    const cfg = parseSingBox(chainNode);
+    expect(cfg.outbounds[0]).toEqual({
+      type: 'vless',
+      tag: 'chain-exit',
+      server: '203.0.113.20',
+      server_port: 15001,
+      uuid: 'chain-uuid',
+      packet_encoding: 'xudp',
+    });
+    expect(cfg.route.rules).toEqual([
+      {
+        inbound: ['in-sb-1'],
+        action: 'route',
+        outbound: 'chain-exit',
+      },
+    ]);
+  });
+
+  it('protects a new chain with REALITY TLS, uTLS, and XUDP', () => {
+    const cfg = parseSingBox({
+      ...chainNode,
+      chainRealityPrivateKey: 'chain-private-key',
+      chainRealityPublicKey: 'chain-public-key',
+      chainShortId: '0123456789abcdef',
+    });
+
+    expect(cfg.outbounds[0]).toEqual({
+      type: 'vless',
+      tag: 'chain-exit',
+      server: '203.0.113.20',
+      server_port: 15001,
+      uuid: 'chain-uuid',
+      packet_encoding: 'xudp',
+      tls: {
+        enabled: true,
+        server_name: 'addons.mozilla.org',
+        utls: { enabled: true, fingerprint: 'chrome' },
+        reality: {
+          enabled: true,
+          public_key: 'chain-public-key',
+          short_id: '0123456789abcdef',
+        },
+      },
+    });
+    expect(JSON.stringify(cfg)).not.toContain('chain-private-key');
+  });
+
+  it('rejects partial REALITY credentials on a chain', () => {
+    expect(() =>
+      parseSingBox({
+        ...chainNode,
+        chainRealityPrivateKey: 'chain-private-key',
+        chainShortId: '0123456789abcdef',
+      }),
+    ).toThrow('Secure chain requires complete REALITY key and short ID credentials');
+  });
+
+  it('ignores chain-only credentials when chain routing is disabled', () => {
+    expect(() =>
+      parseSingBox({ ...baseNode, chainRealityPrivateKey: 'stale-key' }),
+    ).not.toThrow();
+  });
+
+  it('keeps direct as the fallback outbound', () => {
+    const cfg = parseSingBox(chainNode);
+    expect(cfg.outbounds).toContainEqual({ type: 'direct', tag: 'direct' });
+    expect(cfg.route.final).toBe('direct');
+  });
+
+  it('does not enable chain routing when chain details are incomplete', () => {
+    const cfg = parseSingBox({
+      ...baseNode,
+      protocol: 'HYSTERIA2',
+      chainExitIp: '203.0.113.20',
+    });
+    expect(cfg.outbounds).toEqual([{ type: 'direct', tag: 'direct' }]);
+    expect(cfg.route).toBeUndefined();
+  });
 });
 
 // ── Transport ─────────────────────────────────────────────────────────────────
@@ -169,6 +303,19 @@ describe('generateSingBoxConfig – TLS', () => {
     const creds: NodeCredentials = { ...baseCreds, realityPrivateKey: 'my-private-key' };
     const cfg = parseSingBox({ ...baseNode, tls: 'REALITY', domain: 'example.com' }, creds);
     expect(cfg.inbounds[0].tls.reality.private_key).toBe('my-private-key');
+  });
+
+  it('REALITY mode uses the same short ID exported to clients', () => {
+    const creds: NodeCredentials = {
+      ...baseCreds,
+      realityPrivateKey: 'my-private-key',
+      shortId: '0123456789abcdef',
+    };
+    const cfg = parseSingBox(
+      { ...baseNode, tls: 'REALITY', domain: 'example.com' },
+      creds,
+    );
+    expect(cfg.inbounds[0].tls.reality.short_id).toEqual(['0123456789abcdef']);
   });
 
   it('REALITY mode uses empty string for private_key when not provided', () => {

@@ -23,7 +23,7 @@ const mockCrypto = {
 } as unknown as CryptoService;
 
 const mockSingbox = {
-  testHysteria2: jest.fn(),
+  testNode: jest.fn(),
 } as unknown as SingboxTestService;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -63,29 +63,33 @@ describe('XrayTestService', () => {
     });
   });
 
-  describe('testNode — HYSTERIA2 delegates to sing-box', () => {
-    it('calls singboxTest.testHysteria2 and persists result', async () => {
+  describe('testNode — sing-box protocols', () => {
+    it.each(['HYSTERIA2', 'TUIC', 'ANYTLS'])(
+      'delegates %s to sing-box and persists result',
+      async (protocol) => {
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(
-        makeNode({ protocol: 'HYSTERIA2', credentialsEnc: JSON.stringify({ password: 'pass' }) }),
+        makeNode({ protocol, credentialsEnc: JSON.stringify({ password: 'pass' }) }),
       );
-      (mockSingbox.testHysteria2 as jest.Mock).mockResolvedValue(fakeResult);
+      (mockSingbox.testNode as jest.Mock).mockResolvedValue(fakeResult);
       (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
 
       const result = await svc.testNode('node-1');
 
-      expect(mockSingbox.testHysteria2).toHaveBeenCalledWith(
+      expect(mockSingbox.testNode).toHaveBeenCalledWith(
+        protocol,
         expect.objectContaining({ host: '1.2.3.4', port: 10086, credentials: { password: 'pass' } }),
       );
       expect(result.reachable).toBe(true);
       expect(result.latency).toBe(120);
-    });
+      },
+    );
 
     it('persists failure result when sing-box returns reachable=false', async () => {
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(
         makeNode({ protocol: 'HYSTERIA2', credentialsEnc: JSON.stringify({ password: 'pass' }) }),
       );
       const failResult = { ...fakeResult, reachable: false, latency: -1 };
-      (mockSingbox.testHysteria2 as jest.Mock).mockResolvedValue(failResult);
+      (mockSingbox.testNode as jest.Mock).mockResolvedValue(failResult);
       (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
 
       const result = await svc.testNode('node-1');
@@ -114,6 +118,25 @@ describe('XrayTestService', () => {
       );
       expect(result.reachable).toBe(true);
     });
+
+    it('connects REALITY nodes by server IP while retaining the domain as SNI', async () => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(makeNode({
+        protocol: 'VLESS',
+        transport: 'XHTTP',
+        tls: 'REALITY',
+        domain: 'disguise.example.com',
+      }));
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
+      jest.spyOn(svc as any, 'runTest').mockResolvedValue(fakeResult);
+
+      await svc.testNode('node-1');
+
+      expect((svc as any).runTest).toHaveBeenCalledWith(expect.objectContaining({
+        host: '1.2.3.4',
+        domain: 'disguise.example.com',
+        tls: 'REALITY',
+      }));
+    });
   });
 
   describe('testNode — persistence', () => {
@@ -122,7 +145,7 @@ describe('XrayTestService', () => {
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(
         makeNode({ protocol: 'HYSTERIA2', credentialsEnc: JSON.stringify({ password: 'pass' }) }),
       );
-      (mockSingbox.testHysteria2 as jest.Mock).mockResolvedValue(fakeResult);
+      (mockSingbox.testNode as jest.Mock).mockResolvedValue(fakeResult);
       (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
 
       await svc.testNode('node-1');
@@ -139,7 +162,7 @@ describe('XrayTestService', () => {
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(
         makeNode({ protocol: 'HYSTERIA2', credentialsEnc: JSON.stringify({ password: 'pass' }) }),
       );
-      (mockSingbox.testHysteria2 as jest.Mock).mockResolvedValue(fakeResult);
+      (mockSingbox.testNode as jest.Mock).mockResolvedValue(fakeResult);
       (mockPrisma.node.update as jest.Mock).mockRejectedValue(new Error('db error'));
 
       // Should resolve without throwing even if update fails
@@ -155,7 +178,7 @@ describe('XrayTestService', () => {
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(
         makeNode({ protocol: 'HYSTERIA2', credentialsEnc: JSON.stringify({ password: 'pass' }) }),
       );
-      (mockSingbox.testHysteria2 as jest.Mock).mockImplementation(
+      (mockSingbox.testNode as jest.Mock).mockImplementation(
         () =>
           new Promise<typeof fakeResult>((resolve) => {
             resolvers.push(() => resolve(fakeResult));
@@ -179,6 +202,28 @@ describe('XrayTestService', () => {
 
       await Promise.all(promises);
       expect((svc as any).running).toBe(0);
+    });
+  });
+
+  describe('testWithParams', () => {
+    it('delegates TUIC to sing-box', async () => {
+      (mockSingbox.testNode as jest.Mock).mockResolvedValue(fakeResult);
+
+      const result = await svc.testWithParams({
+        protocol: 'TUIC',
+        transport: null,
+        tls: 'TLS',
+        host: '1.2.3.4',
+        port: 443,
+        domain: 'tuic.example.com',
+        credentials: { uuid: 'uuid', password: 'secret' },
+      });
+
+      expect(mockSingbox.testNode).toHaveBeenCalledWith(
+        'TUIC',
+        expect.objectContaining({ domain: 'tuic.example.com', port: 443 }),
+      );
+      expect(result).toEqual(fakeResult);
     });
   });
 
@@ -210,7 +255,9 @@ describe('XrayTestService', () => {
       expect(result.latency).toBe(80);
       expect(result.testedAt).toBeDefined();
       expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-        expect.stringContaining('/tmp/xray-test-'), expect.any(String), 'utf8',
+        expect.stringContaining('/tmp/xray-test-'),
+        expect.any(String),
+        { encoding: 'utf8', mode: 0o600 },
       );
       expect(mockFs.rmSync).toHaveBeenCalled();
       expect(mockProc.kill).toHaveBeenCalledWith('SIGKILL');
