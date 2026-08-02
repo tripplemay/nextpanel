@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma.service';
 import { XrayTestService } from '../nodes/xray-test/xray-test.service';
 import { SingboxTestService } from '../nodes/singbox-test/singbox-test.service';
 import { NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { SocksExitResolverService } from '../nodes/socks-exit-resolver.service';
 
 const mockPrisma = {
   externalNode: {
@@ -22,7 +23,16 @@ const mockSingboxTest = {
   testHysteria2: jest.fn(),
 } as unknown as SingboxTestService;
 
-const svc = new ExternalNodesService(mockPrisma, mockXrayTest, mockSingboxTest);
+const mockSocksExitResolver = {
+  resolve: jest.fn(),
+} as unknown as SocksExitResolverService;
+
+const svc = new ExternalNodesService(
+  mockPrisma,
+  mockXrayTest,
+  mockSingboxTest,
+  mockSocksExitResolver,
+);
 
 const fakeNode = {
   id: 'en-1',
@@ -31,6 +41,7 @@ const fakeNode = {
   address: '1.2.3.4',
   port: 443,
   uuid: 'some-uuid',
+  username: null,
   password: null,
   method: null,
   transport: 'ws',
@@ -44,7 +55,13 @@ const fakeNode = {
   path: '/ws',
 };
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  (mockSocksExitResolver.resolve as jest.Mock).mockResolvedValue({
+    candidates: [{ address: '198.51.100.10', sources: ['test'] }],
+    warnings: [],
+  });
+});
 
 describe('ExternalNodesService', () => {
   describe('list', () => {
@@ -98,6 +115,28 @@ describe('ExternalNodesService', () => {
           xhttpExtra: extra,
           realityPublicKey: 'public-key',
           shortId: '0123456789abcdef',
+        })],
+      });
+    });
+
+    it('persists authenticated SOCKS5 credentials', async () => {
+      (mockPrisma.externalNode.createMany as jest.Mock).mockResolvedValue({ count: 1 });
+      const credentials = Buffer.from('proxy-user:proxy-pass').toString('base64url');
+
+      const result = await svc.import(
+        'user-1',
+        `socks://${credentials}@proxy.example.com:1080#SOCKS`,
+      );
+
+      expect(result).toMatchObject({ success: 1, failed: 0 });
+      expect(mockPrisma.externalNode.createMany).toHaveBeenCalledWith({
+        data: [expect.objectContaining({
+          protocol: 'SOCKS5',
+          address: 'proxy.example.com',
+          port: 1080,
+          username: 'proxy-user',
+          password: 'proxy-pass',
+          tls: 'NONE',
         })],
       });
     });
@@ -199,6 +238,72 @@ describe('ExternalNodesService', () => {
         xhttpHost: 'edge.example.com',
         xhttpExtra: '{"noSSEHeader":true}',
       });
+    });
+
+    it('passes SOCKS5 username and password to the connectivity test', async () => {
+      const socksNode = {
+        ...fakeNode,
+        protocol: 'SOCKS5',
+        address: 'proxy.example.com',
+        port: 1080,
+        uuid: null,
+        username: 'proxy-user',
+        password: 'proxy-pass',
+        transport: null,
+        tls: 'NONE',
+      };
+      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(socksNode);
+      (mockXrayTest.testWithParams as jest.Mock).mockResolvedValue({
+        reachable: true,
+        latency: 20,
+        testedAt: new Date().toISOString(),
+      });
+      (mockPrisma.externalNode.update as jest.Mock).mockResolvedValue(socksNode);
+
+      await svc.test('en-1', 'user-1');
+
+      expect(mockXrayTest.testWithParams).toHaveBeenCalledWith(expect.objectContaining({
+        protocol: 'SOCKS5',
+        host: '198.51.100.10',
+        port: 1080,
+        credentials: expect.objectContaining({
+          username: 'proxy-user',
+          password: 'proxy-pass',
+        }),
+      }));
+    });
+
+    it('tries the next resolved SOCKS5 address after a failed candidate', async () => {
+      const socksNode = {
+        ...fakeNode,
+        protocol: 'SOCKS5',
+        address: 'proxy.example.com',
+        port: 1080,
+        uuid: null,
+        username: 'proxy-user',
+        password: 'proxy-pass',
+        transport: null,
+        tls: 'NONE',
+      };
+      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(socksNode);
+      (mockSocksExitResolver.resolve as jest.Mock).mockResolvedValue({
+        candidates: [
+          { address: '1.1.1.1', sources: ['global'] },
+          { address: '119.147.134.162', sources: ['CN ECS'] },
+        ],
+        warnings: [],
+      });
+      (mockXrayTest.testWithParams as jest.Mock)
+        .mockResolvedValueOnce({ reachable: false, latency: -1, testedAt: new Date().toISOString() })
+        .mockResolvedValueOnce({ reachable: true, latency: 30, testedAt: new Date().toISOString() });
+      (mockPrisma.externalNode.update as jest.Mock).mockResolvedValue(socksNode);
+
+      const result = await svc.test('en-1', 'user-1');
+
+      expect(result.reachable).toBe(true);
+      expect(mockXrayTest.testWithParams).toHaveBeenCalledTimes(2);
+      expect((mockXrayTest.testWithParams as jest.Mock).mock.calls[1][0].host)
+        .toBe('119.147.134.162');
     });
   });
 

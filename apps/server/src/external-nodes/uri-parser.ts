@@ -1,10 +1,11 @@
 /**
  * Pure URI parsing functions for external node import.
- * Supports: vmess://, vless://, ss://, trojan://, hysteria2://
+ * Supports: vmess://, vless://, ss://, socks://, socks5://, trojan://, hysteria2://
  * Also handles Base64-encoded subscription content (multi-line URIs).
  */
 
 import { parseXhttpExtra, parseXhttpHost, parseXhttpMode } from '../nodes/protocols/xhttp';
+import { parseSocksUri } from '../nodes/socks-uri';
 
 export interface ExternalNodeData {
   name: string;
@@ -12,6 +13,7 @@ export interface ExternalNodeData {
   address: string;
   port: number;
   uuid?: string;
+  username?: string;
   password?: string;
   method?: string;
   transport?: string;
@@ -222,6 +224,24 @@ function parseShadowsocks(uri: string): ExternalNodeData | null {
   }
 }
 
+function parseSocks(uri: string): ExternalNodeData | null {
+  try {
+    const parsed = parseSocksUri(uri);
+    return {
+      name: parsed.name,
+      protocol: 'SOCKS5',
+      address: parsed.config.host,
+      port: parsed.config.port,
+      username: parsed.config.username,
+      password: parsed.config.password,
+      tls: 'NONE',
+      rawUri: uri,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function parseTrojan(uri: string): ExternalNodeData | null {
   try {
     const withoutScheme = uri.slice('trojan://'.length);
@@ -307,6 +327,7 @@ export function parseUri(uri: string): ExternalNodeData | null {
   if (trimmed.startsWith('vmess://')) return parseVmess(trimmed);
   if (trimmed.startsWith('vless://')) return parseVless(trimmed);
   if (trimmed.startsWith('ss://')) return parseShadowsocks(trimmed);
+  if (/^socks5?:\/\//i.test(trimmed)) return parseSocks(trimmed);
   if (trimmed.startsWith('trojan://')) return parseTrojan(trimmed);
   if (trimmed.startsWith('hysteria2://') || trimmed.startsWith('hy2://')) return parseHysteria2(trimmed);
   return null;

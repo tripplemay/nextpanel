@@ -1,6 +1,48 @@
 import { parseSubscriptionText, parseUri } from './uri-parser';
 
 describe('external node URI parser', () => {
+  it('parses Base64-authenticated socks URI', () => {
+    const credentials = Buffer.from('proxy-user:proxy-pass').toString('base64url');
+    const node = parseUri(
+      `socks://${credentials}@proxy.example.com:8001#%E7%BE%8E%E5%9B%BD%E5%87%BA%E5%8F%A3`,
+    );
+
+    expect(node).toEqual({
+      name: '美国出口',
+      protocol: 'SOCKS5',
+      address: 'proxy.example.com',
+      port: 8001,
+      username: 'proxy-user',
+      password: 'proxy-pass',
+      tls: 'NONE',
+      rawUri: `socks://${credentials}@proxy.example.com:8001#%E7%BE%8E%E5%9B%BD%E5%87%BA%E5%8F%A3`,
+    });
+  });
+
+  it('parses URL-encoded SOCKS5 credentials and IPv6 without authentication', () => {
+    expect(parseUri('socks5://demo%20user:p%40ss%3Aword@proxy.example.com:1080#Node')).toMatchObject({
+      protocol: 'SOCKS5',
+      username: 'demo user',
+      password: 'p@ss:word',
+      address: 'proxy.example.com',
+      port: 1080,
+    });
+    expect(parseUri('socks://[2001:db8::5]:1080#IPv6')).toMatchObject({
+      protocol: 'SOCKS5',
+      address: '2001:db8::5',
+      port: 1080,
+    });
+  });
+
+  it('imports SOCKS nodes from Base64 subscription content and rejects malformed credentials', () => {
+    const uri = 'socks5://user:pass@proxy.example.com:1080#SOCKS';
+    expect(parseSubscriptionText(Buffer.from(uri).toString('base64'))).toMatchObject({
+      nodes: [expect.objectContaining({ protocol: 'SOCKS5', username: 'user', password: 'pass' })],
+      failed: 0,
+    });
+    expect(parseUri('socks://not-base64@proxy.example.com:1080')).toBeNull();
+  });
+
   it('parses complete VLESS XHTTP REALITY parameters', () => {
     const extra = JSON.stringify({ xPaddingBytes: '100-1000', noSSEHeader: true });
     const query = new URLSearchParams({

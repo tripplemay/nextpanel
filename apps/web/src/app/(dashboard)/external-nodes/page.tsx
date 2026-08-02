@@ -239,13 +239,13 @@ export default function ExternalNodesPage() {
         style={{ maxWidth: '95vw' }}
       >
         <div style={{ marginBottom: 8, color: token.colorTextSecondary, fontSize: 13 }}>
-          支持以下格式：订阅链接（https://...）、Base64 编码的订阅内容、单个或多个 URI（vmess:// vless:// ss:// trojan:// hysteria2://）
+          支持以下格式：订阅链接（https://...）、Base64 编码的订阅内容、单个或多个 URI（vmess:// vless:// ss:// socks:// socks5:// trojan:// hysteria2://）
         </div>
         <TextArea
           rows={8}
           value={importText}
           onChange={(e) => setImportText(e.target.value)}
-          placeholder={`https://example.com/sub/token\n或\nvmess://...\nvless://...`}
+          placeholder={`https://example.com/sub/token\n或\nvmess://...\nvless://...\nsocks://...`}
           style={{ fontFamily: 'monospace', fontSize: 12 }}
         />
       </Modal>

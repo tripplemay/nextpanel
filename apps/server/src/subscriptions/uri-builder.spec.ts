@@ -130,6 +130,18 @@ describe('buildShareUri – IPv6 authority formatting', () => {
   });
 });
 
+describe('buildShareUri – SOCKS5 authentication', () => {
+  it('exports URL-encoded username and password', () => {
+    const uri = buildShareUri({
+      ...baseVless,
+      protocol: 'SOCKS5',
+      credentials: { username: 'demo user', password: 'p@ss:word' },
+    });
+
+    expect(uri).toBe('socks5://demo%20user:p%40ss%3Aword@1.2.3.4:443#TestNode');
+  });
+});
+
 describe('buildShareUri – VLESS+XHTTP+REALITY', () => {
   it('exports all XHTTP share fields and REALITY credentials', () => {
     const uri = new URL(buildShareUri(xhttpVless)!);

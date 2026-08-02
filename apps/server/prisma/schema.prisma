@@ -309,6 +309,7 @@ model ExternalNode {
   address          String
   port             Int
   uuid             String?
+  username         String?
   password         String?
   method           String?
   transport        String?

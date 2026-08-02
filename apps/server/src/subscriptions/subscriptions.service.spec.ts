@@ -45,6 +45,7 @@ interface MockSub {
     name: string; protocol: string; address: string; port: number;
     transport: string | null; tls: string; sni: string | null;
     path: string | null; uuid: string | null; password: string | null;
+    username: string | null;
     method: string | null; realityPublicKey: string | null;
     shortId: string | null;
     xhttpMode: string | null; xhttpHost: string | null;
@@ -316,6 +317,7 @@ function makeExternalNode(protocol: string) {
       sni: 'ext.example.com',
       path: null,
       uuid: protocol === 'VLESS' ? 'ext-uuid' : null,
+      username: protocol === 'SOCKS5' ? 'proxy-user' : null,
       password: protocol === 'TROJAN' ? 'ext-pass' : null,
       method: null,
       realityPublicKey: null,
@@ -401,5 +403,28 @@ describe('SubscriptionsService – external nodes in content', () => {
     const result = await svc.generateSingboxContent('tok');
     const parsed = JSON.parse(result) as { outbounds: Array<{ type: string }> };
     expect(parsed.outbounds.some((o) => o.type === 'trojan')).toBe(true);
+  });
+
+  it('retains external SOCKS5 authentication in all subscription formats', async () => {
+    const external = makeExternalNode('SOCKS5');
+    external.externalNode.password = 'proxy-pass';
+    (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue({
+      token: 'tok', ownerId: 'owner-1', name: 'My Sub', nodes: [], externalNodes: [external],
+    });
+
+    const universal = Buffer.from(await svc.generateContent('tok'), 'base64').toString();
+    const clash = await svc.generateClashContent('tok');
+    const singbox = JSON.parse(await svc.generateSingboxContent('tok')) as {
+      outbounds: Array<Record<string, unknown>>;
+    };
+
+    expect(universal).toContain('socks5://proxy-user:proxy-pass@5.6.7.8:9090#Ext%20Node');
+    expect(clash.content).toContain('username: proxy-user');
+    expect(clash.content).toContain('password: proxy-pass');
+    expect(singbox.outbounds).toContainEqual(expect.objectContaining({
+      type: 'socks',
+      username: 'proxy-user',
+      password: 'proxy-pass',
+    }));
   });
 });

@@ -58,6 +58,7 @@ function clientProtocol(protocol: string): string {
     VLESS: 'vless',
     TROJAN: 'trojan',
     SHADOWSOCKS: 'shadowsocks',
+    SOCKS5: 'socks',
   };
   return map[protocol] ?? protocol.toLowerCase();
 }
@@ -112,6 +113,15 @@ function clientSettings(node: NodeTestInfo): unknown {
             password: c.password ?? '',
           },
         ],
+      };
+
+    case 'SOCKS5':
+      return {
+        address: host,
+        port,
+        ...(c.username !== undefined
+          ? { user: c.username, pass: c.password ?? '' }
+          : {}),
       };
 
     default:

@@ -248,6 +248,7 @@ export interface ExternalNode {
   address: string;
   port: number;
   uuid: string | null;
+  username: string | null;
   password: string | null;
   method: string | null;
   transport: string | null;

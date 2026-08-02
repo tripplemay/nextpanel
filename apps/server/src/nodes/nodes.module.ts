@@ -17,6 +17,6 @@ import { SocksExitResolverService } from './socks-exit-resolver.service';
   imports: [AuditModule, OperationLogModule, CloudflareModule, CertModule],
   providers: [NodesService, NodeDeployService, CryptoService, XrayTestService, SingboxTestService, SocksExitResolverService, ConnectivityScheduler, CertRenewalScheduler],
   controllers: [NodesController],
-  exports: [NodesService, NodeDeployService, XrayTestService, SingboxTestService],
+  exports: [NodesService, NodeDeployService, XrayTestService, SingboxTestService, SocksExitResolverService],
 })
 export class NodesModule {}

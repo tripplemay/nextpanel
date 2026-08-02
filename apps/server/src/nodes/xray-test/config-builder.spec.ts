@@ -83,4 +83,31 @@ describe('buildXrayClientConfig', () => {
       'xtls-rprx-vision',
     );
   });
+
+  it('builds an authenticated SOCKS5 outbound', () => {
+    const config = JSON.parse(
+      buildXrayClientConfig(
+        {
+          protocol: 'SOCKS5',
+          transport: null,
+          tls: 'NONE',
+          host: 'proxy.example.com',
+          port: 1080,
+          domain: null,
+          credentials: { username: 'proxy-user', password: 'proxy-pass' },
+        },
+        20101,
+      ),
+    );
+
+    expect(config.outbounds[0]).toMatchObject({
+      protocol: 'socks',
+      settings: {
+        address: 'proxy.example.com',
+        port: 1080,
+        user: 'proxy-user',
+        pass: 'proxy-pass',
+      },
+    });
+  });
 });

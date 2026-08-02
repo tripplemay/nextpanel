@@ -94,8 +94,12 @@ export function buildShareUri(node: NodeExportInfo): string | null {
         return `anytls://${encodeURIComponent(creds.password ?? '')}@${authorityHost}:${port}/?${params.toString()}#${tag}`;
       }
 
-    case 'SOCKS5':
-      return `socks5://${authorityHost}:${port}#${tag}`;
+    case 'SOCKS5': {
+      const userInfo = creds.username !== undefined
+        ? `${encodeURIComponent(creds.username)}:${encodeURIComponent(creds.password ?? '')}@`
+        : '';
+      return `socks5://${userInfo}${authorityHost}:${port}#${tag}`;
+    }
 
     case 'HTTP':
       return `http://${authorityHost}:${port}#${tag}`;

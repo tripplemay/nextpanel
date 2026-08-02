@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
-import { XrayTestService } from '../nodes/xray-test/xray-test.service';
+import { XrayTestService, type TestResult } from '../nodes/xray-test/xray-test.service';
 import { SingboxTestService } from '../nodes/singbox-test/singbox-test.service';
 import { parseSubscriptionText } from './uri-parser';
+import { SocksExitResolverService } from '../nodes/socks-exit-resolver.service';
 
 @Injectable()
 export class ExternalNodesService {
@@ -12,6 +13,7 @@ export class ExternalNodesService {
     private readonly prisma: PrismaService,
     private readonly xrayTest: XrayTestService,
     private readonly singboxTest: SingboxTestService,
+    private readonly socksExitResolver: SocksExitResolverService,
   ) {}
 
   list(userId: string) {
@@ -52,6 +54,7 @@ export class ExternalNodesService {
         address: n.address,
         port: n.port,
         uuid: n.uuid,
+        username: n.username,
         password: n.password,
         method: n.method,
         transport: n.transport,
@@ -77,6 +80,7 @@ export class ExternalNodesService {
 
     const credentials: Record<string, string> = {};
     if (node.uuid) credentials.uuid = node.uuid;
+    if (node.username) credentials.username = node.username;
     if (node.password) credentials.password = node.password;
     if (node.method) credentials.method = node.method;
     if (node.realityPublicKey) credentials.realityPublicKey = node.realityPublicKey;
@@ -86,7 +90,7 @@ export class ExternalNodesService {
     if (node.xhttpHost) credentials.xhttpHost = node.xhttpHost;
     if (node.xhttpExtra) credentials.xhttpExtra = node.xhttpExtra;
 
-    let result;
+    let result: TestResult | undefined;
     if (node.protocol === 'HYSTERIA2') {
       result = await this.singboxTest.testHysteria2({
         host: node.address,
@@ -94,6 +98,24 @@ export class ExternalNodesService {
         domain: node.sni ?? null,
         credentials,
       });
+    } else if (node.protocol === 'SOCKS5') {
+      const resolution = await this.socksExitResolver.resolve(node.address, []);
+      const candidates = Array.from(new Set([
+        ...resolution.candidates.map((candidate) => candidate.address),
+        node.address,
+      ]));
+      for (const host of candidates) {
+        result = await this.xrayTest.testWithParams({
+          protocol: node.protocol,
+          transport: node.transport,
+          tls: node.tls,
+          host,
+          port: node.port,
+          domain: null,
+          credentials,
+        });
+        if (result.reachable) break;
+      }
     } else {
       result = await this.xrayTest.testWithParams({
         protocol: node.protocol,
@@ -105,6 +127,8 @@ export class ExternalNodesService {
         credentials,
       });
     }
+
+    if (!result) throw new Error('SOCKS5 节点没有可测试的候选地址');
 
     // Persist result
     await this.prisma.externalNode.update({

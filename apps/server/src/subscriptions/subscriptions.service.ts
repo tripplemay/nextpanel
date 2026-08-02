@@ -287,7 +287,7 @@ export class SubscriptionsService {
       externalNodes: { include: { externalNode: true } },
     };
 
-    let sub: { ownerId: string; nodes: SubscriptionNode[]; externalNodes: { externalNode: { name: string; protocol: string; address: string; port: number; transport: string | null; tls: string; sni: string | null; path: string | null; uuid: string | null; password: string | null; method: string | null; realityPublicKey: string | null; shortId: string | null; xhttpMode: string | null; xhttpHost: string | null; xhttpExtra: string | null } }[] } | null = null;
+    let sub: { ownerId: string; nodes: SubscriptionNode[]; externalNodes: { externalNode: { name: string; protocol: string; address: string; port: number; transport: string | null; tls: string; sni: string | null; path: string | null; uuid: string | null; username: string | null; password: string | null; method: string | null; realityPublicKey: string | null; shortId: string | null; xhttpMode: string | null; xhttpHost: string | null; xhttpExtra: string | null } }[] } | null = null;
 
     if (by.shareToken) {
       const share = await this.prisma.subscriptionShare.findUnique({
@@ -322,6 +322,7 @@ export class SubscriptionsService {
     for (const { externalNode: en } of sub.externalNodes) {
       const credentials: Record<string, string> = {};
       if (en.uuid) credentials.uuid = en.uuid;
+      if (en.username) credentials.username = en.username;
       if (en.password) credentials.password = en.password;
       if (en.method) credentials.method = en.method;
       if (en.realityPublicKey) credentials.realityPublicKey = en.realityPublicKey;
