@@ -1,5 +1,5 @@
-import { IsString, IsIn, IsNotEmpty, Matches, MaxLength } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsString, IsIn, IsNotEmpty, IsOptional, Matches, MaxLength, ValidateIf } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { SUPPORTED_PROTOCOLS, type SupportedProtocol } from '../protocols/presets';
 
 export class CreateChainNodeDto {
@@ -19,7 +19,26 @@ export class CreateChainNodeDto {
   @IsString()
   entryServerId: string;
 
-  @ApiProperty({ description: 'Exit server ID (traffic exits here)' })
+  @ApiPropertyOptional({
+    enum: ['MANAGED_SERVER', 'SOCKS5'],
+    default: 'MANAGED_SERVER',
+    description: 'Chain exit type',
+  })
+  @IsOptional()
+  @IsIn(['MANAGED_SERVER', 'SOCKS5'])
+  exitType?: 'MANAGED_SERVER' | 'SOCKS5';
+
+  @ApiPropertyOptional({ description: 'Managed exit server ID' })
+  @ValidateIf((dto: CreateChainNodeDto) => (dto.exitType ?? 'MANAGED_SERVER') === 'MANAGED_SERVER')
   @IsString()
-  exitServerId: string;
+  @IsNotEmpty()
+  exitServerId?: string;
+
+  @ApiPropertyOptional({ description: 'Authenticated SOCKS5 URI' })
+  @ValidateIf((dto: CreateChainNodeDto) => dto.exitType === 'SOCKS5')
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(4096)
+  @Matches(/^[^\r\n]+$/, { message: 'socksUri must not contain line breaks' })
+  socksUri?: string;
 }

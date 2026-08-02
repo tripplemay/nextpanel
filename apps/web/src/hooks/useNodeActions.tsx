@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { App, Input, Modal } from 'antd';
+import { App, Input, Modal, Select } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { AxiosError } from 'axios';
 import { nodesApi } from '@/lib/api';
@@ -29,6 +29,7 @@ export interface UseNodeActionsResult {
   openDelete: (node: Node) => void;
   confirmDelete: (node: Node) => void;
   openRename: (node: Node) => void;
+  openEgressPolicy: (node: Node) => void;
   openShare: (node: Node) => void;
   openLogs: (node: Node) => void;
   modals: React.ReactNode;
@@ -51,6 +52,8 @@ export function useNodeActions({ nodes }: UseNodeActionsOptions): UseNodeActions
 
   const [renameNode, setRenameNode] = useState<Node | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [egressPolicyNode, setEgressPolicyNode] = useState<Node | null>(null);
+  const [egressIpPolicy, setEgressIpPolicy] = useState<'AUTO' | 'IPV4_ONLY'>('AUTO');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [deployingNode, setDeployingNode] = useState<Node | null>(null);
   const [deleteDrawerOpen, setDeleteDrawerOpen] = useState(false);
@@ -137,6 +140,24 @@ export function useNodeActions({ nodes }: UseNodeActionsOptions): UseNodeActions
     },
   });
 
+  const egressPolicyMutation = useMutation({
+    mutationFn: ({ id, policy }: { id: string; policy: 'AUTO' | 'IPV4_ONLY' }) =>
+      nodesApi.update(id, { egressIpPolicy: policy }).then((r) => r.data),
+    onSuccess: (updated) => {
+      qc.setQueriesData<Node[]>({ queryKey: ['nodes'] }, (old) =>
+        old?.map((node) => (node.id === updated.id ? updated : node)),
+      );
+      message.success('出口 IP 策略已更新，节点正在重新部署');
+      setEgressPolicyNode(null);
+    },
+    onError: (err) => {
+      message.error(apiErrorMessage(err, '出口 IP 策略更新失败'));
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['nodes'] });
+    },
+  });
+
   const startBatchTest = useCallback(async () => {
     if (batchTesting) {
       abortBatchRef.current?.abort();
@@ -214,6 +235,15 @@ export function useNodeActions({ nodes }: UseNodeActionsOptions): UseNodeActions
     setRenameValue(node.name);
   }, []);
 
+  const openEgressPolicy = useCallback((node: Node) => {
+    if ((node.implementation ?? 'XRAY') !== 'XRAY') {
+      void message.warning('仅 Xray 节点支持出口 IP 策略');
+      return;
+    }
+    setEgressPolicyNode(node);
+    setEgressIpPolicy(node.egressIpPolicy);
+  }, [message]);
+
   const closeDrawer = useCallback(() => {
     abort();
     setDrawerOpen(false);
@@ -247,6 +277,33 @@ export function useNodeActions({ nodes }: UseNodeActionsOptions): UseNodeActions
           onPressEnter={submitRename}
           placeholder="节点名称"
           style={{ marginTop: 8 }}
+        />
+      </Modal>
+
+      <Modal
+        open={!!egressPolicyNode}
+        destroyOnHidden
+        style={{ maxWidth: '95vw' }}
+        title="出口 IP 策略"
+        onCancel={() => setEgressPolicyNode(null)}
+        onOk={() => {
+          if (egressPolicyNode) {
+            egressPolicyMutation.mutate({
+              id: egressPolicyNode.id,
+              policy: egressIpPolicy,
+            });
+          }
+        }}
+        confirmLoading={egressPolicyMutation.isPending}
+      >
+        <Select
+          value={egressIpPolicy}
+          onChange={setEgressIpPolicy}
+          style={{ width: '100%', marginTop: 8 }}
+          options={[
+            { label: '自动（双栈）', value: 'AUTO' },
+            { label: '仅 IPv4', value: 'IPV4_ONLY' },
+          ]}
         />
       </Modal>
 
@@ -286,6 +343,7 @@ export function useNodeActions({ nodes }: UseNodeActionsOptions): UseNodeActions
     openDelete,
     confirmDelete,
     openRename,
+    openEgressPolicy,
     openShare: setShareNode,
     openLogs: setLogNode,
     modals,

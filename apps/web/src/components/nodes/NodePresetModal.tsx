@@ -1,15 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { App, Modal, Form, Input, Select, Tag, Space, Radio } from 'antd';
+import { App, Modal, Form, Input, Select, Tag, Space, Radio, Segmented } from 'antd';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { nodesApi, serversApi } from '@/lib/api';
-import type { Node } from '@/types/api';
+import type { CreateChainNodeDto, Node } from '@/types/api';
 import type { AxiosError } from 'axios';
 
 const { Option } = Select;
 
 type DeployMode = 'direct' | 'chain';
+type ChainExitType = 'MANAGED_SERVER' | 'SOCKS5';
 
 interface Props {
   open: boolean;
@@ -41,6 +42,7 @@ export default function NodePresetModal({
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const [deployMode, setDeployMode] = useState<DeployMode>('direct');
+  const [chainExitType, setChainExitType] = useState<ChainExitType>('MANAGED_SERVER');
   const [serverId, setServerId] = useState<string | undefined>(undefined);
 
   const { data: presets } = useQuery({
@@ -87,6 +89,7 @@ export default function NodePresetModal({
     if (open) {
       form.resetFields();
       setDeployMode(defaultDeployMode);
+      setChainExitType('MANAGED_SERVER');
       const safeDefaultServerId = typeof defaultServerId === 'string' ? defaultServerId : undefined;
       const safeDefaultEntryServerId = typeof defaultEntryServerId === 'string' ? defaultEntryServerId : undefined;
       const safeDefaultExitServerId = typeof defaultExitServerId === 'string' ? defaultExitServerId : undefined;
@@ -123,7 +126,7 @@ export default function NodePresetModal({
   });
 
   const chainMutation = useMutation({
-    mutationFn: (values: { entryServerId: string; exitServerId: string; preset: string; name: string }) =>
+    mutationFn: (values: CreateChainNodeDto) =>
       nodesApi.createChainNode(values),
     onSuccess: (res) => {
       onSuccess(res.data);
@@ -140,14 +143,20 @@ export default function NodePresetModal({
 
   function handleFinish(values: Record<string, unknown>) {
     if (deployMode === 'chain') {
-      const { entryServerId, exitServerId, preset, name } = values as {
-        entryServerId: string; exitServerId: string; preset: string; name: string;
+      const { entryServerId, exitServerId, socksUri, preset, name } = values as {
+        entryServerId: string; exitServerId?: string; socksUri?: string; preset: string; name: string;
       };
-      if (entryServerId === exitServerId) {
+      if (chainExitType === 'MANAGED_SERVER' && entryServerId === exitServerId) {
         message.error('入口和出口不能是同一台服务器');
         return;
       }
-      chainMutation.mutate({ entryServerId, exitServerId, preset, name });
+      chainMutation.mutate({
+        entryServerId,
+        exitType: chainExitType,
+        preset,
+        name,
+        ...(chainExitType === 'MANAGED_SERVER' ? { exitServerId } : { socksUri }),
+      });
     } else {
       directMutation.mutate(values as { serverId: string; preset: string; name: string });
     }
@@ -178,7 +187,8 @@ export default function NodePresetModal({
             disabled={lockDeployMode}
             onChange={(e) => {
               setDeployMode(e.target.value as DeployMode);
-              form.resetFields(['serverId', 'entryServerId', 'exitServerId', 'name']);
+              form.resetFields(['serverId', 'entryServerId', 'exitServerId', 'socksUri', 'name']);
+              setChainExitType('MANAGED_SERVER');
               setServerId(undefined);
             }}
             optionType="button"
@@ -205,15 +215,38 @@ export default function NodePresetModal({
                 {servers?.map((s) => <Option key={s.id} value={s.id}>{s.name}</Option>)}
               </Select>
             </Form.Item>
-            <Form.Item name="exitServerId" label="出口服务器" rules={[{ required: true, message: '请选择出口服务器' }]}
-              extra="流量从此服务器出站"
-            >
-              <Select placeholder="选择出口服务器">
-                {servers
-                  ?.filter((s) => s.id !== form.getFieldValue('entryServerId'))
-                  .map((s) => <Option key={s.id} value={s.id}>{s.name}</Option>)}
-              </Select>
+            <Form.Item label="出口类型">
+              <Segmented
+                block
+                value={chainExitType}
+                onChange={(value) => {
+                  setChainExitType(value as ChainExitType);
+                  form.resetFields(['exitServerId', 'socksUri']);
+                }}
+                options={[
+                  { label: '托管服务器', value: 'MANAGED_SERVER' },
+                  { label: 'SOCKS5 地址', value: 'SOCKS5' },
+                ]}
+              />
             </Form.Item>
+            {chainExitType === 'MANAGED_SERVER' ? (
+              <Form.Item name="exitServerId" label="出口服务器" rules={[{ required: true, message: '请选择出口服务器' }]}
+                extra="流量从此服务器出站"
+              >
+                <Select placeholder="选择出口服务器">
+                  {servers
+                    ?.filter((s) => s.id !== form.getFieldValue('entryServerId'))
+                    .map((s) => <Option key={s.id} value={s.id}>{s.name}</Option>)}
+                </Select>
+              </Form.Item>
+            ) : (
+              <Form.Item name="socksUri" label="SOCKS5 地址" rules={[{ required: true, message: '请输入 SOCKS5 地址' }]}>
+                <Input.Password
+                  placeholder="socks://BASE64(username:password)@host:port#name"
+                  autoComplete="off"
+                />
+              </Form.Item>
+            )}
           </>
         )}
 

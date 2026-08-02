@@ -6,6 +6,7 @@
 import { generateXrayConfig } from './xray-config';
 import { generateSingBoxConfig, generateSsLibevConfig } from './singbox-config';
 import { REALITY_DEFAULT_SNI } from '../protocols/reality';
+import type { Socks5ExitConfig } from '../socks-uri';
 
 export interface NodeInfo {
   id: string;
@@ -15,6 +16,8 @@ export interface NodeInfo {
   tls: string;              // NONE | TLS | REALITY
   listenPort: number;
   domain: string | null;
+  /** Controls the address family used for proxied outbound traffic. */
+  egressIpPolicy?: string;
   /** xray stats API port — only passed for xray/v2ray nodes during deploy */
   statsPort?: number;
   /** Chain proxy: exit server IP (when set, outbound goes to exit server instead of freedom) */
@@ -29,6 +32,8 @@ export interface NodeInfo {
   chainRealityPublicKey?: string;
   /** Chain proxy: REALITY short ID shared by entry and exit */
   chainShortId?: string;
+  /** Chain proxy: external authenticated SOCKS5 exit. */
+  socksExit?: Socks5ExitConfig;
 }
 
 export interface NodeCredentials {
@@ -76,6 +81,7 @@ export function generateChainExitConfig(
   chainUuid: string,
   entryServerIp: string,
   reality?: ChainRealityCredentials,
+  egressIpPolicy = 'AUTO',
 ): string {
   if (reality && (!reality.privateKey || !reality.shortId)) {
     throw new Error('Secure chain exit requires a REALITY private key and short ID');
@@ -116,11 +122,14 @@ export function generateChainExitConfig(
         },
       ],
       outbounds: [
-        { protocol: 'freedom', tag: 'direct' },
+        xrayDirectOutbound(egressIpPolicy),
         { protocol: 'blackhole', tag: 'blocked' },
       ],
       routing: {
         rules: [
+          ...(egressIpPolicy === 'IPV4_ONLY'
+            ? [{ type: 'field', ip: ['::/0'], outboundTag: 'blocked' }]
+            : []),
           { type: 'field', source: [entryServerIp], outboundTag: 'direct' },
           { type: 'field', network: 'tcp,udp', outboundTag: 'blocked' },
         ],
@@ -129,6 +138,16 @@ export function generateChainExitConfig(
     null,
     2,
   );
+}
+
+function xrayDirectOutbound(egressIpPolicy: string): Record<string, unknown> {
+  return {
+    protocol: 'freedom',
+    tag: 'direct',
+    ...(egressIpPolicy === 'IPV4_ONLY'
+      ? { settings: { domainStrategy: 'ForceIPv4' } }
+      : {}),
+  };
 }
 
 /** Returns the binary path and CLI args for starting the service */

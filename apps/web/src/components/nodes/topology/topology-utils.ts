@@ -67,7 +67,8 @@ export function buildTopology(servers: Server[], nodes: Node[], theme: ResolvedT
   for (const node of nodes) {
     if (!serversById.has(node.serverId)) continue;
 
-    if (!node.exitServerId) {
+    const isChainNode = node.exitType != null || !!node.exitServerId;
+    if (!isChainNode) {
       const group = directByServer.get(node.serverId) ?? [];
       group.push(node);
       directByServer.set(node.serverId, group);
@@ -78,7 +79,9 @@ export function buildTopology(servers: Server[], nodes: Node[], theme: ResolvedT
     entryGroup.push(node);
     chainByEntryServer.set(node.serverId, entryGroup);
 
-    if (!serversById.has(node.exitServerId)) {
+    if (node.exitType === 'SOCKS5') continue;
+
+    if (!node.exitServerId || !serversById.has(node.exitServerId)) {
       const orphanGroup = orphanChainByEntryServer.get(node.serverId) ?? [];
       orphanGroup.push(node);
       orphanChainByEntryServer.set(node.serverId, orphanGroup);

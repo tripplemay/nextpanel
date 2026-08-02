@@ -12,6 +12,7 @@ import { CreateChainNodeDto } from './dto/create-chain-node.dto';
 import { buildShareUri } from '../subscriptions/uri-builder';
 import { PROTOCOL_PRESETS, CREDENTIAL_GENERATORS, type SupportedProtocol } from './protocols/presets';
 import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
+import { parseSocksUri, SocksUriParseError, type ParsedSocksUri } from './socks-uri';
 
 const CLOUDFLARE_PRESETS = new Set<SupportedProtocol>([
   'VLESS_WS_TLS',
@@ -42,6 +43,8 @@ export class NodesService {
       transport: dto.transport,
       tls: dto.tls,
     });
+    const egressIpPolicy = dto.egressIpPolicy ?? 'AUTO';
+    assertEgressIpPolicySupported(shape, egressIpPolicy);
     assertRecommendedPort(shape, dto.listenPort);
     const requiresManagedDns = isManagedCertificateProtocol(shape.protocol);
     if (requiresManagedDns) await this.assertActiveCloudflare(userId);
@@ -62,6 +65,7 @@ export class NodesService {
           tls: shape.tls as any,
           listenPort: dto.listenPort,
           domain: requiresManagedDns ? null : dto.domain,
+          egressIpPolicy,
           credentialsEnc,
           enabled: dto.enabled ?? true,
           ...(requiresManagedDns ? { source: 'AUTO' as const } : {}),
@@ -181,6 +185,7 @@ export class NodesService {
         tls: true,
         listenPort: true,
         domain: true,
+        egressIpPolicy: true,
         cfDnsRecordId: true,
         credentialsEnc: true,
         source: true,
@@ -209,6 +214,8 @@ export class NodesService {
       tls: dto.tls ?? (enteringXhttp || enteringManagedProtocol ? undefined : existing.tls),
     });
     const targetListenPort = dto.listenPort ?? existing.listenPort;
+    const targetEgressIpPolicy = dto.egressIpPolicy ?? existing.egressIpPolicy;
+    assertEgressIpPolicySupported(shape, targetEgressIpPolicy);
     assertRecommendedPort(shape, targetListenPort);
     await this.assertPortAvailable(
       existing.serverId,
@@ -328,6 +335,7 @@ export class NodesService {
               tls: existing.tls,
               listenPort: existing.listenPort,
               domain: existing.domain,
+              egressIpPolicy: existing.egressIpPolicy,
               cfDnsRecordId: existing.cfDnsRecordId,
               credentialsEnc: existing.credentialsEnc,
               source: existing.source,
@@ -494,16 +502,37 @@ export class NodesService {
   }
 
   async createChainNode(userId: string, dto: CreateChainNodeDto) {
-    // Validate both servers belong to user
+    const exitType = dto.exitType ?? 'MANAGED_SERVER';
     const entryServer = await this.prisma.server.findFirst({ where: { id: dto.entryServerId, userId } });
     if (!entryServer) throw new NotFoundException('入口服务器不存在');
     if (!entryServer.sshAuthEnc) throw new BadRequestException('入口服务器凭证已销毁');
 
-    const exitServer = await this.prisma.server.findFirst({ where: { id: dto.exitServerId, userId } });
-    if (!exitServer) throw new NotFoundException('出口服务器不存在');
-    if (!exitServer.sshAuthEnc) throw new BadRequestException('出口服务器凭证已销毁');
-
-    if (dto.entryServerId === dto.exitServerId) throw new BadRequestException('入口和出口不能是同一台服务器');
+    let managedExitServerId: string | null = null;
+    let parsedSocks: ParsedSocksUri | null = null;
+    if (exitType === 'MANAGED_SERVER') {
+      if (!dto.exitServerId || dto.socksUri !== undefined) {
+        throw new BadRequestException('托管出口必须且只能提供出口服务器');
+      }
+      managedExitServerId = dto.exitServerId;
+      const exitServer = await this.prisma.server.findFirst({
+        where: { id: managedExitServerId, userId },
+      });
+      if (!exitServer) throw new NotFoundException('出口服务器不存在');
+      if (!exitServer.sshAuthEnc) throw new BadRequestException('出口服务器凭证已销毁');
+      if (dto.entryServerId === managedExitServerId) {
+        throw new BadRequestException('入口和出口不能是同一台服务器');
+      }
+    } else {
+      if (!dto.socksUri || dto.exitServerId !== undefined) {
+        throw new BadRequestException('SOCKS5 出口必须且只能提供 SOCKS 地址');
+      }
+      try {
+        parsedSocks = parseSocksUri(dto.socksUri);
+      } catch (err) {
+        if (err instanceof SocksUriParseError) throw new BadRequestException(err.message);
+        throw err;
+      }
+    }
 
     const presetKey = dto.preset as SupportedProtocol;
     if (STRICT_DNS_PRESETS.has(presetKey)) await this.assertActiveCloudflare(userId);
@@ -512,29 +541,33 @@ export class NodesService {
     const credentials = CREDENTIAL_GENERATORS[presetKey]();
     const credentialsEnc = this.crypto.encrypt(JSON.stringify(credentials));
 
-    // The entry-to-exit hop uses VLESS + REALITY. Store the complete encrypted
-    // credential envelope so deployment can configure both ends consistently.
-    const chainRealityKeys = generateRealityKeys();
-    const chainCredentials = {
-      uuid: crypto.randomUUID(),
-      ...chainRealityKeys,
-      shortId: crypto.randomBytes(8).toString('hex'),
-    };
-    const chainCredEnc = this.crypto.encrypt(JSON.stringify(chainCredentials));
+    const chainCredEnc = managedExitServerId
+      ? this.crypto.encrypt(JSON.stringify({
+          uuid: crypto.randomUUID(),
+          ...generateRealityKeys(),
+          shortId: crypto.randomBytes(8).toString('hex'),
+        }))
+      : null;
+    const socksExitEnc = parsedSocks
+      ? this.crypto.encrypt(JSON.stringify(parsedSocks.config))
+      : null;
 
-    const node = await this.withDatabaseLocks([
+    const lockKeys = [
       serverPortLock(dto.entryServerId),
-      serverPortLock(dto.exitServerId),
-    ], async () => {
+      ...(managedExitServerId ? [serverPortLock(managedExitServerId)] : []),
+    ];
+    const node = await this.withDatabaseLocks(lockKeys, async () => {
       await this.assertOwnedServer(dto.entryServerId, userId);
-      await this.assertOwnedServer(dto.exitServerId, userId);
+      if (managedExitServerId) await this.assertOwnedServer(managedExitServerId, userId);
       const listenPort = await this.pickPort(
         dto.entryServerId,
         preset.fixedPort,
         preset.portBase,
         preset.implementation,
       );
-      const exitPort = await this.pickChainExitPort(dto.exitServerId);
+      const exitPort = managedExitServerId
+        ? await this.pickChainExitPort(managedExitServerId)
+        : null;
       return this.prisma.node.create({
         data: {
           serverId: dto.entryServerId,
@@ -547,9 +580,12 @@ export class NodesService {
           listenPort,
           domain: null,
           credentialsEnc,
-          exitServerId: dto.exitServerId,
+          exitType: exitType as any,
+          exitServerId: managedExitServerId,
           exitPort,
           chainCredEnc,
+          socksExitEnc,
+          socksExitName: parsedSocks?.name ?? null,
           source: 'AUTO',
         },
         select: this.safeSelect(),
@@ -799,6 +835,7 @@ export class NodesService {
       tls: true,
       listenPort: true,
       domain: true,
+      egressIpPolicy: true,
       source: true,
       status: true,
       enabled: true,
@@ -812,6 +849,8 @@ export class NodesService {
       updatedAt: true,
       exitServerId: true,
       exitPort: true,
+      exitType: true,
+      socksExitName: true,
       exitServer: { select: { id: true, name: true, ip: true } },
       server: { select: { id: true, name: true, ip: true, tags: true, autoTags: true } },
     } as const;
@@ -884,6 +923,16 @@ function isManagedCertificateProtocol(protocol: string): boolean {
 function assertRecommendedPort(shape: NodeShape, listenPort: number): void {
   if (shape.transport === 'XHTTP' && listenPort !== 443) {
     throw new BadRequestException('VLESS + XHTTP + REALITY 必须监听 443 端口');
+  }
+}
+
+function assertEgressIpPolicySupported(
+  shape: NodeShape,
+  policy: string,
+): void {
+  const implementation = (shape.implementation ?? 'XRAY').toUpperCase();
+  if (policy === 'IPV4_ONLY' && implementation !== 'XRAY') {
+    throw new BadRequestException('仅 Xray 节点支持 IPv4-only 出口策略');
   }
 }
 

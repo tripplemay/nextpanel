@@ -4,9 +4,16 @@ import { REALITY_DEFAULT_SNI } from '../protocols/reality';
 // ─── sing-box ────────────────────────────────────────────────────────────────
 
 export function generateSingBoxConfig(node: NodeInfo, creds: NodeCredentials): string {
-  const isChain = !!(node.chainExitIp && node.chainExitPort && node.chainUuid);
-  const chainReality = isChain ? getChainRealityClient(node) : null;
-  const outbounds: unknown[] = isChain
+  const isManagedChain = !!(node.chainExitIp && node.chainExitPort && node.chainUuid);
+  const isSocksChain = !!node.socksExit;
+  if (isManagedChain && isSocksChain) {
+    throw new Error('Managed and SOCKS5 chain exits are mutually exclusive');
+  }
+  const isChain = isManagedChain || isSocksChain;
+  const chainReality = isManagedChain ? getChainRealityClient(node) : null;
+  const outbounds: unknown[] = isSocksChain
+    ? [singBoxSocksOutbound(node.socksExit!)]
+    : isManagedChain
     ? [
         {
           type: 'vless',
@@ -49,7 +56,7 @@ export function generateSingBoxConfig(node: NodeInfo, creds: NodeCredentials): s
           outbound: 'chain-exit',
         },
       ],
-      final: 'direct',
+      final: isSocksChain ? 'chain-exit' : 'direct',
     };
   }
 
@@ -58,6 +65,19 @@ export function generateSingBoxConfig(node: NodeInfo, creds: NodeCredentials): s
     null,
     2,
   );
+}
+
+function singBoxSocksOutbound(socks: NonNullable<NodeInfo['socksExit']>): Record<string, unknown> {
+  return {
+    type: 'socks',
+    tag: 'chain-exit',
+    server: socks.host,
+    server_port: socks.port,
+    version: '5',
+    ...(socks.username !== undefined
+      ? { username: socks.username, password: socks.password ?? '' }
+      : {}),
+  };
 }
 
 function getChainRealityClient(

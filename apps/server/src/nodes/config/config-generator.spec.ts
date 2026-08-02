@@ -104,6 +104,23 @@ describe('generateChainExitConfig', () => {
     });
   });
 
+  it('forces IPv4 and rejects IPv6 destinations at the chain exit', () => {
+    const cfg = JSON.parse(
+      generateChainExitConfig(...args, undefined, 'IPV4_ONLY'),
+    );
+
+    expect(cfg.outbounds[0]).toEqual({
+      protocol: 'freedom',
+      tag: 'direct',
+      settings: { domainStrategy: 'ForceIPv4' },
+    });
+    expect(cfg.routing.rules[0]).toEqual({
+      type: 'field',
+      ip: ['::/0'],
+      outboundTag: 'blocked',
+    });
+  });
+
   it('rejects incomplete REALITY exit credentials', () => {
     expect(() =>
       generateChainExitConfig(...args, { privateKey: 'chain-private-key' } as any),

@@ -13,7 +13,13 @@ import {
   IsFQDN,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Protocol, Implementation, Transport, TlsMode } from '@prisma/client';
+import {
+  EgressIpPolicy,
+  Implementation,
+  Protocol,
+  TlsMode,
+  Transport,
+} from '@prisma/client';
 
 export class NodeCredentialsDto {
   @ApiPropertyOptional()
@@ -98,6 +104,11 @@ export class CreateNodeDto {
   @IsFQDN({ require_tld: true, allow_underscores: false, allow_trailing_dot: false })
   @IsOptional()
   domain?: string;
+
+  @ApiPropertyOptional({ enum: EgressIpPolicy, default: EgressIpPolicy.AUTO })
+  @IsEnum(EgressIpPolicy)
+  @IsOptional()
+  egressIpPolicy?: EgressIpPolicy;
 
   @ApiProperty({ type: NodeCredentialsDto })
   @IsObject()

@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { App, Button, Table, Tag, Space, Switch, Dropdown, Typography, Collapse, Empty, Tooltip, theme as antdTheme } from 'antd';
 import { useIsMobile } from '@/hooks/useIsMobile';
-import { ApiOutlined, ShareAltOutlined, FileTextOutlined, EditOutlined, CloudUploadOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { ApiOutlined, ShareAltOutlined, FileTextOutlined, EditOutlined, CloudUploadOutlined, EllipsisOutlined, DeleteOutlined, GlobalOutlined, PlusOutlined } from '@ant-design/icons';
 import ServerTagList from '@/components/servers/ServerTagList';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { nodesApi, serversApi } from '@/lib/api';
@@ -117,6 +117,7 @@ export default function NodesPage() {
     openDeploy,
     openDelete,
     openRename,
+    openEgressPolicy,
   } = nodeActions;
   const testMutation = { mutate: nodeActions.testNode };
   const toggleMutation = { mutate: nodeActions.toggleNode };
@@ -157,6 +158,11 @@ export default function NodesPage() {
         <Space size={4}>
           <span>{r.name}</span>
           {r.exitServer && <Tag color="purple" style={{ margin: 0 }}>链式 → {r.exitServer.name}</Tag>}
+          {r.exitType === 'SOCKS5' && (
+            <Tag color="cyan" style={{ margin: 0, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              链式 → {r.socksExitName ?? 'SOCKS5'}
+            </Tag>
+          )}
         </Space>
       ),
     },
@@ -167,6 +173,7 @@ export default function NodesPage() {
           <Tag color="blue">{r.protocol}</Tag>
           {r.transport && <Tag>{r.transport}</Tag>}
           {r.tls !== 'NONE' && <Tag color="green">{r.tls}</Tag>}
+          {r.egressIpPolicy === 'IPV4_ONLY' && <Tag color="green">IPv4</Tag>}
         </Space>
       ),
     },
@@ -278,6 +285,13 @@ export default function NodesPage() {
             onClick: () => setLogNode(record),
           },
           {
+            key: 'egress-policy',
+            icon: <GlobalOutlined />,
+            label: '出口 IP 策略',
+            disabled: (record.implementation ?? 'XRAY') !== 'XRAY',
+            onClick: () => openEgressPolicy(record),
+          },
+          {
             key: 'rename',
             icon: <EditOutlined />,
             label: '重命名',
@@ -344,7 +358,7 @@ export default function NodesPage() {
       },
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [isMobile, testResults, testingId, batchTesting, togglingId, toggleMutation, testMutation, modal, openDeploy, openDelete, openRename]);
+  ], [isMobile, testResults, testingId, batchTesting, togglingId, toggleMutation, testMutation, modal, openDeploy, openDelete, openRename, openEgressPolicy]);
 
   // Tablet: hide low-priority columns; mobile uses card layout (table not rendered)
   const TABLET_KEEP_COLUMNS = new Set(['名称', '协议', '状态', '启用', '连通性', '操作']);
@@ -495,6 +509,7 @@ export default function NodesPage() {
                 <Space size={4} style={{ minWidth: 0, flex: 1, marginRight: 8 }}>
                   <Typography.Text strong style={{ fontSize: 14 }} ellipsis>{node.name}</Typography.Text>
                   {node.exitServer && <Tag color="purple" style={{ margin: 0, fontSize: 11 }}>链式</Tag>}
+                  {node.exitType === 'SOCKS5' && <Tag color="cyan" style={{ margin: 0, fontSize: 11 }}>SOCKS5</Tag>}
                 </Space>
                 <StatusTag status={node.status} enabled={node.enabled} />
               </div>

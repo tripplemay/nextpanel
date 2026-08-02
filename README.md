@@ -34,6 +34,8 @@ TUIC 和 AnyTLS 创建时要求用户已配置状态为 `active` 的 Cloudflare 
 
 新建链式节点的入口到出口链路使用独立的 VLESS + REALITY 凭据，并通过 XUDP 转发 UDP 流量；REALITY 私钥只部署到出口服务器。升级前创建的链式节点继续兼容原有凭据格式，如需启用链路加密需重新创建该链式节点。
 
+链式节点也可以使用单个外部 SOCKS5 地址作为出口，支持无认证、标准用户名密码以及 `socks://BASE64(username:password)@host:port#备注` 格式。SOCKS5 凭据加密存储且不会写入审计或部署日志；部署和定时连通性检查会同时验证 TCP 与 UDP ASSOCIATE，UDP 不可用时节点不会被标记为运行成功。
+
 ### 外部节点导入
 - 支持粘贴 URI（vmess:// vless:// ss:// trojan:// hysteria2://）
 - 支持 Base64 编码的订阅内容

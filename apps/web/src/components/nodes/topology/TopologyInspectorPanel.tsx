@@ -8,6 +8,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   FileTextOutlined,
+  GlobalOutlined,
   LinkOutlined,
   PlusOutlined,
   ShareAltOutlined,
@@ -86,8 +87,10 @@ function NodeRow({
           <Tag color="blue">{node.protocol}</Tag>
           {node.transport && <Tag>{node.transport}</Tag>}
           {node.tls !== 'NONE' && <Tag color="green">{node.tls}</Tag>}
+          {node.egressIpPolicy === 'IPV4_ONLY' && <Tag color="green">IPv4</Tag>}
           <Tag>:{node.listenPort}</Tag>
           {node.exitServer && <Tag color="purple">出口 {node.exitServer.name}</Tag>}
+          {node.exitType === 'SOCKS5' && <Tag color="cyan">出口 {node.socksExitName ?? 'SOCKS5'}</Tag>}
           {missingExit && <Tag color="red">出口服务器缺失</Tag>}
           <ConnectivityTag node={node} nodeActions={nodeActions} />
           <Tooltip title="累计上传 / 下载">
@@ -113,6 +116,14 @@ function NodeRow({
         />
         <Button size="small" icon={<CloudUploadOutlined />} onClick={() => nodeActions.openDeploy(node)} />
         <Button size="small" icon={<FileTextOutlined />} onClick={() => nodeActions.openLogs(node)} />
+        <Tooltip title="出口 IP 策略">
+          <Button
+            size="small"
+            icon={<GlobalOutlined />}
+            disabled={(node.implementation ?? 'XRAY') !== 'XRAY'}
+            onClick={() => nodeActions.openEgressPolicy(node)}
+          />
+        </Tooltip>
         <Button size="small" icon={<EditOutlined />} onClick={() => nodeActions.openRename(node)} />
         <Button size="small" danger icon={<DeleteOutlined />} onClick={() => nodeActions.confirmDelete(node)} />
       </div>

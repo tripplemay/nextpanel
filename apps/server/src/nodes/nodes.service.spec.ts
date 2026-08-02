@@ -55,6 +55,7 @@ const fakeNode = {
   id: 'node-1', serverId: 'srv-1', name: 'Test Node',
   protocol: 'VMESS', implementation: 'XRAY', transport: 'TCP',
   tls: 'NONE', listenPort: 10086, domain: null,
+  egressIpPolicy: 'AUTO',
   status: 'RUNNING', enabled: true, createdAt: new Date(), updatedAt: new Date(),
 };
 
@@ -136,6 +137,49 @@ describe('NodesService', () => {
       await svc.create(dto, 'user-id-1');
       const data = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
       expect(data.tls).toBe('NONE');
+    });
+
+    it('defaults the egress IP policy to AUTO', async () => {
+      (mockPrisma.node.create as jest.Mock).mockResolvedValue(fakeNode);
+      const dto = {
+        serverId: 's', name: 'N', protocol: 'VMESS', listenPort: 80, credentials: {},
+      } as any;
+
+      await svc.create(dto, 'user-id-1');
+
+      const data = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
+      expect(data.egressIpPolicy).toBe('AUTO');
+    });
+
+    it('accepts IPv4-only egress for Xray nodes', async () => {
+      (mockPrisma.node.create as jest.Mock).mockResolvedValue(fakeNode);
+
+      await svc.create({
+        serverId: 's',
+        name: 'IPv4 only',
+        protocol: 'VMESS',
+        implementation: 'XRAY',
+        listenPort: 80,
+        credentials: {},
+        egressIpPolicy: 'IPV4_ONLY',
+      } as any, 'user-id-1');
+
+      const data = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
+      expect(data.egressIpPolicy).toBe('IPV4_ONLY');
+    });
+
+    it('rejects IPv4-only egress for non-Xray nodes', async () => {
+      await expect(svc.create({
+        serverId: 's',
+        name: 'Unsupported',
+        protocol: 'VMESS',
+        implementation: 'SING_BOX',
+        listenPort: 80,
+        credentials: {},
+        egressIpPolicy: 'IPV4_ONLY',
+      } as any, 'user-id-1')).rejects.toThrow('仅 Xray 节点支持');
+
+      expect(mockPrisma.node.create).not.toHaveBeenCalled();
     });
 
     it('defaults the full VLESS XHTTP REALITY shape and credentials', async () => {
@@ -280,6 +324,39 @@ describe('NodesService', () => {
   });
 
   describe('update', () => {
+    it('updates the egress IP policy for Xray nodes', async () => {
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(fakeNode);
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({
+        ...fakeNode,
+        egressIpPolicy: 'IPV4_ONLY',
+      });
+
+      await svc.update(
+        'node-1',
+        { egressIpPolicy: 'IPV4_ONLY' } as any,
+        'user-id-1',
+      );
+
+      expect((mockPrisma.node.update as jest.Mock).mock.calls[0][0].data)
+        .toMatchObject({ egressIpPolicy: 'IPV4_ONLY' });
+      expect(mockDeploy.deploy).toHaveBeenCalled();
+    });
+
+    it('requires resetting IPv4-only before switching away from Xray', async () => {
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({
+        ...fakeNode,
+        egressIpPolicy: 'IPV4_ONLY',
+      });
+
+      await expect(svc.update(
+        'node-1',
+        { implementation: 'SING_BOX' } as any,
+        'user-id-1',
+      )).rejects.toThrow('仅 Xray 节点支持');
+
+      expect(mockPrisma.node.update).not.toHaveBeenCalled();
+    });
+
     it('re-encrypts credentials when provided in update', async () => {
       (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(fakeNode);
       (mockPrisma.node.update as jest.Mock).mockResolvedValue(fakeNode);
@@ -1279,6 +1356,74 @@ describe('NodesService', () => {
 
       expect(mockPrisma.node.delete).toHaveBeenCalledWith({ where: { id: 'chain-anytls' } });
       expect(mockPrisma.node.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createChainNode — SOCKS5 exit', () => {
+    it('encrypts the normalized SOCKS5 config without allocating a managed exit port', async () => {
+      const socksCredentials = Buffer.from('proxy-user:proxy-pass').toString('base64url');
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue({
+        id: 'entry-1',
+        ip: '10.0.0.1',
+        sshAuthEnc: 'entry-auth',
+        status: 'ONLINE',
+      });
+      (mockPrisma.node.create as jest.Mock).mockResolvedValue({
+        ...fakeNode,
+        id: 'chain-socks',
+        exitType: 'SOCKS5',
+        socksExitName: 'US exit',
+      });
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({
+        ...fakeNode,
+        id: 'chain-socks',
+        exitType: 'SOCKS5',
+        socksExitName: 'US exit',
+      });
+
+      await svc.createChainNode('user-1', {
+        name: 'SOCKS chain',
+        preset: 'VMESS_TCP',
+        entryServerId: 'entry-1',
+        exitType: 'SOCKS5',
+        socksUri: `socks://${socksCredentials}@proxy.example.com:8001#US%20exit`,
+      });
+
+      const createData = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
+      expect(createData).toMatchObject({
+        serverId: 'entry-1',
+        exitType: 'SOCKS5',
+        exitServerId: null,
+        exitPort: null,
+        chainCredEnc: null,
+        socksExitName: 'US exit',
+      });
+      expect(JSON.parse((mockCrypto.encrypt as jest.Mock).mock.calls[1][0])).toEqual({
+        version: 5,
+        host: 'proxy.example.com',
+        port: 8001,
+        username: 'proxy-user',
+        password: 'proxy-pass',
+      });
+      expect(mockPrisma.node.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects mixed managed and SOCKS5 exit fields', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue({
+        id: 'entry-1',
+        sshAuthEnc: 'entry-auth',
+      });
+
+      await expect(svc.createChainNode('user-1', {
+        name: 'Invalid chain',
+        preset: 'VMESS_TCP',
+        entryServerId: 'entry-1',
+        exitType: 'SOCKS5',
+        exitServerId: 'exit-1',
+        socksUri: 'socks://proxy.example.com:1080',
+      })).rejects.toThrow('必须且只能提供 SOCKS 地址');
+
+      expect(mockPrisma.node.create).not.toHaveBeenCalled();
     });
   });
 });

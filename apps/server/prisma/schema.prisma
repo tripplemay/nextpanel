@@ -127,6 +127,7 @@ model Node {
   tls              TlsMode         @default(NONE)
   listenPort       Int
   domain           String?
+  egressIpPolicy   EgressIpPolicy  @default(AUTO)
   /// AES-GCM encrypted JSON credentials
   credentialsEnc   String
   /// Cloudflare DNS record ID — set for VLESS+WS+TLS nodes, used for cleanup on delete
@@ -155,15 +156,21 @@ model Node {
   exitPort         Int?
   /// Chain proxy: UUID for internal VLESS between entry and exit (AES-GCM encrypted)
   chainCredEnc     String?
+  /// Chain proxy exit kind. Null means this is a direct node.
+  exitType         ChainExitType?
+  /// AES-GCM encrypted SOCKS5 host, port, username, and password.
+  socksExitEnc     String?
+  /// Non-sensitive label parsed from the SOCKS URI fragment.
+  socksExitName    String?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
   snapshots         ConfigSnapshot[]
   subscriptionNodes SubscriptionNode[]
 
-  @@index([userId])
   @@unique([serverId, listenPort])
   @@unique([exitServerId, exitPort])
+  @@index([userId])
 }
 
 enum Protocol {
@@ -209,6 +216,16 @@ enum NodeStatus {
 enum NodeSource {
   MANUAL
   AUTO
+}
+
+enum EgressIpPolicy {
+  AUTO
+  IPV4_ONLY
+}
+
+enum ChainExitType {
+  MANAGED_SERVER
+  SOCKS5
 }
 
 // ──────────────────────────── ConfigSnapshot ────────────────────────────

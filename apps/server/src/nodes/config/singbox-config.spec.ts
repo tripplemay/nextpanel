@@ -256,6 +256,31 @@ describe('generateSingBoxConfig – chain routing', () => {
     expect(cfg.outbounds).toEqual([{ type: 'direct', tag: 'direct' }]);
     expect(cfg.route).toBeUndefined();
   });
+
+  it('routes TCP and UDP through SOCKS5 without a direct outbound', () => {
+    const cfg = parseSingBox({
+      ...baseNode,
+      socksExit: {
+        version: 5,
+        host: 'proxy.example.com',
+        port: 1080,
+        username: 'user',
+        password: 'pass',
+      },
+    });
+
+    expect(cfg.outbounds).toEqual([{
+      type: 'socks',
+      tag: 'chain-exit',
+      server: 'proxy.example.com',
+      server_port: 1080,
+      version: '5',
+      username: 'user',
+      password: 'pass',
+    }]);
+    expect(cfg.route.final).toBe('chain-exit');
+    expect(JSON.stringify(cfg)).not.toContain('"type":"direct"');
+  });
 });
 
 // ── Transport ─────────────────────────────────────────────────────────────────

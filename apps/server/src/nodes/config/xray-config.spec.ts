@@ -53,6 +53,41 @@ describe('generateXrayConfig – structure', () => {
     const cfg = parse(baseNode);
     expect(cfg.outbounds[0].protocol).toBe('freedom');
   });
+
+  it('keeps automatic egress behavior unchanged by default', () => {
+    const cfg = parse(baseNode);
+    expect(cfg.outbounds).toEqual([{ protocol: 'freedom', tag: 'direct' }]);
+    expect(cfg.routing).toBeUndefined();
+  });
+
+  it('forces IPv4 resolution and blocks literal IPv6 destinations', () => {
+    const cfg = parse({ ...baseNode, egressIpPolicy: 'IPV4_ONLY' });
+
+    expect(cfg.outbounds).toEqual([
+      {
+        protocol: 'freedom',
+        tag: 'direct',
+        settings: { domainStrategy: 'ForceIPv4' },
+      },
+      { protocol: 'blackhole', tag: 'blocked' },
+    ]);
+    expect(cfg.routing.rules).toEqual([
+      { type: 'field', ip: ['::/0'], outboundTag: 'blocked' },
+    ]);
+  });
+
+  it('keeps the stats API route ahead of the IPv6 block', () => {
+    const cfg = parse({
+      ...baseNode,
+      egressIpPolicy: 'IPV4_ONLY',
+      statsPort: 30080,
+    });
+
+    expect(cfg.routing.rules).toEqual([
+      { type: 'field', inboundTag: ['api'], outboundTag: 'api' },
+      { type: 'field', ip: ['::/0'], outboundTag: 'blocked' },
+    ]);
+  });
 });
 
 // ── Chain routing ─────────────────────────────────────────────────────────────
@@ -106,6 +141,20 @@ describe('generateXrayConfig – chain routing', () => {
     expect(cfg.outbounds[0].mux).toBeUndefined();
   });
 
+  it('blocks IPv6 before forwarding strict IPv4-only chains', () => {
+    const cfg = parse({ ...chainNode, egressIpPolicy: 'IPV4_ONLY' });
+
+    expect(cfg.outbounds[1]).toEqual({ protocol: 'blackhole', tag: 'blocked' });
+    expect(cfg.routing.rules).toEqual([
+      { type: 'field', ip: ['::/0'], outboundTag: 'blocked' },
+      {
+        type: 'field',
+        inboundTag: ['in-n1'],
+        outboundTag: 'chain-exit',
+      },
+    ]);
+  });
+
   it('rejects partial REALITY credentials on a chain', () => {
     expect(() =>
       parse({
@@ -118,6 +167,44 @@ describe('generateXrayConfig – chain routing', () => {
 
   it('ignores chain-only credentials when chain routing is disabled', () => {
     expect(() => parse({ ...baseNode, chainRealityPublicKey: 'stale-key' })).not.toThrow();
+  });
+
+  it('routes TCP and UDP through an authenticated SOCKS5 exit without direct fallback', () => {
+    const cfg = parse({
+      ...baseNode,
+      socksExit: {
+        version: 5,
+        host: 'proxy.example.com',
+        port: 1080,
+        username: 'user',
+        password: 'pass',
+      },
+    });
+
+    expect(cfg.outbounds).toEqual([{
+      protocol: 'socks',
+      tag: 'chain-exit',
+      settings: {
+        address: 'proxy.example.com',
+        port: 1080,
+        user: 'user',
+        pass: 'pass',
+      },
+      targetStrategy: 'AsIs',
+    }]);
+    expect(cfg.routing.rules).toContainEqual({
+      type: 'field',
+      inboundTag: ['in-n1'],
+      outboundTag: 'chain-exit',
+    });
+    expect(JSON.stringify(cfg)).not.toContain('freedom');
+  });
+
+  it('rejects conflicting managed and SOCKS5 exits', () => {
+    expect(() => parse({
+      ...chainNode,
+      socksExit: { version: 5, host: 'proxy.example.com', port: 1080 },
+    })).toThrow('mutually exclusive');
   });
 });
 

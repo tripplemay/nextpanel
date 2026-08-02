@@ -101,6 +101,25 @@ describe('XrayTestService', () => {
         }),
       );
     });
+
+    it('requires UDP verification for a SOCKS5 chain exit', async () => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(
+        makeNode({
+          protocol: 'HYSTERIA2',
+          exitType: 'SOCKS5',
+          credentialsEnc: JSON.stringify({ password: 'pass' }),
+        }),
+      );
+      (mockSingbox.testNode as jest.Mock).mockResolvedValue(fakeResult);
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
+
+      await svc.testNode('node-1');
+
+      expect(mockSingbox.testNode).toHaveBeenCalledWith(
+        'HYSTERIA2',
+        expect.objectContaining({ requireUdp: true }),
+      );
+    });
   });
 
   describe('testNode — non-HYSTERIA2 path (runTest)', () => {

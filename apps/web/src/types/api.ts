@@ -21,6 +21,7 @@ export interface CreateNodeDto {
   tls?: string;
   listenPort: number;
   domain?: string;
+  egressIpPolicy?: 'AUTO' | 'IPV4_ONLY';
   credentials: Record<string, string>;
   enabled?: boolean;
 }
@@ -37,7 +38,9 @@ export interface CreateChainNodeDto {
   name: string;
   preset: string;
   entryServerId: string;
-  exitServerId: string;
+  exitType?: 'MANAGED_SERVER' | 'SOCKS5';
+  exitServerId?: string;
+  socksUri?: string;
 }
 
 export interface CloudflareSetting {
@@ -218,6 +221,7 @@ export interface Node {
   tls: string;
   listenPort: number;
   domain: string | null;
+  egressIpPolicy: 'AUTO' | 'IPV4_ONLY';
   source: 'MANUAL' | 'AUTO';
   status: string;
   enabled: boolean;
@@ -229,6 +233,8 @@ export interface Node {
   trafficDownBytes: number;
   exitServerId: string | null;
   exitPort: number | null;
+  exitType: 'MANAGED_SERVER' | 'SOCKS5' | null;
+  socksExitName: string | null;
   exitServer?: Pick<Server, 'id' | 'name' | 'ip'> | null;
   createdAt: string;
   updatedAt: string;

@@ -97,7 +97,24 @@ const mockCfService = {
   deleteRecord: jest.fn().mockResolvedValue(undefined),
 } as unknown as import('../cloudflare/cloudflare.service').CloudflareService;
 
-const svc = new NodeDeployService(mockPrisma, mockCrypto, mockOperationLog, mockCertService, mockCfSettings, mockCfService);
+const mockXrayTest = {
+  testNode: jest.fn().mockResolvedValue({
+    reachable: true,
+    latency: 100,
+    message: 'TCP/UDP 连接成功',
+    testedAt: '2026-08-02T00:00:00.000Z',
+  }),
+} as unknown as import('./xray-test/xray-test.service').XrayTestService;
+
+const svc = new NodeDeployService(
+  mockPrisma,
+  mockCrypto,
+  mockOperationLog,
+  mockCertService,
+  mockCfSettings,
+  mockCfService,
+  mockXrayTest,
+);
 
 interface InternalDeployService {
   ensureCoreVersion(
@@ -150,6 +167,7 @@ const fakeNode = {
   serverId: 'srv-1', exitServerId: null,
   protocol: 'VMESS', implementation: 'XRAY', transport: 'TCP', tls: 'NONE',
   listenPort: 10086, domain: null, source: null, userId: 'user-1',
+  egressIpPolicy: 'AUTO',
   credentialsEnc: 'enc:{"uuid":"abc"}',
   server: fakeServer,
 };
@@ -215,6 +233,12 @@ beforeEach(() => {
   (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(null);
   (mockPrisma.node.delete as jest.Mock).mockResolvedValue({});
   (mockOperationLog.createLog as jest.Mock).mockResolvedValue({});
+  (mockXrayTest.testNode as jest.Mock).mockResolvedValue({
+    reachable: true,
+    latency: 100,
+    message: 'TCP/UDP 连接成功',
+    testedAt: '2026-08-02T00:00:00.000Z',
+  });
   // Default exec sequence: happy path for VMESS/XRAY node
   mockExecCommand
     .mockResolvedValueOnce({ stderr: '' })        // daemon-reload
@@ -2347,6 +2371,74 @@ describe('NodeDeployService', () => {
       expect(events).toEqual(['entry-validated', 'exit-active', 'entry-activated']);
     });
 
+    it('deploys only the entry and requires TCP/UDP verification for a SOCKS5 exit', async () => {
+      const socksNode = setupChainNode({
+        protocol: 'VMESS',
+        transport: 'TCP',
+        tls: 'NONE',
+        exitType: 'SOCKS5',
+        exitServerId: null,
+        exitPort: null,
+        chainCredEnc: null,
+        socksExitEnc: 'enc:{"version":5,"host":"proxy.example.com","port":1080,"username":"user","password":"pass"}',
+      });
+      const stagedPath = `/etc/nextpanel/nodes/${socksNode.id}.json.next-tested`;
+      jest.spyOn(internalSvc, 'stageAndValidateConfig').mockResolvedValue(stagedPath);
+      jest.spyOn(internalSvc, 'activateStagedConfig').mockResolvedValue(undefined);
+      const deployExitSpy = jest.spyOn(internalSvc, 'deployChainExit');
+
+      const promise = svc.deploy(socksNode.id);
+      await jest.runAllTimersAsync();
+      const result = await promise;
+
+      expect(result.success).toBe(true);
+      expect(generateConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          socksExit: {
+            version: 5,
+            host: 'proxy.example.com',
+            port: 1080,
+            username: 'user',
+            password: 'pass',
+          },
+        }),
+        expect.any(Object),
+      );
+      expect(deployExitSpy).not.toHaveBeenCalled();
+      expect(mockXrayTest.testNode).toHaveBeenCalledWith(socksNode.id);
+    });
+
+    it('rolls the entry back when SOCKS5 UDP verification fails', async () => {
+      const socksNode = setupChainNode({
+        protocol: 'VMESS',
+        transport: 'TCP',
+        tls: 'NONE',
+        exitType: 'SOCKS5',
+        exitServerId: null,
+        exitPort: null,
+        chainCredEnc: null,
+        socksExitEnc: 'enc:{"version":5,"host":"proxy.example.com","port":1080}',
+      });
+      const stagedPath = `/etc/nextpanel/nodes/${socksNode.id}.json.next-tested`;
+      jest.spyOn(internalSvc, 'stageAndValidateConfig').mockResolvedValue(stagedPath);
+      jest.spyOn(internalSvc, 'activateStagedConfig').mockResolvedValue(undefined);
+      const rollbackSpy = jest.spyOn(internalSvc, 'restoreDeploymentRollback').mockResolvedValue(true);
+      (mockXrayTest.testNode as jest.Mock).mockResolvedValue({
+        reachable: false,
+        latency: -1,
+        message: 'SOCKS5 UDP ASSOCIATE 无响应',
+        testedAt: '2026-08-02T00:00:00.000Z',
+      });
+
+      const promise = svc.deploy(socksNode.id);
+      await jest.runAllTimersAsync();
+      const result = await promise;
+
+      expect(result.success).toBe(false);
+      expect(result.log).toContain('SOCKS5 UDP ASSOCIATE 无响应');
+      expect(rollbackSpy).toHaveBeenCalled();
+    });
+
     it('keeps the active entry config and cleans its stage when exit deployment fails', async () => {
       const chainNode = setupChainNode();
       const stagedPath = `/etc/nextpanel/nodes/${chainNode.id}.json.next-tested`;
@@ -2384,6 +2476,7 @@ describe('NodeDeployService', () => {
       expect(result.success).toBe(true);
       expect(generateConfig).toHaveBeenCalledWith(
         expect.objectContaining({
+          egressIpPolicy: 'AUTO',
           chainUuid: chainCredentials.uuid,
           chainRealityPrivateKey: chainCredentials.realityPrivateKey,
           chainRealityPublicKey: chainCredentials.realityPublicKey,
@@ -2422,6 +2515,7 @@ describe('NodeDeployService', () => {
           id: 'node-1',
           exitPort: 15001,
           chainCredEnc: `enc:${JSON.stringify(chainCredentials)}`,
+          egressIpPolicy: 'AUTO',
         },
         { ip: '1.2.3.4' },
         {
@@ -2455,6 +2549,7 @@ describe('NodeDeployService', () => {
           privateKey: chainCredentials.realityPrivateKey,
           shortId: chainCredentials.shortId,
         },
+        'AUTO',
       );
       expect(execSpy.mock.calls.some(
         (call: unknown[]) => String(call[0]).includes("ufw allow from '1.2.3.4'"),

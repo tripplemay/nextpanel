@@ -32,7 +32,7 @@ export function buildXrayClientConfig(node: NodeTestInfo, localSocksPort: number
           port: localSocksPort,
           listen: '127.0.0.1',
           protocol: 'socks',
-          settings: { udp: false },
+          settings: { udp: true, ip: '127.0.0.1' },
         },
       ],
       outbounds: [

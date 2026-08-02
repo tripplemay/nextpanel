@@ -13,10 +13,17 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
     streamSettings: xrayStreamSettings(node.id, node.transport, node.tls, node.domain, creds),
   };
 
-  // Determine outbound: chain exit or direct freedom
-  const isChain = !!(node.chainExitIp && node.chainExitPort && node.chainUuid);
-  const chainReality = isChain ? getChainRealityClient(node) : null;
-  const outbounds: unknown[] = isChain
+  const isManagedChain = !!(node.chainExitIp && node.chainExitPort && node.chainUuid);
+  const isSocksChain = !!node.socksExit;
+  if (isManagedChain && isSocksChain) {
+    throw new Error('Managed and SOCKS5 chain exits are mutually exclusive');
+  }
+  const isChain = isManagedChain || isSocksChain;
+  const ipv4Only = node.egressIpPolicy === 'IPV4_ONLY';
+  const chainReality = isManagedChain ? getChainRealityClient(node) : null;
+  const outbounds: unknown[] = isSocksChain
+    ? [xraySocksOutbound(node.socksExit!)]
+    : isManagedChain
     ? [
         {
           protocol: 'vless',
@@ -55,12 +62,23 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
             : {}),
         },
       ]
-    : [{ protocol: 'freedom', tag: 'direct' }];
+    : [{
+        protocol: 'freedom',
+        tag: 'direct',
+        ...(ipv4Only ? { settings: { domainStrategy: 'ForceIPv4' } } : {}),
+      }];
+
+  if (ipv4Only) {
+    outbounds.push({ protocol: 'blackhole', tag: 'blocked' });
+  }
 
   if (node.statsPort) {
     const routingRules: unknown[] = [
       { type: 'field', inboundTag: ['api'], outboundTag: 'api' },
     ];
+    if (ipv4Only) {
+      routingRules.push({ type: 'field', ip: ['::/0'], outboundTag: 'blocked' });
+    }
     if (isChain) {
       routingRules.push({ type: 'field', inboundTag: [`in-${node.id}`], outboundTag: 'chain-exit' });
     }
@@ -97,13 +115,39 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
     outbounds: outbounds,
   };
 
-  if (isChain) {
+  if (isChain || ipv4Only) {
+    const routingRules: unknown[] = [];
+    if (ipv4Only) {
+      routingRules.push({ type: 'field', ip: ['::/0'], outboundTag: 'blocked' });
+    }
+    if (isChain) {
+      routingRules.push({
+        type: 'field',
+        inboundTag: [`in-${node.id}`],
+        outboundTag: 'chain-exit',
+      });
+    }
     config.routing = {
-      rules: [{ type: 'field', inboundTag: [`in-${node.id}`], outboundTag: 'chain-exit' }],
+      rules: routingRules,
     };
   }
 
   return JSON.stringify(config, null, 2);
+}
+
+function xraySocksOutbound(socks: NonNullable<NodeInfo['socksExit']>): Record<string, unknown> {
+  return {
+    protocol: 'socks',
+    tag: 'chain-exit',
+    settings: {
+      address: socks.host,
+      port: socks.port,
+      ...(socks.username !== undefined
+        ? { user: socks.username, pass: socks.password ?? '' }
+        : {}),
+    },
+    targetStrategy: 'AsIs',
+  };
 }
 
 function getChainRealityClient(

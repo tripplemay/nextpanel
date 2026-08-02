@@ -11,6 +11,8 @@ import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.ser
 import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
 import { generateConfig, generateChainExitConfig, getBinaryCommand, NodeInfo } from './config/config-generator';
 import { connectSsh, uploadText, binaryExists, whichBinary, detectPackageManager } from './ssh/ssh.util';
+import { parseStoredSocksExit } from './socks-uri';
+import { XrayTestService } from './xray-test/xray-test.service';
 
 export interface DeployResult {
   success: boolean;
@@ -44,6 +46,7 @@ export class NodeDeployService {
     private certService: CertService,
     private cfSettings: CloudflareSettingsService,
     private cfService: CloudflareService,
+    private xrayTest: XrayTestService,
   ) {}
 
   /** Stream deploy logs as SSE events */
@@ -141,6 +144,7 @@ export class NodeDeployService {
       tls: node.tls,
       listenPort: node.listenPort,
       domain: node.domain,
+      egressIpPolicy: node.egressIpPolicy,
       statsPort,
     };
 
@@ -158,6 +162,12 @@ export class NodeDeployService {
       nodeInfo.chainRealityPrivateKey = chain.realityPrivateKey;
       nodeInfo.chainRealityPublicKey = chain.realityPublicKey;
       nodeInfo.chainShortId = chain.shortId;
+    }
+    if (node.exitType === 'SOCKS5') {
+      if (!node.socksExitEnc || node.exitServerId || node.exitPort || node.chainCredEnc) {
+        throw new Error('SOCKS5 链式出口配置不完整');
+      }
+      nodeInfo.socksExit = parseStoredSocksExit(this.crypto.decrypt(node.socksExitEnc));
     }
 
     let configJson: string;
@@ -296,7 +306,10 @@ export class NodeDeployService {
 
       // Validate modern protocol and managed chain configs before exit changes.
       // Activation is deferred until the exit service is confirmed active.
-      const isChainNode = !!(node.exitServerId && node.exitPort && node.chainCredEnc);
+      const isChainNode = !!(
+        (node.exitServerId && node.exitPort && node.chainCredEnc)
+        || (node.exitType === 'SOCKS5' && node.socksExitEnc)
+      );
       const supportsConfigValidation = impl === 'XRAY' || impl === 'SING_BOX';
       if (coreRequirement || (isChainNode && supportsConfigValidation)) {
         stagedConfigPath = await this.stageAndValidateConfig(
@@ -315,7 +328,12 @@ export class NodeDeployService {
         if (!exitServer) throw new Error('出口服务器不存在');
         if (!exitServer.sshAuthEnc) throw new Error('出口服务器凭证已销毁');
         chainExitDeployment = await this.deployChainExit(
-          { id: node.id, exitPort: node.exitPort, chainCredEnc: node.chainCredEnc },
+          {
+            id: node.id,
+            exitPort: node.exitPort,
+            chainCredEnc: node.chainCredEnc,
+            egressIpPolicy: node.egressIpPolicy,
+          },
           { ip: node.server.ip },
           exitServer,
           log,
@@ -409,8 +427,15 @@ export class NodeDeployService {
       const { stdout: activeOut } = await ssh.execCommand(
         `systemctl is-active ${serviceName}`,
       );
-      const isActive = activeOut.trim() === 'active';
+      let isActive = activeOut.trim() === 'active';
       log(`Service status: ${activeOut.trim()}`);
+
+      if (isActive && node.exitType === 'SOCKS5') {
+        log('正在验证 SOCKS5 出口的 TCP 与 UDP 端到端连通性...');
+        const connectivity = await this.xrayTest.testNode(node.id);
+        isActive = connectivity.reachable;
+        log(connectivity.message);
+      }
 
       if (!isActive) {
         const { stdout: journalOut } = await ssh.execCommand(
@@ -979,7 +1004,7 @@ export class NodeDeployService {
   // ── Chain exit deployment ─────────────────────────────────────────────────
 
   private async deployChainExit(
-    node: { id: string; exitPort: number; chainCredEnc: string },
+    node: { id: string; exitPort: number; chainCredEnc: string; egressIpPolicy: string },
     entryServer: { ip: string },
     exitServer: { id: string; ip: string; sshPort: number; sshUser: string; sshAuthType: string; sshAuthEnc: string },
     log: (msg: string) => void,
@@ -1024,6 +1049,7 @@ export class NodeDeployService {
         chain.realityPrivateKey && chain.shortId
           ? { privateKey: chain.realityPrivateKey, shortId: chain.shortId }
           : undefined,
+        node.egressIpPolicy,
       );
       const exitConfigPath = `/etc/nextpanel/nodes/chain-${node.id}.json`;
       const exitServiceName = `nextpanel-chain-${node.id}`;

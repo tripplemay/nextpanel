@@ -4,7 +4,8 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { execFile, spawn, type ChildProcess } from 'child_process';
 import { Injectable, Logger } from '@nestjs/common';
-import { TestResult } from '../xray-test/xray-test.service';
+import type { TestResult } from '../xray-test/xray-test.service';
+import { probeSocks5Udp } from '../socks5-udp-probe';
 
 const TEST_URL = 'http://www.gstatic.com/generate_204';
 const SINGBOX_BINARY = process.platform === 'darwin'
@@ -20,6 +21,7 @@ export interface SingboxNodeInfo {
   port: number;
   domain: string | null;
   credentials: Record<string, string>;
+  requireUdp?: boolean;
 }
 
 @Injectable()
@@ -46,8 +48,17 @@ export class SingboxTestService {
 
     try {
       await this.waitForPort(socksPort, SINGBOX_STARTUP_MS, ready);
-      const { reachable, latency, message } = await this.curlTest(socksPort);
-      return { reachable, latency, message, testedAt };
+      const tcpResult = await this.curlTest(socksPort);
+      if (!tcpResult.reachable || !node.requireUdp) {
+        return { ...tcpResult, testedAt };
+      }
+      const udpLatency = await probeSocks5Udp('127.0.0.1', socksPort);
+      return {
+        reachable: true,
+        latency: tcpResult.latency,
+        message: `TCP/UDP 连接成功，TCP ${tcpResult.latency}ms，UDP ${udpLatency}ms`,
+        testedAt,
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return { reachable: false, latency: -1, message: msg, testedAt };

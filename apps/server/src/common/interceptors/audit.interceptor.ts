@@ -65,7 +65,7 @@ export class AuditInterceptor implements NestInterceptor {
         const body = req.body;
         const diff =
           body && typeof body === 'object' && Object.keys(body).length > 0
-            ? (body as Record<string, unknown>)
+            ? redactSensitiveAuditValues(body as Record<string, unknown>)
             : undefined;
 
         void this.auditService.log({
@@ -80,4 +80,25 @@ export class AuditInterceptor implements NestInterceptor {
       }),
     );
   }
+}
+
+const SENSITIVE_AUDIT_KEY = /(?:password|secret|token|credentials?|sshAuth|socksUri|apiKey)$/i;
+
+export function redactSensitiveAuditValues(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => {
+      if (SENSITIVE_AUDIT_KEY.test(key)) return [key, '[REDACTED]'];
+      if (Array.isArray(item)) {
+        return [key, item.map((entry) =>
+          entry && typeof entry === 'object'
+            ? redactSensitiveAuditValues(entry as Record<string, unknown>)
+            : entry,
+        )];
+      }
+      if (item && typeof item === 'object') {
+        return [key, redactSensitiveAuditValues(item as Record<string, unknown>)];
+      }
+      return [key, item];
+    }),
+  );
 }

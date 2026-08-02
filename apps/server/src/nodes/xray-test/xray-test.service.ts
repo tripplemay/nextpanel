@@ -7,6 +7,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { SingboxTestService } from '../singbox-test/singbox-test.service';
+import { probeSocks5Udp } from '../socks5-udp-probe';
 import { buildXrayClientConfig } from './config-builder';
 
 export interface TestResult {
@@ -64,6 +65,7 @@ export class XrayTestService {
           port: node.listenPort,
           domain: node.domain,
           credentials,
+          requireUdp: node.exitType === 'SOCKS5',
         }),
       );
     } else {
@@ -76,6 +78,7 @@ export class XrayTestService {
           port: node.listenPort,
           domain: node.domain,
           credentials,
+          requireUdp: node.exitType === 'SOCKS5',
         }),
       );
     }
@@ -130,6 +133,7 @@ export class XrayTestService {
     port: number;
     domain: string | null;
     credentials: Record<string, string>;
+    requireUdp?: boolean;
   }): Promise<TestResult> {
     if (this.usesSingbox(params.protocol)) {
       return this.withSemaphore(() =>
@@ -138,6 +142,7 @@ export class XrayTestService {
           port: params.port,
           domain: params.domain,
           credentials: params.credentials,
+          requireUdp: params.requireUdp,
         }),
       );
     }
@@ -158,6 +163,7 @@ export class XrayTestService {
     port: number;
     domain: string | null;
     credentials: Record<string, string>;
+    requireUdp?: boolean;
   }): Promise<TestResult> {
     const testedAt = new Date().toISOString();
     const id = crypto.randomUUID();
@@ -183,8 +189,17 @@ export class XrayTestService {
 
     try {
       await this.waitForPort(socksPort, XRAY_STARTUP_MS);
-      const { reachable, latency, message } = await this.curlTest(socksPort);
-      return { reachable, latency, message, testedAt };
+      const tcpResult = await this.curlTest(socksPort);
+      if (!tcpResult.reachable || !node.requireUdp) {
+        return { ...tcpResult, testedAt };
+      }
+      const udpLatency = await probeSocks5Udp('127.0.0.1', socksPort);
+      return {
+        reachable: true,
+        latency: tcpResult.latency,
+        message: `TCP/UDP 连接成功，TCP ${tcpResult.latency}ms，UDP ${udpLatency}ms`,
+        testedAt,
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return { reachable: false, latency: -1, message: msg, testedAt };
