@@ -106,6 +106,13 @@ const mockXrayTest = {
   }),
 } as unknown as import('./xray-test/xray-test.service').XrayTestService;
 
+const mockSocksExitResolver = {
+  resolve: jest.fn().mockResolvedValue({
+    candidates: [{ address: '203.0.113.10', sources: ['test resolver'] }],
+    warnings: [],
+  }),
+} as unknown as import('./socks-exit-resolver.service').SocksExitResolverService;
+
 const svc = new NodeDeployService(
   mockPrisma,
   mockCrypto,
@@ -114,6 +121,7 @@ const svc = new NodeDeployService(
   mockCfSettings,
   mockCfService,
   mockXrayTest,
+  mockSocksExitResolver,
 );
 
 interface InternalDeployService {
@@ -238,6 +246,10 @@ beforeEach(() => {
     latency: 100,
     message: 'TCP/UDP 连接成功',
     testedAt: '2026-08-02T00:00:00.000Z',
+  });
+  (mockSocksExitResolver.resolve as jest.Mock).mockResolvedValue({
+    candidates: [{ address: '203.0.113.10', sources: ['test resolver'] }],
+    warnings: [],
   });
   // Default exec sequence: happy path for VMESS/XRAY node
   mockExecCommand
@@ -2334,6 +2346,15 @@ describe('NodeDeployService', () => {
         if (command === '/usr/local/bin/xray version 2>&1') {
           return { code: 0, stdout: 'Xray 26.2.6 (Xray, Penetrates Everything.)', stderr: '' };
         }
+        if (command === 'command -v curl') {
+          return { code: 0, stdout: '/usr/bin/curl', stderr: '' };
+        }
+        if (command.startsWith('getent ahosts')) {
+          return { code: 0, stdout: '192.0.2.10', stderr: '' };
+        }
+        if (command.includes("-w '%{http_code}'")) {
+          return { code: 0, stdout: '204', stderr: '' };
+        }
         if (command.includes('systemctl is-active')) {
           return { code: 0, stdout: 'active', stderr: '' };
         }
@@ -2396,7 +2417,7 @@ describe('NodeDeployService', () => {
         expect.objectContaining({
           socksExit: {
             version: 5,
-            host: 'proxy.example.com',
+            host: '203.0.113.10',
             port: 1080,
             username: 'user',
             password: 'pass',
@@ -2437,6 +2458,33 @@ describe('NodeDeployService', () => {
       expect(result.success).toBe(false);
       expect(result.log).toContain('SOCKS5 UDP ASSOCIATE 无响应');
       expect(rollbackSpy).toHaveBeenCalled();
+    });
+
+    it('fails before replacing the service when no SOCKS5 address can be resolved', async () => {
+      const socksNode = setupChainNode({
+        protocol: 'VMESS',
+        transport: 'TCP',
+        tls: 'NONE',
+        exitType: 'SOCKS5',
+        exitServerId: null,
+        exitPort: null,
+        chainCredEnc: null,
+        socksExitEnc: 'enc:{"version":5,"host":"proxy.example.com","port":1080}',
+      });
+      (mockSocksExitResolver.resolve as jest.Mock).mockResolvedValue({
+        candidates: [],
+        warnings: ['Google DoH A: timeout'],
+      });
+      const stageSpy = jest.spyOn(internalSvc, 'stageAndValidateConfig');
+
+      const result = await svc.deploy(socksNode.id);
+
+      expect(result.success).toBe(false);
+      expect(result.log).toContain('没有可用的 A/AAAA 候选地址');
+      expect(stageSpy).not.toHaveBeenCalled();
+      expect(mockExecCommand.mock.calls.some(
+        (call) => String(call[0]).includes('systemctl stop nextpanel-'),
+      )).toBe(false);
     });
 
     it('keeps the active entry config and cleans its stage when exit deployment fails', async () => {

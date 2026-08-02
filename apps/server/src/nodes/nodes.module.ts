@@ -11,10 +11,11 @@ import { AuditModule } from '../audit/audit.module';
 import { OperationLogModule } from '../operation-log/operation-log.module';
 import { CloudflareModule } from '../cloudflare/cloudflare.module';
 import { CertModule } from '../common/cert/cert.module';
+import { SocksExitResolverService } from './socks-exit-resolver.service';
 
 @Module({
   imports: [AuditModule, OperationLogModule, CloudflareModule, CertModule],
-  providers: [NodesService, NodeDeployService, CryptoService, XrayTestService, SingboxTestService, ConnectivityScheduler, CertRenewalScheduler],
+  providers: [NodesService, NodeDeployService, CryptoService, XrayTestService, SingboxTestService, SocksExitResolverService, ConnectivityScheduler, CertRenewalScheduler],
   controllers: [NodesController],
   exports: [NodesService, NodeDeployService, XrayTestService, SingboxTestService],
 })

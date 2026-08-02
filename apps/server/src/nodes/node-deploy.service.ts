@@ -1,4 +1,5 @@
 import * as crypto from 'crypto';
+import { isIP } from 'net';
 import { Injectable, Logger, MessageEvent, NotFoundException, BadRequestException } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { NodeSSH } from 'node-ssh';
@@ -11,8 +12,13 @@ import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.ser
 import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
 import { generateConfig, generateChainExitConfig, getBinaryCommand, NodeInfo } from './config/config-generator';
 import { connectSsh, uploadText, binaryExists, whichBinary, detectPackageManager } from './ssh/ssh.util';
-import { parseStoredSocksExit } from './socks-uri';
+import { parseStoredSocksExit, type Socks5ExitConfig } from './socks-uri';
 import { XrayTestService } from './xray-test/xray-test.service';
+import {
+  buildSocksExitProbeConfig,
+  SocksExitResolverService,
+  type SocksExitCandidate,
+} from './socks-exit-resolver.service';
 
 export interface DeployResult {
   success: boolean;
@@ -47,6 +53,7 @@ export class NodeDeployService {
     private cfSettings: CloudflareSettingsService,
     private cfService: CloudflareService,
     private xrayTest: XrayTestService,
+    private socksExitResolver: SocksExitResolverService,
   ) {}
 
   /** Stream deploy logs as SSE events */
@@ -170,24 +177,26 @@ export class NodeDeployService {
       nodeInfo.socksExit = parseStoredSocksExit(this.crypto.decrypt(node.socksExitEnc));
     }
 
-    let configJson: string;
-    try {
-      configJson = generateConfig(nodeInfo, credentials);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log(`Configuration generation failed: ${message}`);
-      await this.finalize(
-        nodeId,
-        node.name,
-        false,
-        logs,
-        '',
-        actorId,
-        startMs,
-        correlationId,
-        statsPort,
-      );
-      return { success: false, log: logs.join('\n') };
+    let configJson = '';
+    if (!nodeInfo.socksExit) {
+      try {
+        configJson = generateConfig(nodeInfo, credentials);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log(`Configuration generation failed: ${message}`);
+        await this.finalize(
+          nodeId,
+          node.name,
+          false,
+          logs,
+          '',
+          actorId,
+          startMs,
+          correlationId,
+          statsPort,
+        );
+        return { success: false, log: logs.join('\n') };
+      }
     }
     const configPath = `/etc/nextpanel/nodes/${node.id}.json`;
     const serviceName = `nextpanel-${node.id}`;
@@ -267,6 +276,18 @@ export class NodeDeployService {
           coreRequirement.minimumVersion,
           log,
         );
+      }
+
+      if (nodeInfo.socksExit) {
+        nodeInfo.socksExit = await this.selectReachableSocksExit(
+          ssh,
+          bin,
+          impl,
+          node.id,
+          nodeInfo.socksExit,
+          log,
+        );
+        configJson = generateConfig(nodeInfo, credentials);
       }
 
       // ── 5. Provision TLS certificate ───────────────────────────────────────
@@ -560,6 +581,177 @@ export class NodeDeployService {
         log: logs.join('\n'),
         ...(rollbackFailed ? { rollbackFailed: true } : {}),
       };
+    }
+  }
+
+  private async selectReachableSocksExit(
+    ssh: NodeSSH,
+    bin: string,
+    implementation: string,
+    nodeId: string,
+    socks: Socks5ExitConfig,
+    log: (message: string) => void,
+  ): Promise<Socks5ExitConfig> {
+    if (!['XRAY', 'V2RAY', 'SING_BOX'].includes(implementation)) {
+      throw new Error(`SOCKS5 链式出口不支持 ${implementation} 实现`);
+    }
+
+    const curlCheck = await ssh.execCommand('command -v curl');
+    if ((curlCheck.code ?? 0) !== 0 || !curlCheck.stdout.trim()) {
+      throw new Error('入口服务器缺少 curl，无法执行 SOCKS5 出口端到端预检');
+    }
+
+    let entrySystemAddresses: string[] = [];
+    if (!isIpAddress(socks.host)) {
+      log(`正在解析 SOCKS5 出口域名 ${socks.host}...`);
+      const entryLookup = await ssh.execCommand(
+        `getent ahosts ${shellQuote(socks.host)} 2>/dev/null | awk '{print $1}'`,
+      );
+      entrySystemAddresses = entryLookup.stdout
+        .split(/\s+/)
+        .map((value) => value.trim())
+        .filter(isIpAddress);
+    }
+
+    const resolution = await this.socksExitResolver.resolve(socks.host, entrySystemAddresses);
+    if (resolution.candidates.length === 0) {
+      const detail = resolution.warnings.length > 0
+        ? `；受控 DNS 错误：${resolution.warnings.slice(0, 2).join('；')}`
+        : '';
+      throw new Error(`SOCKS5 出口域名 ${socks.host} 没有可用的 A/AAAA 候选地址${detail}`);
+    }
+
+    log(`SOCKS5 出口候选地址：${resolution.candidates.map((candidate) =>
+      `${candidate.address}（${candidate.sources.join('、')}）`).join('；')}`);
+    if (resolution.warnings.length > 0) {
+      log(`受控 DNS 有 ${resolution.warnings.length} 个查询未成功，继续使用已获得的候选地址`);
+    }
+
+    await ssh.execCommand(
+      `find /tmp -maxdepth 1 -type f -name 'nextpanel-socks-probe-*' -mmin +30 -delete 2>/dev/null || true`,
+    );
+
+    const retryCandidates: SocksExitCandidate[] = [];
+    const failures: string[] = [];
+    for (const candidate of resolution.candidates) {
+      log(`正在从入口服务器探测 SOCKS5 ${candidate.address}:${socks.port}...`);
+      const result = await this.probeSocksExitCandidate(
+        ssh,
+        bin,
+        implementation,
+        nodeId,
+        socks,
+        candidate.address,
+      );
+      if (result.reachable) {
+        log(`SOCKS5 候选 ${candidate.address}:${socks.port} 认证及 CONNECT 成功（${result.latency}ms），运行配置将固定使用该地址`);
+        return { ...socks, host: candidate.address };
+      }
+      log(`SOCKS5 候选 ${candidate.address}:${socks.port} 不可用：${result.message}`);
+      failures.push(`${candidate.address}: ${result.message}`);
+      if (result.retryable) retryCandidates.push(candidate);
+    }
+
+    if (retryCandidates.length > 0) {
+      log(`正在重试 ${retryCandidates.length} 个可能瞬时失败的 SOCKS5 候选地址...`);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      for (const candidate of retryCandidates) {
+        const result = await this.probeSocksExitCandidate(
+          ssh,
+          bin,
+          implementation,
+          nodeId,
+          socks,
+          candidate.address,
+        );
+        if (result.reachable) {
+          log(`SOCKS5 候选 ${candidate.address}:${socks.port} 重试成功（${result.latency}ms），运行配置将固定使用该地址`);
+          return { ...socks, host: candidate.address };
+        }
+        log(`SOCKS5 候选 ${candidate.address}:${socks.port} 重试失败：${result.message}`);
+      }
+    }
+
+    throw new Error(`所有 SOCKS5 出口候选地址均不可用：${failures.join('；')}`);
+  }
+
+  private async probeSocksExitCandidate(
+    ssh: NodeSSH,
+    bin: string,
+    implementation: string,
+    nodeId: string,
+    socks: Socks5ExitConfig,
+    address: string,
+  ): Promise<SocksExitProbeResult> {
+    const id = `${nodeId}-${crypto.randomUUID()}`;
+    const prefix = `/tmp/nextpanel-socks-probe-${id}`;
+    const configPath = `${prefix}.json`;
+    const logPath = `${prefix}.log`;
+    const pidPath = `${prefix}.pid`;
+    const localPort = crypto.randomInt(20000, 50000);
+    const config = buildSocksExitProbeConfig(implementation, socks, address, localPort);
+
+    try {
+      await uploadText(ssh, config, configPath, 0o600);
+      const start = await ssh.execCommand(
+        `umask 077; ${shellQuote(bin)} run -c ${shellQuote(configPath)} ` +
+        `>${shellQuote(logPath)} 2>&1 & printf '%s' $! > ${shellQuote(pidPath)}`,
+      );
+      if ((start.code ?? 0) !== 0) {
+        return {
+          reachable: false,
+          latency: -1,
+          retryable: false,
+          message: `临时代理启动失败${commandDetail(start.stdout, start.stderr) ? `：${commandDetail(start.stdout, start.stderr)}` : ''}`,
+        };
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      const active = await ssh.execCommand(
+        `test -s ${shellQuote(pidPath)} && kill -0 "$(cat ${shellQuote(pidPath)})" 2>/dev/null`,
+      );
+      if ((active.code ?? 0) !== 0) {
+        const logs = await ssh.execCommand(`tail -n 8 ${shellQuote(logPath)} 2>/dev/null || true`);
+        return {
+          reachable: false,
+          latency: -1,
+          retryable: true,
+          message: `临时代理异常退出${logs.stdout.trim() ? `：${commandDetail(logs.stdout)}` : ''}`,
+        };
+      }
+
+      const startedAt = Date.now();
+      const probe = await ssh.execCommand(
+        `curl -sS -o /dev/null -w '%{http_code}' ` +
+        `--socks5-hostname ${shellQuote(`127.0.0.1:${localPort}`)} ` +
+        `--connect-timeout 5 --max-time 9 ` +
+        `${shellQuote('http://www.gstatic.com/generate_204')}`,
+      );
+      const code = probe.code ?? 0;
+      const httpCode = probe.stdout.trim();
+      if (code === 0 && httpCode === '204') {
+        return {
+          reachable: true,
+          latency: Date.now() - startedAt,
+          retryable: false,
+          message: '连接成功',
+        };
+      }
+
+      const logs = await ssh.execCommand(`tail -n 8 ${shellQuote(logPath)} 2>/dev/null || true`);
+      return {
+        reachable: false,
+        latency: -1,
+        retryable: code === 7 || code === 52 || code === 56,
+        message: describeSocksExitProbeFailure(code, httpCode, probe.stderr, logs.stdout),
+      };
+    } finally {
+      await ssh.execCommand(
+        `if test -s ${shellQuote(pidPath)}; then ` +
+        `pid="$(cat ${shellQuote(pidPath)})"; kill "$pid" 2>/dev/null || true; ` +
+        `sleep 0.1; kill -9 "$pid" 2>/dev/null || true; fi; ` +
+        `rm -f -- ${shellQuote(configPath)} ${shellQuote(logPath)} ${shellQuote(pidPath)}`,
+      );
     }
   }
 
@@ -2426,6 +2618,13 @@ interface ChainExitDeployment {
   exitPort: number;
 }
 
+interface SocksExitProbeResult {
+  reachable: boolean;
+  latency: number;
+  retryable: boolean;
+  message: string;
+}
+
 class DeploymentRollbackFailureError extends Error {
   readonly rollbackFailed = true;
 
@@ -2467,6 +2666,29 @@ function commandDetail(stdout?: string, stderr?: string): string {
     .trim()
     .replace(/\s*\n\s*/g, ' | ');
   return detail.length > 1500 ? `${detail.slice(0, 1500)}...` : detail;
+}
+
+function isIpAddress(value: string): boolean {
+  return isIP(value) !== 0;
+}
+
+function describeSocksExitProbeFailure(
+  exitCode: number,
+  httpCode: string,
+  stderr: string,
+  coreLogs: string,
+): string {
+  let reason: string;
+  if (exitCode === 28) reason = 'TCP、SOCKS 握手或目标 CONNECT 超时';
+  else if (exitCode === 56) reason = 'SOCKS 连接被上游重置';
+  else if (exitCode === 97) reason = 'SOCKS5 握手、认证或 CONNECT 被拒绝';
+  else if (exitCode === 7) reason = '临时代理连接失败';
+  else if (exitCode === 52) reason = '上游建立连接后未返回数据';
+  else if (exitCode === 0) reason = `目标返回 HTTP ${httpCode || '无响应'}`;
+  else reason = `curl 退出码 ${exitCode}`;
+
+  const detail = commandDetail(stderr, coreLogs);
+  return detail ? `${reason}；诊断：${detail}` : reason;
 }
 
 /**
