@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import {
-  App, Button, Table, Tag, Space, Modal, Input, Popconfirm, Typography, Tooltip, theme as antdTheme,
+  App, Button, Table, Tag, Space, Modal, Input, Popconfirm, Typography, Tooltip, Select, theme as antdTheme,
 } from 'antd';
 import { DeleteOutlined, ApiOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -66,6 +66,7 @@ export default function ExternalNodesPage() {
   const { token } = antdTheme.useToken();
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
+  const [importProtocol, setImportProtocol] = useState<'HTTP' | 'SOCKS5'>('HTTP');
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, ConnectivityResult>>({});
 
@@ -76,12 +77,13 @@ export default function ExternalNodesPage() {
   });
 
   const importMutation = useMutation({
-    mutationFn: (text: string) => externalNodesApi.import(text),
+    mutationFn: (text: string) => externalNodesApi.import(text, importProtocol),
     onSuccess: (res) => {
       const { success, failed } = res.data;
       qc.invalidateQueries({ queryKey: ['external-nodes'] });
       setImportOpen(false);
       setImportText('');
+      setImportProtocol('HTTP');
       if (success > 0) {
         message.success(`导入成功 ${success} 个节点${failed > 0 ? `，${failed} 个解析失败` : ''}`);
       } else {
@@ -231,7 +233,7 @@ export default function ExternalNodesPage() {
       <Modal
         open={importOpen}
         title="导入节点"
-        onCancel={() => { setImportOpen(false); setImportText(''); }}
+        onCancel={() => { setImportOpen(false); setImportText(''); setImportProtocol('HTTP'); }}
         onOk={() => { if (importText.trim()) importMutation.mutate(importText.trim()); }}
         okText="导入"
         confirmLoading={importMutation.isPending}
@@ -239,8 +241,14 @@ export default function ExternalNodesPage() {
         style={{ maxWidth: '95vw' }}
       >
         <div style={{ marginBottom: 8, color: token.colorTextSecondary, fontSize: 13 }}>
-          支持以下格式：订阅链接（https://...）、Base64 编码的订阅内容、单个或多个 URI（vmess:// vless:// ss:// socks:// socks5:// trojan:// hysteria2://）
+          支持订阅链接、Base64 订阅内容、节点 URI，以及 MiyaIP 四段格式（主机:端口:账号:密码）。无 scheme 的 MiyaIP 条目按所选协议导入。
         </div>
+        <Select
+          value={importProtocol}
+          onChange={setImportProtocol}
+          options={[{ label: 'MiyaIP 无 scheme：HTTP', value: 'HTTP' }, { label: 'MiyaIP 无 scheme：SOCKS5', value: 'SOCKS5' }]}
+          style={{ width: '100%', marginBottom: 8 }}
+        />
         <TextArea
           rows={8}
           value={importText}

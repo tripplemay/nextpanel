@@ -110,4 +110,27 @@ describe('buildXrayClientConfig', () => {
       },
     });
   });
+
+  it('builds an authenticated HTTP outbound', () => {
+    const config = JSON.parse(buildXrayClientConfig({
+      protocol: 'HTTP',
+      transport: null,
+      tls: 'NONE',
+      host: 'proxy.example.com',
+      port: 8080,
+      domain: null,
+      credentials: { username: 'proxy-user', password: 'proxy-pass' },
+    }, 20102));
+
+    expect(config.outbounds[0]).toMatchObject({
+      protocol: 'http',
+      settings: {
+        servers: [{
+          address: 'proxy.example.com',
+          port: 8080,
+          users: [{ user: 'proxy-user', pass: 'proxy-pass' }],
+        }],
+      },
+    });
+  });
 });

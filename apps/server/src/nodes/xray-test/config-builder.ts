@@ -13,7 +13,7 @@ import { REALITY_DEFAULT_SNI, REALITY_FLOW } from '../protocols/reality';
 import { parseXhttpExtra, parseXhttpHost, parseXhttpMode } from '../protocols/xhttp';
 
 export interface NodeTestInfo {
-  protocol: string;      // VMESS | VLESS | TROJAN | SHADOWSOCKS
+  protocol: string;      // VMESS | VLESS | TROJAN | SHADOWSOCKS | SOCKS5 | HTTP
   transport: string | null;
   tls: string;           // NONE | TLS | REALITY
   host: string;          // server IP
@@ -59,6 +59,7 @@ function clientProtocol(protocol: string): string {
     TROJAN: 'trojan',
     SHADOWSOCKS: 'shadowsocks',
     SOCKS5: 'socks',
+    HTTP: 'http',
   };
   return map[protocol] ?? protocol.toLowerCase();
 }
@@ -122,6 +123,17 @@ function clientSettings(node: NodeTestInfo): unknown {
         ...(c.username !== undefined
           ? { user: c.username, pass: c.password ?? '' }
           : {}),
+      };
+
+    case 'HTTP':
+      return {
+        servers: [{
+          address: host,
+          port,
+          ...(c.username !== undefined
+            ? { users: [{ user: c.username, pass: c.password ?? '' }] }
+            : {}),
+        }],
       };
 
     default:

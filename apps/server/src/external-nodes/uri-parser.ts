@@ -1,6 +1,7 @@
 /**
  * Pure URI parsing functions for external node import.
- * Supports: vmess://, vless://, ss://, socks://, socks5://, trojan://, hysteria2://
+ * Supports: vmess://, vless://, ss://, socks://, socks5://, http://, https://,
+ * trojan://, hysteria2://, and MiyaIP host:port:username:password entries.
  * Also handles Base64-encoded subscription content (multi-line URIs).
  */
 
@@ -27,6 +28,8 @@ export interface ExternalNodeData {
   path?: string;
   rawUri: string;
 }
+
+export type BareProxyProtocol = 'HTTP' | 'SOCKS5';
 
 function safeDecodeBase64(s: string): string {
   const padded = s.replace(/-/g, '+').replace(/_/g, '/');
@@ -322,7 +325,75 @@ function parseHysteria2(uri: string): ExternalNodeData | null {
   }
 }
 
-export function parseUri(uri: string): ExternalNodeData | null {
+function parseHttp(uri: string): ExternalNodeData | null {
+  try {
+    const parsed = new URL(uri);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    const port = parsed.port ? Number(parsed.port) : parsed.protocol === 'https:' ? 443 : 80;
+    if (!parsed.hostname || !Number.isInteger(port) || port < 1 || port > 65535) return null;
+    const username = parsed.username ? safeDecodeURIComponent(parsed.username) : undefined;
+    const password = parsed.password ? safeDecodeURIComponent(parsed.password) : undefined;
+    if ((username === undefined) !== (password === undefined)) return null;
+    const fragment = parsed.hash ? parsed.hash.slice(1) : null;
+    const address = parsed.hostname.startsWith('[') && parsed.hostname.endsWith(']')
+      ? parsed.hostname.slice(1, -1)
+      : parsed.hostname;
+    return {
+      name: parseName(fragment),
+      protocol: 'HTTP',
+      address,
+      port,
+      username,
+      password,
+      tls: parsed.protocol === 'https:' ? 'TLS' : 'NONE',
+      sni: parsed.protocol === 'https:' ? address : undefined,
+      rawUri: uri,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** MiyaIP compact format: host:port:username:password (HTTP or SOCKS5). */
+function parseBareProxy(value: string, protocol: BareProxyProtocol): ExternalNodeData | null {
+  const trimmed = value.trim();
+  let address: string;
+  let portText: string;
+  let username: string;
+  let password: string;
+
+  if (trimmed.startsWith('[')) {
+    const closingBracket = trimmed.indexOf(']');
+    if (closingBracket <= 1 || trimmed[closingBracket + 1] !== ':') return null;
+    const fields = trimmed.slice(closingBracket + 2).split(':');
+    if (fields.length < 3) return null;
+    address = trimmed.slice(1, closingBracket);
+    [portText, username] = fields;
+    password = fields.slice(2).join(':');
+  } else {
+    const fields = trimmed.split(':');
+    if (fields.length < 4) return null;
+    [address, portText, username] = fields;
+    password = fields.slice(3).join(':');
+  }
+
+  const parsedHost = parseHostPort(`${address.includes(':') ? `[${address}]` : address}:${portText}`);
+  if (!parsedHost || !username || !password) return null;
+  if (/^[\u0000-\u001f\u007f]/.test(username) || /[\u0000-\u001f\u007f]/.test(username + password)) return null;
+
+  return {
+    name: 'MiyaIP',
+    protocol,
+    address: parsedHost.address,
+    port: parsedHost.port,
+    username,
+    password,
+    tls: 'NONE',
+    rawUri: trimmed,
+  };
+}
+
+export function parseUri(uri: string, bareProtocol: BareProxyProtocol = 'HTTP'): ExternalNodeData | null {
   const trimmed = uri.trim();
   if (trimmed.startsWith('vmess://')) return parseVmess(trimmed);
   if (trimmed.startsWith('vless://')) return parseVless(trimmed);
@@ -330,16 +401,23 @@ export function parseUri(uri: string): ExternalNodeData | null {
   if (/^socks5?:\/\//i.test(trimmed)) return parseSocks(trimmed);
   if (trimmed.startsWith('trojan://')) return parseTrojan(trimmed);
   if (trimmed.startsWith('hysteria2://') || trimmed.startsWith('hy2://')) return parseHysteria2(trimmed);
-  return null;
+  if (/^https?:\/\//i.test(trimmed)) return parseHttp(trimmed);
+  return parseBareProxy(trimmed, bareProtocol);
 }
 
 /** Parse raw text: either a single/multi-line URI list, or a Base64 subscription. */
-export function parseSubscriptionText(text: string): { nodes: ExternalNodeData[]; failed: number } {
+export function parseSubscriptionText(
+  text: string,
+  bareProtocol: BareProxyProtocol = 'HTTP',
+): { nodes: ExternalNodeData[]; failed: number } {
   const trimmed = text.trim();
   let lines: string[];
 
-  // Detect Base64: no newlines and decodes to lines containing ://
-  if (!trimmed.includes('\n') && !trimmed.includes('://')) {
+  // MiyaIP compact entries contain no URI scheme and can otherwise look like
+  // an unpadded Base64 string. Check the single-entry form before decoding.
+  if (parseBareProxy(trimmed, bareProtocol)) {
+    lines = [trimmed];
+  } else if (!trimmed.includes('\n') && !trimmed.includes('://')) {
     try {
       const decoded = safeDecodeBase64(trimmed);
       lines = decoded.split(/\r?\n/).filter((l) => l.trim());
@@ -354,7 +432,7 @@ export function parseSubscriptionText(text: string): { nodes: ExternalNodeData[]
   let failed = 0;
 
   for (const line of lines) {
-    const result = parseUri(line.trim());
+    const result = parseUri(line.trim(), bareProtocol);
     if (result) nodes.push(result);
     else failed++;
   }

@@ -1,6 +1,32 @@
 import { parseSubscriptionText, parseUri } from './uri-parser';
 
 describe('external node URI parser', () => {
+  it('parses MiyaIP host:port:username:password entries as HTTP by default', () => {
+    expect(parseUri('202.58.222.43:8022:xseswzdrqe:ipimtwmiiimyu')).toMatchObject({
+      name: 'MiyaIP',
+      protocol: 'HTTP',
+      address: '202.58.222.43',
+      port: 8022,
+      username: 'xseswzdrqe',
+      password: 'ipimtwmiiimyu',
+      tls: 'NONE',
+    });
+  });
+
+  it('supports selecting SOCKS5 for MiyaIP entries without a scheme', () => {
+    expect(parseSubscriptionText('202.58.222.43:8022:xseswzdrqe:ipimtwmiiimyu', 'SOCKS5')).toMatchObject({
+      failed: 0,
+      nodes: [expect.objectContaining({ protocol: 'SOCKS5', username: 'xseswzdrqe' })],
+    });
+  });
+
+  it('parses authenticated HTTP proxy URIs', () => {
+    expect(parseUri('http://proxy-user:proxy-pass@proxy.example.com:8080#HTTP')).toMatchObject({
+      name: 'HTTP', protocol: 'HTTP', address: 'proxy.example.com', port: 8080,
+      username: 'proxy-user', password: 'proxy-pass', tls: 'NONE',
+    });
+  });
+
   it('parses Base64-authenticated socks URI', () => {
     const credentials = Buffer.from('proxy-user:proxy-pass').toString('base64url');
     const node = parseUri(

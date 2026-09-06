@@ -34,7 +34,7 @@ export class ExternalNodesController {
     @Body() dto: ImportExternalNodesDto,
     @CurrentUser() user: { id: string },
   ) {
-    return this.service.import(user.id, dto.text);
+    return this.service.import(user.id, dto.text, dto.protocol);
   }
 
   @Post(':id/test')

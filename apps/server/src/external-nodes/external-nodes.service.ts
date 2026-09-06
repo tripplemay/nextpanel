@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException, BadRequestException,
 import { PrismaService } from '../prisma.service';
 import { XrayTestService, type TestResult } from '../nodes/xray-test/xray-test.service';
 import { SingboxTestService } from '../nodes/singbox-test/singbox-test.service';
-import { parseSubscriptionText } from './uri-parser';
+import { parseSubscriptionText, type BareProxyProtocol } from './uri-parser';
 import { SocksExitResolverService } from '../nodes/socks-exit-resolver.service';
 
 @Injectable()
@@ -39,9 +39,10 @@ export class ExternalNodesService {
     return trimmed;
   }
 
-  async import(userId: string, text: string) {
+  async import(userId: string, text: string, bareProtocol: BareProxyProtocol = 'HTTP') {
     const resolved = await this.resolveText(text);
-    const { nodes, failed } = parseSubscriptionText(resolved);
+    const protocol: BareProxyProtocol = bareProtocol === 'SOCKS5' ? 'SOCKS5' : 'HTTP';
+    const { nodes, failed } = parseSubscriptionText(resolved, protocol);
     if (nodes.length === 0) {
       return { success: 0, failed, errors: ['未能解析出任何有效节点'] };
     }

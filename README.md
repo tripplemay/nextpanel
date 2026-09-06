@@ -37,7 +37,8 @@ TUIC 和 AnyTLS 创建时要求用户已配置状态为 `active` 的 Cloudflare 
 链式节点也可以使用单个外部 SOCKS5 地址作为出口，支持无认证、标准用户名密码以及 `socks://BASE64(username:password)@host:port#备注` 格式。SOCKS5 凭据加密存储且不会写入审计或部署日志；部署和定时连通性检查会同时验证 TCP 与 UDP ASSOCIATE，UDP 不可用时节点不会被标记为运行成功。
 
 ### 外部节点导入
-- 支持粘贴 URI（vmess:// vless:// ss:// trojan:// hysteria2://）
+- 支持粘贴 URI（vmess:// vless:// ss:// socks:// socks5:// http:// https:// trojan:// hysteria2://）
+- 支持 MiyaIP 四段格式（主机:端口:账号:密码），可选择按 HTTP 或 SOCKS5 导入
 - 支持 Base64 编码的订阅内容
 - 支持订阅链接（https://...）自动拉取解析
 - 导入后可测试连通性、加入订阅统一管理
