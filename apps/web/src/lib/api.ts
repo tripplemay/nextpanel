@@ -186,6 +186,7 @@ export const externalNodesApi = {
   import: (text: string, protocol: 'HTTP' | 'SOCKS5' = 'HTTP') =>
     api.post<{ success: number; failed: number; errors: string[] }>('/external-nodes/import', { text, protocol }),
   test: (id: string) => api.post<ConnectivityResult>(`/external-nodes/${id}/test`),
+  rename: (id: string, name: string) => api.patch<ExternalNode>(`/external-nodes/${id}/rename`, { name }),
   remove: (id: string) => api.delete<void>(`/external-nodes/${id}`),
 };
 

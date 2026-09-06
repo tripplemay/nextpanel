@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Param,
@@ -14,6 +15,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ExternalNodesService } from './external-nodes.service';
 import { ImportExternalNodesDto } from './dto/import-external-nodes.dto';
+import { RenameExternalNodeDto } from './dto/rename-external-node.dto';
 
 @ApiTags('external-nodes')
 @ApiBearerAuth()
@@ -44,6 +46,16 @@ export class ExternalNodesController {
     @CurrentUser() user: { id: string },
   ) {
     return this.service.test(id, user.id);
+  }
+
+  @Patch(':id/rename')
+  @ApiOperation({ summary: 'Rename an external node (no connectivity change)' })
+  rename(
+    @Param('id') id: string,
+    @Body() dto: RenameExternalNodeDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.service.rename(id, dto.name, user.id);
   }
 
   @Delete(':id')

@@ -144,6 +144,20 @@ export class ExternalNodesService {
     return result;
   }
 
+  /** Rename an external node without changing its imported connection data. */
+  async rename(id: string, name: string, userId: string) {
+    const node = await this.prisma.externalNode.findUnique({ where: { id } });
+    if (!node) throw new NotFoundException(`ExternalNode ${id} not found`);
+    if (node.userId !== userId) throw new ForbiddenException();
+
+    const trimmed = name.trim();
+    if (!trimmed) throw new BadRequestException('节点名称不能为空');
+    return this.prisma.externalNode.update({
+      where: { id },
+      data: { name: trimmed },
+    });
+  }
+
   async remove(id: string, userId: string) {
     const node = await this.prisma.externalNode.findUnique({ where: { id } });
     if (!node) throw new NotFoundException(`ExternalNode ${id} not found`);

@@ -307,6 +307,35 @@ describe('ExternalNodesService', () => {
     });
   });
 
+  describe('rename', () => {
+    it('throws NotFoundException when node not found', async () => {
+      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(null);
+      await expect(svc.rename('bad-id', 'Renamed', 'user-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ForbiddenException when userId does not match', async () => {
+      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue({ ...fakeNode, userId: 'other-user' });
+      await expect(svc.rename('en-1', 'Renamed', 'user-1')).rejects.toThrow(ForbiddenException);
+    });
+
+    it('trims and persists the new display name', async () => {
+      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      (mockPrisma.externalNode.update as jest.Mock).mockResolvedValue({ ...fakeNode, name: 'Miya US 01' });
+
+      await svc.rename('en-1', '  Miya US 01  ', 'user-1');
+
+      expect(mockPrisma.externalNode.update).toHaveBeenCalledWith({
+        where: { id: 'en-1' },
+        data: { name: 'Miya US 01' },
+      });
+    });
+
+    it('rejects a whitespace-only name', async () => {
+      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      await expect(svc.rename('en-1', '   ', 'user-1')).rejects.toThrow(BadRequestException);
+    });
+  });
+
   describe('remove', () => {
     it('throws NotFoundException when node not found', async () => {
       (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(null);

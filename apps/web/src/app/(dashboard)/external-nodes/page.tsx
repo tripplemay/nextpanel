@@ -4,7 +4,7 @@ import { useState } from 'react';
 import {
   App, Button, Table, Tag, Space, Modal, Input, Popconfirm, Typography, Tooltip, Select, theme as antdTheme,
 } from 'antd';
-import { DeleteOutlined, ApiOutlined } from '@ant-design/icons';
+import { DeleteOutlined, ApiOutlined, EditOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { externalNodesApi } from '@/lib/api';
 import PageHeader from '@/components/common/PageHeader';
@@ -69,6 +69,8 @@ export default function ExternalNodesPage() {
   const [importProtocol, setImportProtocol] = useState<'HTTP' | 'SOCKS5'>('HTTP');
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, ConnectivityResult>>({});
+  const [renameNode, setRenameNode] = useState<ExternalNode | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   const { data = [], isLoading } = useQuery({
     queryKey: ['external-nodes'],
@@ -115,6 +117,27 @@ export default function ExternalNodesPage() {
     },
     onError: () => message.error('删除失败'),
   });
+
+  const renameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => externalNodesApi.rename(id, name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['external-nodes'] });
+      setRenameNode(null);
+      setRenameValue('');
+      message.success('节点已重命名');
+    },
+    onError: () => message.error('重命名失败'),
+  });
+
+  function openRename(node: ExternalNode) {
+    setRenameNode(node);
+    setRenameValue(node.name);
+  }
+
+  function submitRename() {
+    const name = renameValue.trim();
+    if (renameNode && name) renameMutation.mutate({ id: renameNode.id, name });
+  }
 
   const allExternalColumns = [
     {
@@ -170,9 +193,16 @@ export default function ExternalNodesPage() {
     },
     {
       title: '操作',
-      width: 120,
+      width: 150,
       render: (_: unknown, r: ExternalNode) => (
         <Space size={4}>
+          <Tooltip title="重命名">
+            <Button
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => openRename(r)}
+            />
+          </Tooltip>
           <Tooltip title="测试连通性">
             <Button
               size="small"
@@ -255,6 +285,27 @@ export default function ExternalNodesPage() {
           onChange={(e) => setImportText(e.target.value)}
           placeholder={`https://example.com/sub/token\n或\nvmess://...\nvless://...\nsocks://...`}
           style={{ fontFamily: 'monospace', fontSize: 12 }}
+        />
+      </Modal>
+
+      <Modal
+        open={!!renameNode}
+        title="重命名节点"
+        onCancel={() => { setRenameNode(null); setRenameValue(''); }}
+        onOk={submitRename}
+        okButtonProps={{ disabled: !renameValue.trim() }}
+        confirmLoading={renameMutation.isPending}
+        destroyOnHidden
+        style={{ maxWidth: '95vw' }}
+      >
+        <Input
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          onPressEnter={submitRename}
+          placeholder="节点名称"
+          maxLength={100}
+          showCount
+          autoFocus
         />
       </Modal>
     </AppCard>
