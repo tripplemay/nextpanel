@@ -22,6 +22,10 @@ or type-aware lint rules; TypeScript remains a separate mandatory gate. Scoped
 exceptions preserve intentional control-character validation, lock-loss failures,
 disabled enterprise OAuth UI and Jest mock loading. Runtime package versions are
 unchanged; the package manager is pinned to the same pnpm 9.15.9 as CI.
+Supported Node runtimes are 20.19+ within 20.x, 22.13+ within 22.x, or 24+.
+The manifest and `.npmrc` enforce this during installation; the standalone installer
+rejects older existing runtimes before application installation and installs Node 22
+when Node is absent. It does not silently upgrade an existing shared-host runtime.
 
 Reproduce the gate in a clean checkout with dependencies and Chromium installed:
 
