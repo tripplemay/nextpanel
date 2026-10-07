@@ -2,10 +2,11 @@
 
 ## Scope and delivery boundary
 
-Implemented locally after the first security/correctness release. No commit, push,
-production schema migration, token rotation, Agent upgrade or remote configuration
-change has been performed for this package. The pre-existing mode-only worktree
-changes are preserved.
+This report records the local implementation checkpoint after the first
+security/correctness release. At that checkpoint no production changes had been
+performed. Subsequent authorized commit, deployment and production verification are
+recorded in `2026-10-07-security-closeout-release.md`. The pre-existing mode-only
+worktree changes are preserved.
 
 SSE terminal-state handling, metrics/subscription performance, MFA, device inventory,
 CI expansion and low-downtime deployment remain separate work.
