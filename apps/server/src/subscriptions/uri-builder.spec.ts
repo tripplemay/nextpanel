@@ -10,6 +10,9 @@ import {
 import type { NodeExportInfo } from './uri-builder';
 import { REALITY_FLOW, REALITY_DEFAULT_SNI } from '../nodes/protocols/reality';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const baseVless: NodeExportInfo = {
   name: 'TestNode',
@@ -472,14 +475,21 @@ describe('sing-box 1.13 native config validation', () => {
         uuid: '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
       },
     };
-    const result = spawnSync('sing-box', ['check', '-c', '/dev/stdin'], {
-      encoding: 'utf8',
-      env,
-      input: buildConfig([validTuic, anytlsNode]),
-    });
-
-    expect(result.status).toBe(0);
-    expect(`${result.stdout}${result.stderr}`).not.toMatch(/deprecated/i);
+    const directory = mkdtempSync(join(tmpdir(), 'nextpanel-singbox-check-'));
+    try {
+      // Node's pipe-backed stdin cannot reliably be reopened as /dev/stdin on Linux.
+      const config = join(directory, 'config.json');
+      writeFileSync(config, buildConfig([validTuic, anytlsNode]), { mode: 0o600 });
+      const result = spawnSync('sing-box', ['check', '-c', config], {
+        encoding: 'utf8', env, timeout: 15_000,
+      });
+      if (result.status !== 0) {
+        throw new Error(`Native config check failed (${result.status}): ${result.error?.message ?? ''}\n${result.stdout}${result.stderr}`);
+      }
+      expect(`${result.stdout}${result.stderr}`).not.toMatch(/deprecated/i);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
 
