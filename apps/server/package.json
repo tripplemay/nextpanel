@@ -5,7 +5,7 @@
     "dev": "nest start --watch",
     "build": "nest build",
     "start": "node dist/main",
-    "lint": "eslint src --ext .ts",
+    "lint": "eslint src --max-warnings 0",
     "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts",
     "test": "jest",
     "test:cov": "jest --coverage"

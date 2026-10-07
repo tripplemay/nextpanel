@@ -167,6 +167,7 @@ export default function AccountSettingsPage() {
       </Card>
 
       {/* TODO: 企业微信绑定暂时屏蔽，等可信IP配置完成后恢复 */}
+      {/* eslint-disable-next-line no-constant-binary-expression -- Keep enterprise binding disabled pending real OAuth acceptance. */}
       {false && wxConfig?.configured && (
         <Card title="企业微信绑定" size="small" style={{ maxWidth: 400, marginTop: 16 }}>
           {bindStatus?.bound ? (

@@ -113,7 +113,7 @@ function parseHostPort(value: string): { host: string; port: number } {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new SocksUriParseError('SOCKS 端口必须在 1-65535 之间');
   }
-  if (!rawHost || rawHost.length > 253 || /[\s/?#@\[\]]/.test(rawHost)) {
+  if (!rawHost || rawHost.length > 253 || /[\s/?#@[\]]/.test(rawHost)) {
     throw new SocksUriParseError('SOCKS 主机名无效');
   }
 
@@ -181,6 +181,7 @@ function decodeComponent(value: string, label: string): string {
 }
 
 function hasControlCharacters(value: string): boolean {
+  // eslint-disable-next-line no-control-regex -- Detecting control characters is the purpose of this predicate.
   return /[\u0000-\u001f\u007f]/.test(value);
 }
 

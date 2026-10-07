@@ -7,8 +7,21 @@
 requests run the same reusable checks without deployment credentials. Validation
 uses Node 22, pnpm 9.15.9 with the frozen lockfile, PostgreSQL 16 and pinned Python
 Playwright/Chromium. It runs backend HTTP/unit tests, SSE/ops/fail-closed gate tests,
-type checks, production builds, isolated database migration/restore and browser
+ESLint correctness checks, type checks, production builds, isolated database migration/restore and browser
 security/P1 flows. Fixture-only logs are retained for seven days.
+
+The native configuration tests use sing-box 1.13.0. CI installs the official Linux
+amd64 release with a checked-in SHA-256 pin before running the gate. `verify.sh`
+requires the binary and sets `REQUIRE_SING_BOX=1`; a missing binary is a failure,
+not a skipped test. Install this version locally before reproducing the full gate.
+
+`pnpm lint` checks server, web and shared TypeScript with ESLint 9 / typescript-eslint
+and React Rules of Hooks. It fails on errors and warnings. This initial gate does
+not enforce unused-variable cleanup, banning all `any`, exhaustive hook dependencies
+or type-aware lint rules; TypeScript remains a separate mandatory gate. Scoped
+exceptions preserve intentional control-character validation, lock-loss failures,
+disabled enterprise OAuth UI and Jest mock loading. Runtime package versions are
+unchanged; the package manager is pinned to the same pnpm 9.15.9 as CI.
 
 Reproduce the gate in a clean checkout with dependencies and Chromium installed:
 
@@ -25,7 +38,13 @@ loopback-only server and mocks API requests. `verify.sh` deliberately overrides
 checkout because Prisma generation and production builds write generated artifacts.
 The workflow gate does not enforce manual SSH/CLI operations outside GitHub; those
 operators must run it before a release. Branch protection remains a repository
-setting, not something this workflow silently changes.
+setting, not something this workflow silently changes. Required check names must
+match the successful pull-request check (`checks`, GitHub Actions app 15368), not
+only the reusable deployment label (`validate / checks`). Require up-to-date PR
+branches, include administrators, prohibit force pushes/deletion, and resolve review
+conversations before merging. Keep required approvals at zero for the current
+single-maintainer workflow; CI remains mandatory. Repository protection does not
+restrict a host administrator's direct SSH access.
 
 `Deploy` stages a full commit in an isolated directory, installs the frozen lockfile,
 generates Prisma and builds before stopping either production process. SSH host keys

@@ -7,8 +7,11 @@ export NEXT_TELEMETRY_DISABLED=1
 # No test stage requires project credentials or a live backend.
 export DATABASE_URL='postgresql://fixture:fixture@127.0.0.1:1/fixture'
 export API_URL='http://127.0.0.1:1'
+export REQUIRE_SING_BOX=1
 run_in() ( cd "$ROOT/$1"; shift; "$@"; )
 
+./node_modules/.bin/eslint apps/server/src apps/web/src packages/shared/src --max-warnings 0
+sing-box version
 run_in apps/server ./node_modules/.bin/prisma generate
 run_in apps/server ./node_modules/.bin/prisma validate
 run_in apps/server ./node_modules/.bin/tsc --noEmit --incremental false

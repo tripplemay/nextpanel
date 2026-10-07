@@ -7,7 +7,7 @@
     "build": "next build",
     "analyze": "ANALYZE=true next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint src --max-warnings 0"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",

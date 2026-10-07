@@ -135,7 +135,7 @@ describe('SingboxTestService', () => {
     let svc: SingboxTestService;
     let mockProc: { kill: jest.Mock };
 
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+
     const mockFs = require('fs');
 
     beforeEach(() => {
@@ -199,10 +199,10 @@ describe('SingboxTestService', () => {
     afterEach(() => jest.restoreAllMocks());
 
     function mockExecFile(err: Error | null, stdout: string) {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+
       const cp = require('child_process');
       jest.spyOn(cp, 'execFile').mockImplementation(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
         (...args: any[]) => {
           const cb = args[args.length - 1] as (e: Error | null, out: string) => void;
           cb(err, stdout);
@@ -266,7 +266,7 @@ describe('SingboxTestService', () => {
 
   describe('allocatePort', () => {
     let svc: SingboxTestService;
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+
     const mockNet = require('net');
 
     beforeEach(() => {
@@ -306,7 +306,7 @@ describe('SingboxTestService', () => {
 
   describe('waitForPort', () => {
     let svc: SingboxTestService;
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+
     const mockNet = require('net');
 
     beforeEach(() => {
@@ -358,7 +358,7 @@ describe('SingboxTestService', () => {
 
     it('returns proc and ready promise that rejects on ENOENT', () => {
       const svc = new SingboxTestService();
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+
       const cp = require('child_process');
       const mockChild = { on: jest.fn() };
       jest.spyOn(cp, 'spawn').mockReturnValue(mockChild);
@@ -379,7 +379,7 @@ describe('SingboxTestService', () => {
 
     it('ready rejects with generic message for non-ENOENT spawn errors', () => {
       const svc = new SingboxTestService();
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+
       const cp = require('child_process');
       const mockChild = { on: jest.fn() };
       jest.spyOn(cp, 'spawn').mockReturnValue(mockChild);

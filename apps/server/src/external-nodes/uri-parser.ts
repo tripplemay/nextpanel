@@ -383,6 +383,7 @@ function parseBareProxy(value: string, protocol: BareProxyProtocol): ExternalNod
 
   const parsedHost = parseHostPort(`${address.includes(':') ? `[${address}]` : address}:${portText}`);
   if (!parsedHost || !username || !password) return null;
+  // eslint-disable-next-line no-control-regex -- Explicitly reject control characters in imported credentials.
   if (/^[\u0000-\u001f\u007f]/.test(username) || /[\u0000-\u001f\u007f]/.test(username + password)) return null;
 
   return {

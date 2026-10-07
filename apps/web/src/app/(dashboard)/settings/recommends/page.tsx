@@ -266,7 +266,7 @@ export default function RecommendsManagePage() {
     });
 
     return cols;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [isMobile]);
 
   const collapseItems = categories.map((cat) => {

@@ -251,7 +251,7 @@ describe('XrayTestService', () => {
   describe('runTest', () => {
     let svc2: XrayTestService;
     let mockProc: { kill: jest.Mock };
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+
     const mockFs = require('fs');
 
     beforeEach(() => {
@@ -302,10 +302,10 @@ describe('XrayTestService', () => {
     afterEach(() => jest.restoreAllMocks());
 
     function mockExecFile(err: Error | null, stdout: string) {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+
       const cp = require('child_process');
       jest.spyOn(cp, 'execFile').mockImplementation(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
         (...args: any[]) => {
           const cb = args[args.length - 1] as (e: Error | null, out: string) => void;
           cb(err, stdout);
@@ -369,7 +369,7 @@ describe('XrayTestService', () => {
   // ── allocatePort ──────────────────────────────────────────────────────────
 
   describe('allocatePort', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+
     const mockNet = require('net');
 
     beforeEach(() => jest.clearAllMocks());
@@ -405,7 +405,7 @@ describe('XrayTestService', () => {
   // ── waitForPort ───────────────────────────────────────────────────────────
 
   describe('waitForPort', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+
     const mockNet = require('net');
 
     beforeEach(() => jest.clearAllMocks());
@@ -442,7 +442,7 @@ describe('XrayTestService', () => {
     afterEach(() => jest.restoreAllMocks());
 
     it('returns child process and logs spawn errors via logger.warn', () => {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+
       const cp = require('child_process');
       const mockChild = { on: jest.fn() };
       jest.spyOn(cp, 'spawn').mockReturnValue(mockChild);

@@ -19,7 +19,7 @@ test('production deployment depends on the reusable validation gate without bypa
   assert.doesNotMatch(validation, /secrets\.|continue-on-error:/);
 });
 
-for (const failure of ['apps/server:jest', 'root:ops', 'apps/server:nest', 'root:database', 'apps/web:tsc', 'apps/web:next', 'root:browser', '']) {
+for (const failure of ['root:eslint', 'root:sing-box', 'apps/server:jest', 'root:ops', 'apps/server:nest', 'root:database', 'apps/web:tsc', 'apps/web:next', 'root:browser', '']) {
   test(`verification fails closed at ${failure || 'all stages succeed'}`, () => {
     const temp = realpathSync(mkdtempSync(join(tmpdir(), 'np-ci-gate-')));
     try {
@@ -41,7 +41,7 @@ step="$dir:$name"
 printf '%s\\n' "$step" >> "$TEST_ROOT/events"
 [[ "$step" != "$FAIL_STEP" ]] || exit 42
 `;
-      for (const file of ['bin/node', 'apps/server/node_modules/.bin/prisma', 'apps/server/node_modules/.bin/tsc',
+      for (const file of ['bin/node', 'bin/sing-box', 'node_modules/.bin/eslint', 'apps/server/node_modules/.bin/prisma', 'apps/server/node_modules/.bin/tsc',
         'apps/server/node_modules/.bin/jest', 'apps/server/node_modules/.bin/nest',
         'apps/web/node_modules/.bin/tsc', 'apps/web/node_modules/.bin/next', 'packages/shared/node_modules/.bin/tsc']) {
         mkdirSync(dirname(join(temp, file)), { recursive: true });

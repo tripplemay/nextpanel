@@ -48,7 +48,7 @@ export default function AgentInstallDrawer({
       start();
     }
     return abort;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [open, serverId]);
 
   const drawerTitle = (

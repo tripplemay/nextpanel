@@ -453,6 +453,9 @@ describe('buildSingboxOutbound – modern protocol presets', () => {
 
 describe('sing-box 1.13 native config validation', () => {
   const version = spawnSync('sing-box', ['version'], { encoding: 'utf8' });
+  if (process.env.REQUIRE_SING_BOX === '1' && version.status !== 0) {
+    throw new Error('sing-box is required for the release gate; native validation must not be skipped');
+  }
   const nativeIt = version.status === 0 ? it : it.skip;
 
   nativeIt.each([

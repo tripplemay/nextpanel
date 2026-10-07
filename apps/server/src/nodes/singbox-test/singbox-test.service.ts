@@ -199,7 +199,7 @@ export class SingboxTestService {
           let reason: string;
           if (err) {
             const exitCode: number | string | undefined =
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
               (err as any).code as number | string | undefined;
             if (exitCode === 7) {
               reason = '节点不可达（连接被拒绝）';
