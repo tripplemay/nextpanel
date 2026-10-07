@@ -7,6 +7,11 @@ checkpoint does not include commit, push, a GitHub-hosted run or production
 deployment. The existing mode-only changes remain untouched. No database schema,
 credentials, subscription tokens, Agent binary or production process was changed.
 
+Release follow-up: the P1 implementation has since passed the GitHub-hosted gate and
+been deployed. See [production acceptance](2026-10-07-p1-production-release.md) for
+the exact production commit, observed maintenance window, independent checks and
+rollback evidence. The verification section below preserves the local checkpoint.
+
 ## SSE terminal states
 
 - A terminal business event, not HTTP EOF, determines success. Deployment streams
@@ -91,8 +96,8 @@ Evidence: `out/p1-20261007/verification.log`, `browser-server.log`, `actionlint.
 
 ## Remaining boundary
 
-These results are not production acceptance. An authorized commit/push should execute
-the actual GitHub-hosted gate, then the existing deployment and independent external
-login/subscription/proxy checks. P2 subscription N+1 optimization, low-downtime releases,
+The local results above alone are not production acceptance; the linked release report
+records the subsequent GitHub gate, deployment and independent external checks.
+P2 subscription N+1 optimization, low-downtime releases,
 durable task recovery/retry, alerts and previously excluded fleet machines are not part
 of this P1 change set.
