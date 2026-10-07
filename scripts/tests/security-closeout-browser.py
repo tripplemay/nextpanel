@@ -59,6 +59,7 @@ with sync_playwright() as p:
         return context, page, state
 
     for width in (1440, 390):
+        print(f'START credential reveal flow: {width}px', flush=True)
         context, page, state = fixture(width)
         page.goto(base + '/external-nodes')
         page.wait_for_load_state('networkidle')
@@ -87,6 +88,7 @@ with sync_playwright() as p:
         page.get_by_role('button', name='Close', exact=True).click()
         expect(page.get_by_role('dialog')).to_have_count(0)
         if width == 1440:
+            print('START credential expiry clock check', flush=True)
             page.clock.install()
             page.get_by_role('button', name='查看节点凭据').click()
             page.get_by_label('确认当前密码').fill('current-password')

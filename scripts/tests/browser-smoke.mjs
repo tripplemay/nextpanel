@@ -29,14 +29,25 @@ try {
     try {
       const response = await fetch(`${base}/login`, { signal: AbortSignal.timeout(1000) });
       await response.arrayBuffer();
-      if (response.ok) break;
+      if (response.ok) {
+        console.log('[browser] fixture frontend ready');
+        break;
+      }
     } catch { /* wait for the isolated frontend */ }
     if (Date.now() > deadline) throw new Error('Fixture server did not become ready');
     await sleep(250);
   }
   for (const script of ['security-closeout-browser.py', 'p1-browser.py']) {
-    const child = spawn(process.env.PYTHON || 'python3', [join(root, 'scripts/tests', script), base], { stdio: 'inherit' });
-    const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
+    console.log(`[browser] starting ${script}`);
+    const child = spawn(process.env.PYTHON || 'python3', ['-u', join(root, 'scripts/tests', script), base], { stdio: 'inherit', detached: true });
+    const code = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        console.error(`[browser] ${script} exceeded 180 seconds`);
+        if (child.pid) process.kill(-child.pid, 'SIGKILL');
+      }, 180_000);
+      child.once('error', error => { clearTimeout(timer); reject(error); });
+      child.once('exit', code => { clearTimeout(timer); resolve(code); });
+    });
     if (code !== 0) throw new Error(`${script} failed (${code})`);
   }
 } finally {

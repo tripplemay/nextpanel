@@ -83,6 +83,7 @@ with sync_playwright() as p:
         }""", {'index': index, 'text': text, 'close': close})
 
     for width in (1440, 390):
+        print(f'START deploy terminal flows: {width}px', flush=True)
         context, page, state = fixture(width)
         page.goto(base + '/nodes')
         page.wait_for_load_state('networkidle')
