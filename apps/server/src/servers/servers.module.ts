@@ -8,10 +8,11 @@ import { NodesModule } from '../nodes/nodes.module';
 import { OperationLogModule } from '../operation-log/operation-log.module';
 import { CloudflareModule } from '../cloudflare/cloudflare.module';
 import { IpCheckModule } from '../ip-check/ip-check.module';
+import { ServerOwnerGuard } from './server-owner.guard';
 
 @Module({
   imports: [NodesModule, OperationLogModule, CloudflareModule, IpCheckModule],
-  providers: [ServersService, CryptoService, PingScheduler, AutoSetupService],
+  providers: [ServersService, CryptoService, PingScheduler, AutoSetupService, ServerOwnerGuard],
   controllers: [ServersController],
   exports: [ServersService],
 })

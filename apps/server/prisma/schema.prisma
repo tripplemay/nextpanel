@@ -39,6 +39,16 @@ model RevokedToken {
   @@index([expiresAt])
 }
 
+model OAuthState {
+  id          String   @id
+  browserHash String
+  purpose     String
+  userId      String?
+  expiresAt   DateTime
+
+  @@index([expiresAt])
+}
+
 // ──────────────────────────── InviteCode ────────────────────────────
 
 model InviteCode {
@@ -313,6 +323,7 @@ model ExternalNode {
   password         String?
   method           String?
   transport        String?
+  transportHost    String?
   tls              String    @default("NONE")
   realityPublicKey String?
   shortId          String?
@@ -377,6 +388,8 @@ enum AuditAction {
 
 model OperationLog {
   id            String   @id @default(cuid())
+  /// Persisted independently of the resource so deleted-resource logs remain isolated.
+  ownerId       String?
   /// Resource type — e.g. 'node', 'server', any future resource
   resourceType  String
   /// Nullable — resource may be deleted but log must persist
@@ -399,6 +412,7 @@ model OperationLog {
   @@index([resourceType, resourceId])
   @@index([correlationId])
   @@index([createdAt])
+  @@index([ownerId, createdAt])
 }
 
 // ──────────────────────────── RuleCache ────────────────────────────

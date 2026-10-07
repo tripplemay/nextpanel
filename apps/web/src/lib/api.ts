@@ -195,9 +195,11 @@ export const wxWorkApi = {
   configured: () => api.get<{ configured: boolean }>('/auth/wxwork/configured'),
   loginUrl: (device: string, redirectUri?: string) =>
     api.get<{ url: string; state: string }>('/auth/wxwork/login-url', { params: { device, redirect_uri: redirectUri } }),
-  callback: (code: string) =>
-    api.post<{ accessToken: string; user: { id: string; username: string; role: string } }>('/auth/wxwork/callback', { code }),
-  bind: (code: string) => api.post<{ bound: boolean; wxWorkName: string }>('/auth/wxwork/bind', { code }),
+  callback: (code: string, state: string) =>
+    api.post<{ accessToken: string; user: { id: string; username: string; role: string } }>('/auth/wxwork/callback', { code, state }),
+  bindUrl: (device: string, currentPassword: string) =>
+    api.post<{ url: string; state: string }>('/auth/wxwork/bind-url', { currentPassword }, { params: { device } }),
+  bind: (code: string, state: string) => api.post<{ bound: boolean; wxWorkName: string }>('/auth/wxwork/bind', { code, state }),
   unbind: () => api.delete<{ bound: boolean }>('/auth/wxwork/unbind'),
   bindStatus: () => api.get<{ bound: boolean; wxWorkName: string | null }>('/auth/wxwork/bind-status'),
   getSettings: () => api.get<WxWorkSetting | null>('/wxwork/settings'),

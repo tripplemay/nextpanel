@@ -294,7 +294,8 @@ export class ServersService {
     }
   }
 
-  installAgentStream(id: string): Observable<MessageEvent> {
+  async installAgentStream(id: string, userId: string): Promise<Observable<MessageEvent>> {
+    await this.findOne(id, userId);
     return new Observable((subscriber) => {
       const emit = (log: string) =>
         subscriber.next({ data: { log } } as MessageEvent);
@@ -538,8 +539,7 @@ export class ServersService {
       const isActive = activeOut.trim() === 'active';
 
       if (isActive) {
-        onLog('Agent 安装并启动成功！');
-        await this.prisma.server.update({ where: { id }, data: { status: 'ONLINE' } });
+        onLog('Agent 安装并启动成功；在线状态由实际心跳确认');
         return true;
       } else {
         const { stdout: journalOut } = await ssh.execCommand(

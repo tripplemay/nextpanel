@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 
 export interface CreateOperationLogParams {
+  ownerId?: string | null;
   resourceType: string;
   resourceId: string | null;
   resourceName: string;
@@ -13,18 +14,29 @@ export interface CreateOperationLogParams {
   durationMs: number | null;
 }
 
+export interface LogReader { id: string; role: string }
+
 @Injectable()
 export class OperationLogService {
   constructor(private prisma: PrismaService) {}
 
   async createLog(params: CreateOperationLogParams) {
-    return this.prisma.operationLog.create({ data: params });
+    let ownerId = params.ownerId;
+    if (ownerId === undefined && params.resourceId) {
+      const resource = params.resourceType === 'node'
+        ? await this.prisma.node.findUnique({ where: { id: params.resourceId }, select: { userId: true } })
+        : params.resourceType === 'server'
+          ? await this.prisma.server.findUnique({ where: { id: params.resourceId }, select: { userId: true } })
+          : null;
+      ownerId = resource?.userId ?? null;
+    }
+    return this.prisma.operationLog.create({ data: { ...params, ownerId: ownerId ?? null } });
   }
 
   /** Recent operation logs for a resource (no log text — call getLog for full text) */
-  async listByResource(resourceType: string, resourceId: string, limit = 20) {
+  async listByResource(resourceType: string, resourceId: string, user: LogReader, limit = 20) {
     return this.prisma.operationLog.findMany({
-      where: { resourceType, resourceId },
+      where: { resourceType, resourceId, ...this.scope(user) },
       orderBy: { createdAt: 'desc' },
       take: limit,
       select: {
@@ -42,9 +54,9 @@ export class OperationLogService {
   }
 
   /** Find the OperationLog linked to an AuditLog via correlationId (includes log text for UI display) */
-  async getByCorrelationId(correlationId: string) {
+  async getByCorrelationId(correlationId: string, user: LogReader) {
     return this.prisma.operationLog.findFirst({
-      where: { correlationId },
+      where: { correlationId, ...this.scope(user) },
       select: {
         id: true,
         resourceType: true,
@@ -61,9 +73,9 @@ export class OperationLogService {
   }
 
   /** Full detail for one record including log text */
-  async getLog(id: string) {
-    return this.prisma.operationLog.findUnique({
-      where: { id },
+  async getLog(id: string, user: LogReader) {
+    return this.prisma.operationLog.findFirst({
+      where: { id, ...this.scope(user) },
       select: {
         id: true,
         resourceType: true,
@@ -76,5 +88,9 @@ export class OperationLogService {
         createdAt: true,
       },
     });
+  }
+
+  private scope(user: LogReader) {
+    return user.role === 'ADMIN' ? {} : { ownerId: user.id };
   }
 }

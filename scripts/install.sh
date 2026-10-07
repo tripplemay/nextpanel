@@ -32,6 +32,8 @@ echo ""
 
 [ "$EUID" -eq 0 ] || fail "请以 root 用户运行：sudo bash install.sh"
 
+[ ! -f "$APP_DIR/apps/server/.env" ] || fail "检测到现有配置；为避免覆盖加密密钥，请使用 nextpanel update"
+
 if ! command -v apt-get &>/dev/null; then
   fail "本脚本仅支持 Debian/Ubuntu 系统（未检测到 apt-get）"
 fi
@@ -251,7 +253,7 @@ DATABASE_URL="postgresql://nextpanel:${DB_PASS}@localhost:5432/nextpanel"
 JWT_SECRET="${JWT_SECRET}"
 JWT_EXPIRES_IN="7d"
 ENCRYPTION_KEY="${ENCRYPTION_KEY}"
-PORT=3001
+PORT=3201
 ALLOWED_ORIGIN="${ALLOWED_ORIGIN}"
 PANEL_URL="${PANEL_URL}"
 GITHUB_REPO="tripplemay/nextpanel-releases"
@@ -373,24 +375,24 @@ info "正在验证服务就绪..."
 
 # 等待后端启动
 for i in $(seq 1 30); do
-  if curl -sf http://127.0.0.1:3001/api/docs > /dev/null 2>&1; then
+  if curl -sf --max-time 3 http://127.0.0.1:3201/api/health/ready > /dev/null 2>&1; then
     ok "后端服务就绪"
     break
   fi
   if [ "$i" -eq 30 ]; then
-    warn "后端服务启动超时，请检查日志：pm2 logs nextpanel-server"
+    fail "后端服务启动超时，安装未验收通过；请检查日志：pm2 logs nextpanel-server"
   fi
   sleep 1
 done
 
 # 等待前端启动
 for i in $(seq 1 30); do
-  if curl -sf http://127.0.0.1:3000/ > /dev/null 2>&1; then
+  if curl -sf --max-time 3 http://127.0.0.1:3200/ > /dev/null 2>&1; then
     ok "前端服务就绪"
     break
   fi
   if [ "$i" -eq 30 ]; then
-    warn "前端服务启动超时，请检查日志：pm2 logs nextpanel-web"
+    fail "前端服务启动超时，安装未验收通过；请检查日志：pm2 logs nextpanel-web"
   fi
   sleep 1
 done

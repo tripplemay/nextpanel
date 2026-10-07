@@ -150,9 +150,10 @@ function clientStreamSettings(node: NodeTestInfo): unknown {
 
   // Transport-specific settings
   if (network === 'ws') {
-    base.wsSettings = { path: '/', headers: domain ? { Host: domain } : {} };
+    const host = c.transportHost ?? domain;
+    base.wsSettings = { path: c.path || '/', headers: host ? { Host: host } : {} };
   } else if (network === 'grpc') {
-    base.grpcSettings = { serviceName: 'grpc' };
+    base.grpcSettings = { serviceName: c.path ?? 'grpc' };
   } else if (network === 'xhttp') {
     const mode = parseXhttpMode(c.xhttpMode);
     if (!mode) throw new Error(`Unsupported XHTTP mode: ${c.xhttpMode}`);

@@ -18,6 +18,7 @@ export interface ExternalNodeData {
   password?: string;
   method?: string;
   transport?: string;
+  transportHost?: string;
   tls: string;
   realityPublicKey?: string;
   shortId?: string;
@@ -103,6 +104,7 @@ function parseVmess(uri: string): ExternalNodeData | null {
       port,
       uuid: String(json.id ?? ''),
       transport,
+      transportHost: transport === 'WS' ? String(json.host ?? '') : undefined,
       tls,
       xhttpMode: xhttpMode ?? undefined,
       xhttpHost,
@@ -165,6 +167,7 @@ function parseVless(uri: string): ExternalNodeData | null {
       xhttpExtra,
       sni: query.get('sni') ?? (isXhttp ? undefined : query.get('host') ?? ''),
       path: query.get('path') ?? query.get('serviceName') ?? '',
+      transportHost: transport === 'WS' ? query.get('host') ?? undefined : undefined,
       rawUri: uri,
     };
   } catch {
@@ -257,7 +260,7 @@ function parseTrojan(uri: string): ExternalNodeData | null {
     const query = qIdx >= 0 ? new URLSearchParams(main.slice(qIdx + 1)) : new URLSearchParams();
 
     const atIdx = hostPart.lastIndexOf('@');
-    const password = atIdx >= 0 ? hostPart.slice(0, atIdx) : '';
+    const password = atIdx >= 0 ? safeDecodeURIComponent(hostPart.slice(0, atIdx)) : '';
     const hostPort = atIdx >= 0 ? hostPart.slice(atIdx + 1) : hostPart;
     const parsedHost = parseHostPort(hostPort);
     if (!parsedHost) return null;
@@ -284,7 +287,8 @@ function parseTrojan(uri: string): ExternalNodeData | null {
       xhttpHost,
       xhttpExtra,
       sni: query.get('sni') ?? '',
-      path: query.get('path') ?? '',
+      path: query.get('path') ?? query.get('serviceName') ?? '',
+      transportHost: transport === 'WS' ? query.get('host') ?? undefined : undefined,
       rawUri: uri,
     };
   } catch {
@@ -305,7 +309,7 @@ function parseHysteria2(uri: string): ExternalNodeData | null {
     const query = qIdx >= 0 ? new URLSearchParams(main.slice(qIdx + 1)) : new URLSearchParams();
 
     const atIdx = hostPart.lastIndexOf('@');
-    const password = atIdx >= 0 ? hostPart.slice(0, atIdx) : '';
+    const password = atIdx >= 0 ? safeDecodeURIComponent(hostPart.slice(0, atIdx)) : '';
     const hostPort = atIdx >= 0 ? hostPart.slice(atIdx + 1) : hostPart;
     const parsedHost = parseHostPort(hostPort);
     if (!parsedHost) return null;
@@ -332,8 +336,8 @@ function parseHttp(uri: string): ExternalNodeData | null {
     const port = parsed.port ? Number(parsed.port) : parsed.protocol === 'https:' ? 443 : 80;
     if (!parsed.hostname || !Number.isInteger(port) || port < 1 || port > 65535) return null;
     const username = parsed.username ? safeDecodeURIComponent(parsed.username) : undefined;
-    const password = parsed.password ? safeDecodeURIComponent(parsed.password) : undefined;
-    if ((username === undefined) !== (password === undefined)) return null;
+    const password = username !== undefined ? safeDecodeURIComponent(parsed.password) : undefined;
+    if (username === undefined && parsed.password) return null;
     const fragment = parsed.hash ? parsed.hash.slice(1) : null;
     const address = parsed.hostname.startsWith('[') && parsed.hostname.endsWith(']')
       ? parsed.hostname.slice(1, -1)
@@ -391,6 +395,11 @@ function parseBareProxy(value: string, protocol: BareProxyProtocol): ExternalNod
     tls: 'NONE',
     rawUri: trimmed,
   };
+}
+
+export function importedTransportHost(node: { transportHost?: string | null; rawUri?: string | null }): string | undefined {
+  // Recover WS Host for rows imported before transportHost was stored separately.
+  return node.transportHost ?? (node.rawUri ? parseUri(node.rawUri)?.transportHost : undefined);
 }
 
 export function parseUri(uri: string, bareProtocol: BareProxyProtocol = 'HTTP'): ExternalNodeData | null {

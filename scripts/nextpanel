@@ -47,15 +47,15 @@ cmd_status() {
 
   # 健康检查
   echo "健康检查："
-  if curl -sf http://127.0.0.1:3001/api/docs > /dev/null 2>&1; then
-    echo -e "  后端 (3001)：${GREEN}正常${NC}"
+  if curl -sf http://127.0.0.1:3201/api/health/ready > /dev/null 2>&1; then
+    echo -e "  后端 (3201)：${GREEN}正常${NC}"
   else
-    echo -e "  后端 (3001)：${RED}异常${NC}"
+    echo -e "  后端 (3201)：${RED}异常${NC}"
   fi
-  if curl -sf http://127.0.0.1:3400/ > /dev/null 2>&1; then
-    echo -e "  前端 (3400)：${GREEN}正常${NC}"
+  if curl -sf http://127.0.0.1:3200/ > /dev/null 2>&1; then
+    echo -e "  前端 (3200)：${GREEN}正常${NC}"
   else
-    echo -e "  前端 (3400)：${RED}异常${NC}"
+    echo -e "  前端 (3200)：${RED}异常${NC}"
   fi
   echo ""
 
@@ -205,16 +205,28 @@ cmd_update() {
 # ── backup ─────────────────────────────────────────────────────────────────
 
 cmd_backup_quiet() {
+  local timestamp backup_file temporary_file
   mkdir -p "$BACKUP_DIR"
-  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-  BACKUP_FILE="$BACKUP_DIR/nextpanel_${TIMESTAMP}.sql.gz"
+  timestamp=$(date +%Y%m%d_%H%M%S)
+  temporary_file=$(mktemp "$BACKUP_DIR/nextpanel_${timestamp}_XXXXXX") || return 1
+  backup_file="$temporary_file.sql.gz"
+  if ! sudo -u postgres pg_dump nextpanel | gzip > "$temporary_file"; then
+    rm -f -- "$temporary_file"
+    return 1
+  fi
+  if ! mv -- "$temporary_file" "$backup_file"; then
+    rm -f -- "$temporary_file"
+    return 1
+  fi
+  LAST_BACKUP_FILE="$backup_file"
 
-  sudo -u postgres pg_dump nextpanel 2>/dev/null | gzip > "$BACKUP_FILE"
-
-  # 轮转：只保留最近 MAX_BACKUPS 份
-  ls -t "$BACKUP_DIR"/nextpanel_*.sql.gz 2>/dev/null | tail -n +$((MAX_BACKUPS + 1)) | xargs rm -f 2>/dev/null || true
-
-  ok "数据库已备份：$BACKUP_FILE"
+  # A restore must not rotate away the selected input or its safety backup.
+  if [ "${1:-rotate}" = "rotate" ]; then
+    ls -t "$BACKUP_DIR"/nextpanel_*.sql.gz 2>/dev/null |
+      tail -n +$((MAX_BACKUPS + 1)) |
+      while IFS= read -r file; do rm -f -- "$file"; done
+  fi
+  ok "数据库已备份：$backup_file"
 }
 
 cmd_backup() {
@@ -233,65 +245,52 @@ cmd_backup() {
 
 # ── restore ────────────────────────────────────────────────────────────────
 
+restore_database() {
+  local source_file="$1"
+  sudo -u postgres dropdb nextpanel --if-exists || return 1
+  sudo -u postgres createdb nextpanel -O nextpanel || return 1
+  gunzip < "$source_file" | sudo -u postgres psql -X -v ON_ERROR_STOP=1 --single-transaction -d nextpanel
+}
+
+restart_after_restore() {
+  (cd "$APP_DIR" && pm2 restart ecosystem.config.cjs && pm2 save)
+}
+
 cmd_restore() {
   check_root
   check_install
 
-  BACKUP_FILE="${1:-}"
-  [ -n "$BACKUP_FILE" ] || fail "用法：nextpanel restore <备份文件.sql.gz>"
-  [ -f "$BACKUP_FILE" ] || fail "备份文件不存在：$BACKUP_FILE"
-
-  # 验证备份文件完整性
-  info "正在验证备份文件..."
-  if ! gunzip -t "$BACKUP_FILE" 2>/dev/null; then
-    fail "备份文件损坏（gzip 校验失败）"
-  fi
-  ok "备份文件验证通过"
-
-  echo ""
+  local requested_file="${1:-}" safety_file confirm
+  [ -n "$requested_file" ] || fail "用法：nextpanel restore <备份文件.sql.gz>"
+  [ -f "$requested_file" ] || fail "备份文件不存在：$requested_file"
+  requested_file="$(cd "$(dirname "$requested_file")" && pwd)/$(basename "$requested_file")"
+  gunzip -t "$requested_file" || fail "备份文件损坏（gzip 校验失败）"
   warn "此操作将用备份文件替换当前数据库。"
-  read -rp "确认继续？[y/N]：" CONFIRM
-  [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ] || fail "已取消"
+  read -rp "确认继续？[y/N]：" confirm
+  [ "$confirm" = "y" ] || [ "$confirm" = "Y" ] || fail "已取消"
 
-  # 安全备份
-  info "正在备份当前数据库（安全措施）..."
-  cmd_backup_quiet
-
-  info "正在停止服务..."
-  pm2 stop nextpanel-server > /dev/null 2>&1 || true
-  pm2 stop nextpanel-web > /dev/null 2>&1 || true
-
-  info "正在恢复数据库..."
-  sudo -u postgres dropdb nextpanel --if-exists 2>/dev/null
-  sudo -u postgres createdb nextpanel -O nextpanel 2>/dev/null
-  gunzip < "$BACKUP_FILE" | sudo -u postgres psql -d nextpanel > /dev/null 2>&1
-  if [ $? -ne 0 ]; then
-    warn "恢复失败，正在回滚到安全备份..."
-    # Find the latest safety backup (the one we just created before restore)
-    SAFETY_BACKUP=$(ls -t "$BACKUP_DIR"/nextpanel_*.sql.gz 2>/dev/null | head -1)
-    if [ -n "$SAFETY_BACKUP" ] && [ "$SAFETY_BACKUP" != "$BACKUP_FILE" ]; then
-      sudo -u postgres dropdb nextpanel --if-exists 2>/dev/null
-      sudo -u postgres createdb nextpanel -O nextpanel 2>/dev/null
-      if gunzip < "$SAFETY_BACKUP" | sudo -u postgres psql -d nextpanel > /dev/null 2>&1; then
-        ok "已回滚到安全备份：$SAFETY_BACKUP"
-      else
-        fail "回滚也失败了，数据库可能处于不一致状态，请手动恢复"
-      fi
-    else
-      fail "未找到可用的安全备份进行回滚，数据库可能处于不一致状态"
-    fi
-    fail "数据库恢复失败，已回滚到恢复前的状态"
+  # Stop writers before the safety snapshot; abort before touching the database if this fails.
+  pm2 stop nextpanel-web || return 1
+  pm2 stop nextpanel-server || return 1
+  if ! cmd_backup_quiet no-rotate; then
+    restart_after_restore || true
+    warn "安全备份失败，未修改数据库"
+    return 1
   fi
-  ok "数据库已恢复"
+  safety_file="$LAST_BACKUP_FILE"
 
-  info "正在重启服务..."
-  cd "$APP_DIR"
-  pm2 restart ecosystem.config.cjs > /dev/null 2>&1
-  pm2 save > /dev/null 2>&1
-
-  sleep 5
-  ok "恢复完成！"
-  echo ""
+  if ! restore_database "$requested_file"; then
+    warn "恢复失败，正在回滚到安全备份：$safety_file"
+    if restore_database "$safety_file"; then
+      restart_after_restore || return 1
+      warn "已回滚到恢复前状态；本次恢复未成功"
+      return 1
+    fi
+    warn "回滚失败，服务保持停止；请手动恢复：$safety_file"
+    return 1
+  fi
+  restart_after_restore || return 1
+  ok "恢复完成"
 }
 
 # ── domain set ─────────────────────────────────────────────────────────────
@@ -529,6 +528,7 @@ cmd_help() {
 
 # ── 主路由 ─────────────────────────────────────────────────────────────────
 
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 case "${1:-help}" in
   status)     cmd_status ;;
   update)     shift; cmd_update "$@" ;;
@@ -546,3 +546,4 @@ case "${1:-help}" in
   uninstall)  cmd_uninstall ;;
   help|*)     cmd_help ;;
 esac
+fi

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Spin, Result, Button, Typography } from 'antd';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
@@ -15,16 +15,22 @@ export default function WxWorkCallbackPage() {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const started = useRef(false);
 
   useEffect(() => {
-    const code = new URLSearchParams(window.location.search).get('code');
-    if (!code) {
+    if (started.current) return;
+    started.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const state = params.get('state');
+    if (!code || !state) {
       setError('授权失败：未获取到授权码');
       setLoading(false);
       return;
     }
 
-    wxWorkApi.callback(code)
+    window.history.replaceState(null, '', window.location.pathname);
+    wxWorkApi.callback(code, state)
       .then((res) => {
         setAuth(res.data.accessToken, res.data.user);
         qc.clear();

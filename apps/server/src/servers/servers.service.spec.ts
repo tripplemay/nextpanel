@@ -488,12 +488,16 @@ describe('ServersService', () => {
 
   describe('installAgentStream', () => {
     const fakeServerWithToken = { ...fakeServer, sshAuthEnc: 'enc:secret', agentToken: 'tok-abc' };
+    beforeEach(() => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServerWithToken);
+    });
 
     // Helper: collect all SSE events from the observable
-    function collectEvents(id: string): Promise<Array<{ data: Record<string, unknown> }>> {
+    async function collectEvents(id: string): Promise<Array<{ data: Record<string, unknown> }>> {
+      const stream = await svc.installAgentStream(id, 'user-id-1');
       return new Promise((resolve, reject) => {
         const events: Array<{ data: Record<string, unknown> }> = [];
-        svc.installAgentStream(id).subscribe({
+        stream.subscribe({
           next: (ev) => events.push(ev as any),
           error: reject,
           complete: () => resolve(events),
@@ -619,15 +623,13 @@ describe('ServersService', () => {
       expect(doneEvent?.data.success).toBe(false);
     });
 
-    it('emits done=false when server is not found', async () => {
+    it('rejects foreign or missing servers before exposing tokens or opening SSH', async () => {
       process.env.PANEL_URL = 'https://panel.test';
       process.env.GITHUB_REPO = 'org/repo';
-      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(null);
-
-      const events = await collectEvents('srv-1');
-
-      const doneEvent = events.find((e) => e.data.done === true);
-      expect(doneEvent?.data.success).toBe(false);
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(null);
+      await expect(collectEvents('srv-1')).rejects.toBeInstanceOf(NotFoundException);
+      expect(mockPrisma.server.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'srv-1', userId: 'user-id-1' } }));
+      expect(mockSsh.execCommand).not.toHaveBeenCalled();
 
       delete process.env.PANEL_URL;
       delete process.env.GITHUB_REPO;
@@ -683,6 +685,7 @@ describe('ServersService', () => {
       const doneEvent = events.find((e) => e.data.done === true);
       expect(doneEvent?.data.success).toBe(true);
       expect(mockSsh.dispose).toHaveBeenCalled();
+      expect(mockPrisma.server.update).not.toHaveBeenCalled();
 
       delete process.env.PANEL_URL;
       delete process.env.GITHUB_REPO;

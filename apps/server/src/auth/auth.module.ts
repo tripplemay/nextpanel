@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { WxWorkModule } from '../wxwork/wxwork.module';
+import { OAuthStateService } from './oauth-state.service';
 
 @Module({
   imports: [
@@ -21,7 +22,7 @@ import { WxWorkModule } from '../wxwork/wxwork.module';
     }),
     WxWorkModule,
   ],
-  providers: [AuthService, JwtStrategy, CryptoService],
+  providers: [AuthService, JwtStrategy, CryptoService, OAuthStateService],
   controllers: [AuthController],
   exports: [AuthService, CryptoService],
 })

@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Post, Patch, Delete, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Patch, Delete, Query, UseGuards, Req, Res } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
-import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -9,6 +9,8 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { WxWorkService } from '../wxwork/wxwork.service';
+import { OAuthStateService } from './oauth-state.service';
+import { OAuthCallbackDto, OAuthBindStartDto } from './dto/oauth-callback.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -17,7 +19,7 @@ export class AuthController {
   constructor(
     private authService: AuthService,
     private wxWorkService: WxWorkService,
-    private config: ConfigService,
+    private oauthState: OAuthStateService,
   ) {}
 
   @Post('login')
@@ -64,21 +66,39 @@ export class AuthController {
   async wxWorkLoginUrl(
     @Query('device') device: string,
     @Query('redirect_uri') redirectUri: string,
+    @Res({ passthrough: true }) res: Response,
   ) {
     const d = device === 'mobile' ? 'mobile' : 'desktop';
-    const panelUrl = this.config.get<string>('PANEL_URL') ?? '';
-    const callbackUri = redirectUri || `${panelUrl}/wxwork/callback`;
-    const state = Math.random().toString(36).slice(2);
+    const callbackUri = this.oauthState.callbackUri('login');
+    if (redirectUri && redirectUri !== callbackUri) throw new BadRequestException('不允许该回调地址');
+    const state = await this.oauthState.issue('login', res);
     const url = await this.wxWorkService.getLoginUrl(callbackUri, state, d);
+    return { url, state };
+  }
+
+  @Post('wxwork/bind-url')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  async wxWorkBindUrl(
+    @CurrentUser() user: { id: string },
+    @Body() dto: OAuthBindStartDto,
+    @Query('device') device: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.authService.verifyPassword(user.id, dto.currentPassword);
+    const state = await this.oauthState.issue('bind', res, user.id);
+    const url = await this.wxWorkService.getLoginUrl(
+      this.oauthState.callbackUri('bind'), state, device === 'mobile' ? 'mobile' : 'desktop',
+    );
     return { url, state };
   }
 
   @Post('wxwork/callback')
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @ApiOperation({ summary: 'WeChat Work OAuth callback — exchange code for JWT' })
-  async wxWorkCallback(@Body('code') code: string) {
-    if (!code) throw new Error('code is required');
-    const { userId, name } = await this.wxWorkService.getUserByCode(code);
+  async wxWorkCallback(@Body() dto: OAuthCallbackDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    await this.oauthState.consume('login', dto.state, req, res);
+    const { userId, name } = await this.wxWorkService.getUserByCode(dto.code);
     return this.authService.wxWorkLogin(userId, name);
   }
 
@@ -87,10 +107,12 @@ export class AuthController {
   @ApiOperation({ summary: 'Bind WeChat Work account to current user' })
   async wxWorkBind(
     @CurrentUser() user: { id: string },
-    @Body('code') code: string,
+    @Body() dto: OAuthCallbackDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    if (!code) throw new Error('code is required');
-    const { userId, name } = await this.wxWorkService.getUserByCode(code);
+    await this.oauthState.consume('bind', dto.state, req, res, user.id);
+    const { userId, name } = await this.wxWorkService.getUserByCode(dto.code);
     await this.authService.wxWorkBind(user.id, userId, name);
     return { bound: true, wxWorkName: name };
   }

@@ -339,11 +339,9 @@ export default function SubscriptionsPage() {
                     type="primary"
                     icon={<ExportOutlined />}
                     onClick={() => {
-                      if (opts.useShareToken && sub.shareToken) {
-                        setLinkTarget(getShareFormats(sub.shareToken));
-                      } else {
-                        setLinkTarget(getFormats(sub.token));
-                      }
+                      const token = opts.useShareToken ? sub.shareToken : sub.token;
+                      if (!token) { message.error('订阅凭证缺失，请刷新页面'); return; }
+                      setLinkTarget(opts.useShareToken ? getShareFormats(token) : getFormats(token));
                     }}
                   />
                   {!opts.readonly && (
@@ -370,11 +368,9 @@ export default function SubscriptionsPage() {
                     type="primary"
                     icon={<ExportOutlined />}
                     onClick={() => {
-                      if (opts.useShareToken && sub.shareToken) {
-                        setLinkTarget(getShareFormats(sub.shareToken));
-                      } else {
-                        setLinkTarget(getFormats(sub.token));
-                      }
+                      const token = opts.useShareToken ? sub.shareToken : sub.token;
+                      if (!token) { message.error('订阅凭证缺失，请刷新页面'); return; }
+                      setLinkTarget(opts.useShareToken ? getShareFormats(token) : getFormats(token));
                     }}
                   >
                     导出链接

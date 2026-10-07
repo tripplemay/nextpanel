@@ -2,8 +2,9 @@ import { Injectable, NotFoundException, ForbiddenException, BadRequestException,
 import { PrismaService } from '../prisma.service';
 import { XrayTestService, type TestResult } from '../nodes/xray-test/xray-test.service';
 import { SingboxTestService } from '../nodes/singbox-test/singbox-test.service';
-import { parseSubscriptionText, type BareProxyProtocol } from './uri-parser';
+import { importedTransportHost, parseSubscriptionText, type BareProxyProtocol } from './uri-parser';
 import { SocksExitResolverService } from '../nodes/socks-exit-resolver.service';
+import { fetchPublicText } from '../common/http/public-fetch';
 
 @Injectable()
 export class ExternalNodesService {
@@ -25,16 +26,12 @@ export class ExternalNodesService {
 
   private async resolveText(text: string): Promise<string> {
     const trimmed = text.trim();
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      this.logger.log(`Fetching subscription URL: ${trimmed}`);
-      const res = await fetch(trimmed, {
-        headers: { 'User-Agent': 'ClashForAndroid/2.5.12' },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!res.ok) {
-        throw new BadRequestException(`订阅链接请求失败：HTTP ${res.status}`);
-      }
-      return await res.text();
+    if (/^https?:\/\//i.test(trimmed) && !/[\r\n]/.test(trimmed)) {
+      let url: URL;
+      try { url = new URL(trimmed); } catch { throw new BadRequestException('URL 无效'); }
+      // Authenticated proxy URIs and named proxy entries are not subscription endpoints.
+      if (url.username || url.password || url.hash) return trimmed;
+      return fetchPublicText(trimmed, { userAgent: 'ClashForAndroid/2.5.12' });
     }
     return trimmed;
   }
@@ -59,6 +56,7 @@ export class ExternalNodesService {
         password: n.password,
         method: n.method,
         transport: n.transport,
+        transportHost: n.transportHost,
         tls: n.tls,
         realityPublicKey: n.realityPublicKey,
         shortId: n.shortId,
@@ -86,7 +84,9 @@ export class ExternalNodesService {
     if (node.method) credentials.method = node.method;
     if (node.realityPublicKey) credentials.realityPublicKey = node.realityPublicKey;
     if (node.shortId) credentials.shortId = node.shortId;
-    if (node.path) credentials.path = node.path;
+    if (node.path != null) credentials.path = node.path;
+    const transportHost = importedTransportHost(node);
+    if (transportHost !== undefined) credentials.transportHost = transportHost;
     if (node.xhttpMode) credentials.xhttpMode = node.xhttpMode;
     if (node.xhttpHost) credentials.xhttpHost = node.xhttpHost;
     if (node.xhttpExtra) credentials.xhttpExtra = node.xhttpExtra;

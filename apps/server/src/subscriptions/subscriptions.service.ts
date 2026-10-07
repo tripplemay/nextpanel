@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma.service';
 import { NodesService } from '../nodes/nodes.service';
 import { buildShareUri, buildClashSubscription, buildSingboxOutbound, buildFullSingboxConfig, buildHomeProxyConfig } from './uri-builder';
 import type { NodeExportInfo } from './uri-builder';
+import { importedTransportHost } from '../external-nodes/uri-parser';
 
 type SubscriptionNode = {
   node: {
@@ -111,7 +112,15 @@ export class SubscriptionsService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    return shares.map((s) => ({ ...s.subscription, shareToken: s.shareToken }));
+    return shares.map((s) => ({
+      id: s.subscription.id,
+      name: s.subscription.name,
+      createdAt: s.subscription.createdAt,
+      updatedAt: s.subscription.updatedAt,
+      nodes: s.subscription.nodes,
+      externalNodes: s.subscription.externalNodes,
+      shareToken: s.shareToken,
+    }));
   }
 
   // ─── Share management ─────────────────────────────────────────────────────
@@ -287,7 +296,7 @@ export class SubscriptionsService {
       externalNodes: { include: { externalNode: true } },
     };
 
-    let sub: { ownerId: string; nodes: SubscriptionNode[]; externalNodes: { externalNode: { name: string; protocol: string; address: string; port: number; transport: string | null; tls: string; sni: string | null; path: string | null; uuid: string | null; username: string | null; password: string | null; method: string | null; realityPublicKey: string | null; shortId: string | null; xhttpMode: string | null; xhttpHost: string | null; xhttpExtra: string | null } }[] } | null = null;
+    let sub: { ownerId: string; nodes: SubscriptionNode[]; externalNodes: { externalNode: { name: string; protocol: string; address: string; port: number; transport: string | null; transportHost: string | null; tls: string; sni: string | null; path: string | null; uuid: string | null; username: string | null; password: string | null; method: string | null; realityPublicKey: string | null; shortId: string | null; xhttpMode: string | null; xhttpHost: string | null; xhttpExtra: string | null } }[] } | null = null;
 
     if (by.shareToken) {
       const share = await this.prisma.subscriptionShare.findUnique({
@@ -327,7 +336,9 @@ export class SubscriptionsService {
       if (en.method) credentials.method = en.method;
       if (en.realityPublicKey) credentials.realityPublicKey = en.realityPublicKey;
       if (en.shortId) credentials.shortId = en.shortId;
-      if (en.path) credentials.path = en.path;
+      if (en.path != null) credentials.path = en.path;
+      const transportHost = importedTransportHost(en);
+      if (transportHost !== undefined) credentials.transportHost = transportHost;
       if (en.xhttpMode) credentials.xhttpMode = en.xhttpMode;
       if (en.xhttpHost) credentials.xhttpHost = en.xhttpHost;
       if (en.xhttpExtra) credentials.xhttpExtra = en.xhttpExtra;

@@ -1,3 +1,5 @@
+import { fetchPublicText } from '../common/http/public-fetch';
+jest.mock('../common/http/public-fetch', () => ({ fetchPublicText: jest.fn() }));
 import { ExternalNodesService } from './external-nodes.service';
 import { PrismaService } from '../prisma.service';
 import { XrayTestService } from '../nodes/xray-test/xray-test.service';
@@ -142,24 +144,18 @@ describe('ExternalNodesService', () => {
     });
 
     it('fetches URL when text starts with https://', async () => {
-      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: false,
-        status: 404,
-      } as Response);
+      (fetchPublicText as jest.Mock).mockRejectedValue(new BadRequestException('remote HTTP 404'));
       await expect(svc.import('user-1', 'https://example.com/sub')).rejects.toThrow(BadRequestException);
-      fetchSpy.mockRestore();
+
     });
 
     it('resolves URL content and imports nodes', async () => {
       const vlessUri = 'vless://some-uuid@1.2.3.4:443?type=ws&security=tls&sni=test.com#Remote+Node';
-      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        text: async () => vlessUri,
-      } as Response);
+      (fetchPublicText as jest.Mock).mockResolvedValue(vlessUri);
       (mockPrisma.externalNode.createMany as jest.Mock).mockResolvedValue({ count: 1 });
       const result = await svc.import('user-1', 'https://example.com/sub');
       expect(result.success).toBe(1);
-      fetchSpy.mockRestore();
+
     });
   });
 

@@ -21,6 +21,7 @@ import { Audit } from '../common/decorators/audit.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ServersService } from './servers.service';
 import { AutoSetupService } from './auto-setup.service';
+import { ServerOwnerGuard } from './server-owner.guard';
 import { CreateServerDto } from './dto/create-server.dto';
 import { UpdateServerDto } from './dto/update-server.dto';
 import { RestoreCredentialsDto } from './dto/restore-credentials.dto';
@@ -154,21 +155,26 @@ export class ServersController {
   }
 
   @Sse(':id/install-agent')
+  @UseGuards(ServerOwnerGuard)
   @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @ApiOperation({ summary: 'Install agent on server via SSH (SSE stream)' })
-  installAgent(@Param('id') id: string): Observable<MessageEvent> {
-    return this.serversService.installAgentStream(id);
+  installAgent(
+    @Param('id') id: string,
+    @CurrentUser() user: { id: string },
+  ): Promise<Observable<MessageEvent>> {
+    return this.serversService.installAgentStream(id, user.id);
   }
 
   @Sse(':id/auto-setup')
+  @UseGuards(ServerOwnerGuard)
   @Roles('ADMIN', 'OPERATOR', 'VIEWER')
-  @ApiOperation({ summary: 'Auto-setup proxy nodes from templates (SSE stream)' })
+  @ApiOperation({ summary: 'SSH connectivity check only (legacy SSE endpoint)' })
   runAutoSetup(
     @Param('id') id: string,
     @Query('templateIds') templateIds: string,
     @CurrentUser() user: { id: string },
-  ): Observable<MessageEvent> {
+  ): Promise<Observable<MessageEvent>> {
     const ids = templateIds ? templateIds.split(',').filter(Boolean) : [];
-    return this.autoSetupService.setupStream(id, ids, user?.id);
+    return this.autoSetupService.setupStream(id, ids, user.id);
   }
 }

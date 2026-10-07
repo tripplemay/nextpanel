@@ -22,8 +22,10 @@ import { WxWorkModule } from './wxwork/wxwork.module';
 import { OpenRouterModule } from './openrouter/openrouter.module';
 import { RecommendsModule } from './recommends/recommends.module';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
+import { HealthController } from './health.controller';
 
 @Module({
+  controllers: [HealthController],
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),

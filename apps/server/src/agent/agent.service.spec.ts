@@ -8,7 +8,7 @@ import { UnauthorizedException } from '@nestjs/common';
 const mockPrisma = {
   server: {
     findUnique: jest.fn(),
-    update: jest.fn(),
+    updateMany: jest.fn(),
   },
   node: {
     findMany: jest.fn().mockResolvedValue([]),
@@ -28,17 +28,40 @@ const mockConfig = {
   get: jest.fn().mockReturnValue('tripplemay/nextpanel-releases'),
 } as unknown as ConfigService;
 
-const svc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
+let svc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
 
 const fakeServer = { id: 'srv-1', agentToken: 'tok-abc', pendingAgentUpdate: false };
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  svc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
+});
 
 describe('AgentService', () => {
+  const heartbeat = { agentToken: 'tok-abc', agentVersion: '1.7.0', cpu: 0, mem: 0, disk: 0, networkIn: 0, networkOut: 0 };
+
+  it.each(['DELETING', 'ERROR'])('does not resurrect a server that became %s after lookup', async (status) => {
+    (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({ ...fakeServer, status: 'ONLINE' });
+    (mockPrisma.server.updateMany as jest.Mock).mockImplementation(async ({ where }) => ({ count: where.status.notIn.includes(status) ? 0 : 1 }));
+    const result = await svc.handleHeartbeat({ ...heartbeat, nodeStatuses: [{ nodeId: 'n1', status: 'RUNNING' }] });
+    expect(result).toEqual({ ok: true, xrayNodes: [] });
+    expect(mockMetrics.record).not.toHaveBeenCalled();
+    expect(mockPrisma.node.updateMany).not.toHaveBeenCalled();
+    expect(mockIpCheck.getPendingTask).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, 'amd64', 'arm64'] as const)('withholds unverifiable updates for architecture %s', async (architecture) => {
+    (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({ ...fakeServer, pendingAgentUpdate: true });
+    (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+    (svc as any).latestVersionCache = { version: '2.0.0', tagName: 'v2.0.0', fetchedAt: Date.now(), digests: {}, releaseNotes: '' };
+    const result = await svc.handleHeartbeat({ ...heartbeat, architecture });
+    expect(result.updateCommand).toBeUndefined();
+  });
+
   describe('handleHeartbeat', () => {
     it('returns { ok: true } on valid token', async () => {
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       const result = await svc.handleHeartbeat({
         agentToken: 'tok-abc',
@@ -61,22 +84,22 @@ describe('AgentService', () => {
 
     it('updates agentVersion on the server', async () => {
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await svc.handleHeartbeat({
         agentToken: 'tok-abc', agentVersion: 'v2.0.0',
         cpu: 10, mem: 20, disk: 30, networkIn: 0, networkOut: 0,
       });
 
-      expect(mockPrisma.server.update).toHaveBeenCalledWith({
-        where: { id: 'srv-1' },
+      expect(mockPrisma.server.updateMany).toHaveBeenCalledWith({
+        where: { id: 'srv-1', status: { notIn: ['DELETING', 'ERROR'] } },
         data: expect.objectContaining({ agentVersion: 'v2.0.0' }),
       });
     });
 
     it('calls metricsService.record with correct values', async () => {
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       // First call establishes the previous network baseline
       await svc.handleHeartbeat({
@@ -85,7 +108,7 @@ describe('AgentService', () => {
       });
       jest.clearAllMocks();
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       // Second call: delta = 10240 bytes over 10s → rate = 1024 bytes/s; delta = 20480 → 2048/s
       await svc.handleHeartbeat({
@@ -98,7 +121,7 @@ describe('AgentService', () => {
 
     it('updates node statuses when nodeStatuses provided', async () => {
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.node.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await svc.handleHeartbeat({
@@ -125,7 +148,7 @@ describe('AgentService', () => {
 
     it('skips node status update when nodeStatuses not provided', async () => {
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await svc.handleHeartbeat({
         agentToken: 'tok-abc', agentVersion: 'v1',
@@ -137,7 +160,7 @@ describe('AgentService', () => {
 
     it('updates nodeTraffic when nodeTraffic payload is provided', async () => {
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.node.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await svc.handleHeartbeat({
@@ -155,26 +178,27 @@ describe('AgentService', () => {
     it('delivers updateCommand but keeps flag set while agent is still on old version', async () => {
       const serverWithUpdate = { ...fakeServer, pendingAgentUpdate: true };
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(serverWithUpdate);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(serverWithUpdate);
+      (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       // getLatestVersion makes two fetches: GitHub releases API, then RELEASE_NOTES.md
       const fetchSpy = jest.spyOn(global, 'fetch')
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v2.0.0' }) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v2.0.0', assets: [{ name: 'agent-linux-arm64', digest: 'sha256:' + 'a'.repeat(64) }] }) } as Response)
         .mockResolvedValueOnce({ ok: false } as Response); // RELEASE_NOTES.md not required
 
       // Agent reports old version — update is still in progress
       const result = await svc.handleHeartbeat({
-        agentToken: 'tok-abc', agentVersion: '1.4.0',
+        agentToken: 'tok-abc', agentVersion: '1.4.0', architecture: 'arm64',
         cpu: 0, mem: 0, disk: 0, networkIn: 0, networkOut: 0,
       });
 
       // Command should be sent so agent can download
       expect(result.updateCommand).toMatchObject({
         version: '2.0.0',
-        downloadUrl: expect.stringContaining('v2.0.0'),
+        downloadUrl: expect.stringContaining('v2.0.0/agent-linux-arm64'),
+        sha256: 'a'.repeat(64),
       });
       // Flag must NOT be cleared — agent hasn't updated yet
-      const updateCall = (mockPrisma.server.update as jest.Mock).mock.calls[0][0];
+      const updateCall = (mockPrisma.server.updateMany as jest.Mock).mock.calls[0][0];
       expect(updateCall.data).not.toHaveProperty('pendingAgentUpdate');
       fetchSpy.mockRestore();
     });
@@ -183,24 +207,24 @@ describe('AgentService', () => {
       const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
       const serverWithUpdate = { ...fakeServer, id: 'srv-timeout', pendingAgentUpdate: true };
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(serverWithUpdate);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(serverWithUpdate);
+      (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]);
 
       const fetchSpy = jest.spyOn(global, 'fetch')
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v2.0.0' }) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v2.0.0', assets: [{ name: 'agent-linux-arm64', digest: 'sha256:' + 'a'.repeat(64) }] }) } as Response)
         .mockResolvedValueOnce({ ok: false } as Response);
 
       // Backdate the pendingUpdateSince entry so elapsed > TIMEOUT
       (freshSvc as any).pendingUpdateSince.set('srv-timeout', Date.now() - 16 * 60 * 1000);
 
       const result = await freshSvc.handleHeartbeat({
-        agentToken: 'tok-abc', agentVersion: '1.4.0',
+        agentToken: 'tok-abc', agentVersion: '1.4.0', architecture: 'arm64',
         cpu: 0, mem: 0, disk: 0, networkIn: 0, networkOut: 0,
       });
 
       // Timed out — no command, flag cleared
       expect(result.updateCommand).toBeUndefined();
-      expect(mockPrisma.server.update).toHaveBeenCalledWith(
+      expect(mockPrisma.server.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ pendingAgentUpdate: false }) }),
       );
       fetchSpy.mockRestore();
@@ -209,11 +233,11 @@ describe('AgentService', () => {
     it('clears pendingAgentUpdate flag once agent reports the target version', async () => {
       const serverWithUpdate = { ...fakeServer, pendingAgentUpdate: true };
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(serverWithUpdate);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(serverWithUpdate);
+      (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       // getLatestVersion makes two fetches: GitHub releases API, then RELEASE_NOTES.md
       const fetchSpy = jest.spyOn(global, 'fetch')
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v2.0.0' }) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v2.0.0', assets: [{ name: 'agent-linux-arm64', digest: 'sha256:' + 'a'.repeat(64) }] }) } as Response)
         .mockResolvedValueOnce({ ok: false } as Response);
 
       // Agent reports the new version — update is complete
@@ -225,7 +249,7 @@ describe('AgentService', () => {
       // No command needed — agent is already on the target version
       expect(result.updateCommand).toBeUndefined();
       // Flag should now be cleared
-      expect(mockPrisma.server.update).toHaveBeenCalledWith(
+      expect(mockPrisma.server.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ pendingAgentUpdate: false }) }),
       );
       fetchSpy.mockRestore();
@@ -233,7 +257,7 @@ describe('AgentService', () => {
 
     it('returns ipCheckTask when pending task exists', async () => {
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
+      (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
       (mockIpCheck.getPendingTask as jest.Mock).mockResolvedValue({ serverId: 'srv-1' });
 
       const result = await svc.handleHeartbeat({

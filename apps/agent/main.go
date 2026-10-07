@@ -6,19 +6,23 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
 const (
-	version           = "1.6.0"
+	version           = "1.7.0"
 	heartbeatInterval = 10 * time.Second
 	httpTimeout       = 8 * time.Second
 )
 
 var httpClient = &http.Client{
-	Timeout: httpTimeout,
+	Timeout:       httpTimeout,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse },
 	Transport: &http.Transport{
 		DisableKeepAlives: true,
 	},
@@ -30,15 +34,16 @@ type nodeStatus struct {
 }
 
 type heartbeatPayload struct {
-	AgentToken    string            `json:"agentToken"`
-	AgentVersion  string            `json:"agentVersion"`
-	CPU           float64           `json:"cpu"`
-	Mem           float64           `json:"mem"`
-	Disk          float64           `json:"disk"`
-	NetworkIn     uint64            `json:"networkIn"`
-	NetworkOut    uint64            `json:"networkOut"`
-	NodeTraffic   []nodeTrafficStat `json:"nodeTraffic,omitempty"`
-	NodeStatuses  []nodeStatus      `json:"nodeStatuses,omitempty"`
+	AgentToken   string            `json:"agentToken"`
+	AgentVersion string            `json:"agentVersion"`
+	Architecture string            `json:"architecture"`
+	CPU          float64           `json:"cpu"`
+	Mem          float64           `json:"mem"`
+	Disk         float64           `json:"disk"`
+	NetworkIn    uint64            `json:"networkIn"`
+	NetworkOut   uint64            `json:"networkOut"`
+	NodeTraffic  []nodeTrafficStat `json:"nodeTraffic,omitempty"`
+	NodeStatuses []nodeStatus      `json:"nodeStatuses,omitempty"`
 }
 
 type ipCheckTask struct {
@@ -48,6 +53,7 @@ type ipCheckTask struct {
 type updateCommand struct {
 	Version     string `json:"version"`
 	DownloadURL string `json:"downloadUrl"`
+	SHA256      string `json:"sha256"`
 }
 
 type heartbeatResponse struct {
@@ -96,15 +102,16 @@ func discoverChainServices() []nodeStatus {
 
 func sendHeartbeat(cfg *Config, m *Metrics, traffic []nodeTrafficStat, chainStatuses []nodeStatus) (*heartbeatResponse, error) {
 	payload := heartbeatPayload{
-		AgentToken:    cfg.AgentToken,
-		AgentVersion:  version,
-		CPU:           m.CPU,
-		Mem:           m.Mem,
-		Disk:          m.Disk,
-		NetworkIn:     m.NetworkIn,
-		NetworkOut:    m.NetworkOut,
-		NodeTraffic:   traffic,
-		NodeStatuses:  chainStatuses,
+		AgentToken:   cfg.AgentToken,
+		AgentVersion: version,
+		Architecture: runtime.GOARCH,
+		CPU:          m.CPU,
+		Mem:          m.Mem,
+		Disk:         m.Disk,
+		NetworkIn:    m.NetworkIn,
+		NetworkOut:   m.NetworkOut,
+		NodeTraffic:  traffic,
+		NodeStatuses: chainStatuses,
 	}
 
 	body, err := json.Marshal(payload)
@@ -112,16 +119,20 @@ func sendHeartbeat(cfg *Config, m *Metrics, traffic []nodeTrafficStat, chainStat
 		return nil, err
 	}
 
-	// Prefer direct IP connection (bypasses CF), fall back to CF URL
+	// Never prefer an insecure direct link over the authenticated panel connection.
 	baseURL := cfg.ServerURL
-	if cfg.DirectURL != "" {
+	if cfg.DirectURL != "" && (strings.HasPrefix(cfg.DirectURL, "https://") || !strings.HasPrefix(cfg.ServerURL, "https://")) {
 		baseURL = cfg.DirectURL
 	}
 	url := strings.TrimRight(baseURL, "/") + "/api/agent/heartbeat"
 	resp, err := httpClient.Post(url, "application/json", bytes.NewReader(body))
-	if err != nil && cfg.DirectURL != "" && baseURL == cfg.DirectURL {
-		// Direct connection failed, fall back to CF URL
-		url = strings.TrimRight(cfg.ServerURL, "/") + "/api/agent/heartbeat"
+	if err != nil && cfg.DirectURL != "" && cfg.DirectURL != cfg.ServerURL {
+		// Preserve telemetry failover; plaintext responses still cannot authorize updates.
+		fallback := cfg.DirectURL
+		if baseURL == cfg.DirectURL {
+			fallback = cfg.ServerURL
+		}
+		url = strings.TrimRight(fallback, "/") + "/api/agent/heartbeat"
 		resp, err = httpClient.Post(url, "application/json", bytes.NewReader(body))
 	}
 	if err != nil {
@@ -137,10 +148,30 @@ func sendHeartbeat(cfg *Config, m *Metrics, traffic []nodeTrafficStat, chainStat
 	if err := json.NewDecoder(resp.Body).Decode(&hbResp); err != nil {
 		return nil, fmt.Errorf("解析响应失败: %w", err)
 	}
+	if !hbResp.OK {
+		return nil, fmt.Errorf("heartbeat was not acknowledged")
+	}
+	if resp.TLS == nil || len(resp.TLS.VerifiedChains) == 0 {
+		hbResp.UpdateCommand = nil
+	}
 	return &hbResp, nil
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(version)
+		return
+	}
+	if len(os.Args) == 3 && os.Args[1] == "--rollback" {
+		backup, err := os.Executable()
+		if err == nil {
+			err = restorePreviousExecutable(backup, os.Args[2])
+		}
+		if err != nil {
+			log.Fatalf("rollback failed: %v", err)
+		}
+		return
+	}
 	cfg, err := loadConfig()
 	if err != nil {
 		log.Fatalf("启动失败: %v", err)
@@ -155,8 +186,9 @@ func main() {
 	ensureNexttrace()
 
 	var xrayNodes []xrayNode
-	var ipCheckRunning bool
-	var selfUpdateRunning bool
+	var ipCheckRunning atomic.Bool
+	var selfUpdateRunning atomic.Bool
+	var startupConfirmed bool
 
 	for {
 		m, err := collectMetrics()
@@ -169,32 +201,37 @@ func main() {
 			if err != nil {
 				log.Printf("心跳发送失败: %v", err)
 			} else {
+				if !startupConfirmed {
+					if err := confirmSelfUpdate(); err != nil {
+						log.Printf("update confirmation failed: %v", err)
+					} else {
+						startupConfirmed = true
+					}
+				}
 				xrayNodes = hbResp.XrayNodes
 				log.Printf("心跳已发送 CPU=%.1f%% MEM=%.1f%% DISK=%.1f%% xrayNodes=%d",
 					m.CPU, m.Mem, m.Disk, len(xrayNodes))
 
 				// Run IP check task if assigned and not already running
-				if hbResp.IpCheckTask != nil && !ipCheckRunning {
-					ipCheckRunning = true
+				if hbResp.IpCheckTask != nil && ipCheckRunning.CompareAndSwap(false, true) {
 					go func(serverId string) {
-						defer func() { ipCheckRunning = false }()
+						defer func() { ipCheckRunning.Store(false) }()
 						runIpCheck(cfg, serverId)
 					}(hbResp.IpCheckTask.ServerID)
 				}
 
 				// Self-update if server delivered an update command
-				if hbResp.UpdateCommand != nil && !selfUpdateRunning {
+				if hbResp.UpdateCommand != nil && hbResp.UpdateCommand.Version != version && selfUpdateRunning.CompareAndSwap(false, true) {
 					cmd := hbResp.UpdateCommand
 					if cmd.Version != version {
-						selfUpdateRunning = true
-						go func(ver, url string) {
+						go func(ver, url, digest string) {
+							defer selfUpdateRunning.Store(false)
 							log.Printf("收到更新指令：v%s → v%s，开始自更新...", version, ver)
-							if err := selfUpdate(url); err != nil {
+							if err := selfUpdate(url, digest, ver); err != nil {
 								log.Printf("自更新失败: %v", err)
-								selfUpdateRunning = false
 							}
-							// selfUpdate exits the process on success; PM2 restarts it
-						}(cmd.Version, cmd.DownloadURL)
+							// selfUpdate exits the process on success; systemd restarts it
+						}(cmd.Version, cmd.DownloadURL, cmd.SHA256)
 					}
 				}
 			}

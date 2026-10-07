@@ -194,6 +194,7 @@ export class NodeDeployService {
           startMs,
           correlationId,
           statsPort,
+          node.userId,
         );
         return { success: false, log: logs.join('\n') };
       }
@@ -241,14 +242,14 @@ export class NodeDeployService {
         if (!resolvedBin) {
           log(`Auto-install failed. Please install the binary manually and retry.`);
           ssh.dispose();
-          await this.finalize(nodeId, node.name, false, logs, configJson, actorId, startMs, correlationId);
+          await this.finalize(nodeId, node.name, false, logs, configJson, actorId, startMs, correlationId, undefined, node.userId);
           return { success: false, log: logs.join('\n') };
         }
         // Re-verify — use resolved path (may differ from default for ss-libev)
         if (!(await binaryExists(ssh, resolvedBin))) {
           log(`Binary still not found at ${resolvedBin} after install. Aborting.`);
           ssh.dispose();
-          await this.finalize(nodeId, node.name, false, logs, configJson, actorId, startMs, correlationId);
+          await this.finalize(nodeId, node.name, false, logs, configJson, actorId, startMs, correlationId, undefined, node.userId);
           return { success: false, log: logs.join('\n') };
         }
         // Override bin if ss-libev resolved to a different path
@@ -483,7 +484,7 @@ export class NodeDeployService {
         }
       }
 
-      await this.finalize(nodeId, node.name, isActive, logs, configJson, actorId, startMs, correlationId, statsPort);
+      await this.finalize(nodeId, node.name, isActive, logs, configJson, actorId, startMs, correlationId, statsPort, node.userId);
 
       // Keep both rollback points until the database status/snapshot commit has
       // succeeded. A persistence failure must not leave the remote pair committed
@@ -564,7 +565,7 @@ export class NodeDeployService {
       const msg = err instanceof Error ? err.message : String(err);
       log(`Deploy error: ${msg}`);
       try {
-        await this.finalize(nodeId, node.name, false, logs, configJson, actorId, startMs, correlationId, statsPort);
+        await this.finalize(nodeId, node.name, false, logs, configJson, actorId, startMs, correlationId, statsPort, node.userId);
       } catch (finalizeErr) {
         if (rollbackFailed) {
           const finalizeMessage = finalizeErr instanceof Error
@@ -873,6 +874,7 @@ export class NodeDeployService {
       await this.operationLog.createLog({
         resourceType: 'node',
         resourceId: node.id,
+        ownerId: node.userId,
         resourceName: node.name,
         actorId: actorId ?? null,
         operation: 'UNDEPLOY',
@@ -917,6 +919,7 @@ export class NodeDeployService {
         await this.operationLog.createLog({
           resourceType: 'node',
           resourceId: node.id,
+          ownerId: node.userId,
           resourceName: node.name,
           actorId: actorId ?? null,
           operation: 'UNDEPLOY',
@@ -951,6 +954,7 @@ export class NodeDeployService {
     await this.operationLog.createLog({
       resourceType: 'node',
       resourceId: node.id,
+      ownerId: node.userId,
       resourceName: node.name,
       actorId: actorId ?? null,
       operation: 'UNDEPLOY',
@@ -2525,6 +2529,7 @@ export class NodeDeployService {
     startMs: number,
     correlationId?: string,
     statsPort?: number,
+    ownerId?: string,
   ) {
     const encryptedConfig = this.crypto.encrypt(configJson);
     // Hash only the encrypted envelope. Hashing plaintext would provide an
@@ -2582,6 +2587,7 @@ export class NodeDeployService {
       this.operationLog.createLog({
         resourceType: 'node',
         resourceId: nodeId,
+        ownerId,
         resourceName: nodeName,
         actorId: actorId ?? null,
         operation: 'DEPLOY',

@@ -44,7 +44,7 @@ export default function AutoSetupDrawer({
 
   const drawerTitle = (
     <Space>
-      <span>自动配置 — {serverName}</span>
+      <span>SSH 连接检查 — {serverName}</span>
       {deployStatus === 'running' && <Badge status="processing" text="配置中" />}
       {deployStatus === 'success' && (
         <Text type="success"><CheckCircleFilled /> 配置完成</Text>
@@ -75,7 +75,7 @@ export default function AutoSetupDrawer({
       <LogTerminal
         lines={logLines}
         status={deployStatus}
-        successText="自动配置完成，节点已部署"
+        successText="SSH 检查完成；未部署节点，请使用节点协议预设"
         failedText="配置失败，请查看上方日志"
         minHeight={300}
         maxHeight="calc(100vh - 280px)"

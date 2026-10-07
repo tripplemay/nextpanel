@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { firstValueFrom, toArray } from 'rxjs';
 import { AutoSetupService } from './auto-setup.service';
 import { PrismaService } from '../prisma.service';
@@ -17,7 +17,7 @@ jest.mock('../nodes/ssh/ssh.util', () => ({
 const mockConnectSsh = sshUtil.connectSsh as jest.Mock;
 
 const mockPrisma = {
-  server: { findUnique: jest.fn() },
+  server: { findUnique: jest.fn(), findFirst: jest.fn() },
 } as unknown as PrismaService;
 
 const mockCrypto = {
@@ -32,7 +32,7 @@ const fakeServer = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function collectEvents(svc: AutoSetupService, serverId: string) {
-  return firstValueFrom(svc.setupStream(serverId, [], 'actor-1').pipe(toArray()));
+  return firstValueFrom((await svc.setupStream(serverId, [], 'actor-1')).pipe(toArray()));
 }
 
 // ── Suite ─────────────────────────────────────────────────────────────────────
@@ -42,16 +42,15 @@ describe('AutoSetupService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
     svc = new AutoSetupService(mockPrisma, mockCrypto);
   });
 
-  it('emits done=false when server is not found', async () => {
-    (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(null);
-
-    const events = await collectEvents(svc, 'missing');
-    const doneEvent = events.find((e) => (e.data as any).done);
-
-    expect(doneEvent?.data).toMatchObject({ done: true, success: false });
+  it('rejects missing or foreign servers before opening SSH', async () => {
+    (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(null);
+    await expect(collectEvents(svc, 'missing')).rejects.toBeInstanceOf(NotFoundException);
+    expect(mockPrisma.server.findFirst).toHaveBeenCalledWith({ where: { id: 'missing', userId: 'actor-1' } });
+    expect(mockConnectSsh).not.toHaveBeenCalled();
   });
 
   it('emits done=true and disposes SSH on success', async () => {
@@ -67,7 +66,7 @@ describe('AutoSetupService', () => {
     );
     expect(mockSsh.dispose).toHaveBeenCalled();
     expect(doneEvent?.data).toMatchObject({ done: true, success: true });
-    expect(logs.some((l) => l.includes('自动配置完成'))).toBe(true);
+    expect(logs.some((l) => l.includes('未修改服务器配置'))).toBe(true);
   });
 
   it('decrypts SSH auth before connecting', async () => {
@@ -94,15 +93,11 @@ describe('AutoSetupService', () => {
     expect(logs.some((l) => l.includes('[ERROR]') && l.includes('connection refused'))).toBe(true);
   });
 
-  it('ignores _templateIds (no-op)', async () => {
+  it('rejects unsupported template configuration instead of claiming success', async () => {
     (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
     mockConnectSsh.mockResolvedValue(mockSsh);
 
-    // Even with templateIds provided, should still succeed and not call any template logic
-    const events = await firstValueFrom(
-      svc.setupStream('srv-1', ['tpl-1', 'tpl-2'], 'actor').pipe(toArray()),
-    );
-    const doneEvent = events.find((e) => (e.data as any).done);
-    expect(doneEvent?.data).toMatchObject({ done: true, success: true });
+    await expect(svc.setupStream('srv-1', ['tpl-1'], 'actor')).rejects.toBeInstanceOf(BadRequestException);
+    expect(mockConnectSsh).not.toHaveBeenCalled();
   });
 });

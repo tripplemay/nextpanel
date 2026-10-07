@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
-import { AgentService, HeartbeatPayload } from './agent.service';
+import { AgentService } from './agent.service';
+import { HeartbeatDto } from './heartbeat.dto';
 
 @ApiTags('agent')
 @Controller('agent')
@@ -10,7 +11,7 @@ export class AgentController {
   /** Called by each node's agent to report health and metrics */
   @Post('heartbeat')
   @ApiOperation({ summary: 'Agent heartbeat — no JWT required, uses agentToken' })
-  heartbeat(@Body() payload: HeartbeatPayload) {
+  heartbeat(@Body() payload: HeartbeatDto) {
     return this.agentService.handleHeartbeat(payload);
   }
 

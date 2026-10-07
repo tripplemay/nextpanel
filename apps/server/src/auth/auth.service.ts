@@ -207,6 +207,13 @@ export class AuthService {
     await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
   }
 
+  async verifyPassword(userId: string, password: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user?.passwordHash || !(await bcrypt.compare(password, user.passwordHash))) {
+      throw new UnauthorizedException('请使用当前账户密码重新认证');
+    }
+  }
+
   /** Purge expired revoked tokens daily to keep the table small */
   @Cron('0 3 * * *')
   async purgeExpiredTokens(): Promise<void> {

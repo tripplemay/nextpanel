@@ -1,5 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { OpenRouterSettingsService } from './openrouter-settings.service';
+import { fetchPublicText } from '../common/http/public-fetch';
 
 export interface ExtractResult {
   name: string;
@@ -81,25 +82,11 @@ export class OpenRouterService {
     // Step 1: Fetch the URL HTML
     let html: string;
     try {
-      const res = await fetch(url, {
-        signal: AbortSignal.timeout(15_000),
-        redirect: 'follow',
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-        },
-      });
-      if (!res.ok) {
-        if (res.status === 403) {
-          throw new BadRequestException('该网站有反爬保护（HTTP 403），无法自动识别，请手动填写');
-        }
-        throw new Error(`HTTP ${res.status}`);
-      }
-      html = await res.text();
+      html = await fetchPublicText(url);
     } catch (err) {
       if (err instanceof BadRequestException) throw err;
-      this.logger.error(`Failed to fetch URL ${url}: ${err}`);
-      throw new BadRequestException(`无法访问该 URL: ${err}`);
+      this.logger.warn('Failed to fetch recommendation URL');
+      throw new BadRequestException('无法访问该 URL');
     }
 
     // Step 2: Strip HTML to plain text

@@ -37,6 +37,16 @@ const fakeInvite = { id: 'inv1', code: 'valid-code', maxUses: 5, usedCount: 2 };
 beforeEach(() => jest.clearAllMocks());
 
 describe('AuthService', () => {
+  it('requires the current password before creating an OAuth binding authorization', async () => {
+    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(fakeUser);
+    bcryptCompare.mockResolvedValue(false);
+    await expect(svc.verifyPassword('u1', 'wrong')).rejects.toThrow(UnauthorizedException);
+    bcryptCompare.mockResolvedValue(true);
+    await expect(svc.verifyPassword('u1', 'correct')).resolves.toBeUndefined();
+    expect(bcryptCompare).toHaveBeenLastCalledWith('correct', 'hashed');
+    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+    await expect(svc.verifyPassword('missing', 'correct')).rejects.toThrow(UnauthorizedException);
+  });
   describe('login', () => {
     it('returns accessToken and user info on success', async () => {
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(fakeUser);

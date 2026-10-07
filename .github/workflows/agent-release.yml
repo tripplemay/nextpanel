@@ -45,9 +45,9 @@ jobs:
         if: steps.tag_check.outputs.EXISTS == 'false'
         run: |
           cd apps/agent
-          go mod tidy
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o agent-linux-amd64 .
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o agent-linux-arm64 .
+          go test -mod=readonly -race ./...
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -ldflags="-s -w" -o agent-linux-amd64 .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -mod=readonly -ldflags="-s -w" -o agent-linux-arm64 .
 
       - name: Create GitHub Release
         if: steps.tag_check.outputs.EXISTS == 'false'

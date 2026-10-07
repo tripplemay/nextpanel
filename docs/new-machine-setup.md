@@ -70,7 +70,7 @@ JWT_SECRET="<JWT_SECRET>"
 JWT_EXPIRES_IN="7d"
 ENCRYPTION_KEY="<ENCRYPTION_KEY>"
 PORT=3001
-ALLOWED_ORIGIN="http://localhost:3000"
+ALLOWED_ORIGIN="http://localhost:3400"
 ```
 
 在 `apps/web/.env.local` 中设置：

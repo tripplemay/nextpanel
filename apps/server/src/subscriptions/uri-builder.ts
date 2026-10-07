@@ -42,8 +42,8 @@ export function buildShareUri(node: NodeExportInfo): string | null {
         scy: 'auto',
         net,
         type: 'none',
-        host: net === 'xhttp' ? (xhttpHost ?? '') : (domain ?? ''),
-        path: net === 'ws' ? '/' : net === 'grpc' ? 'grpc' : net === 'xhttp' ? normalizeXhttpPath(creds.path) : '',
+        host: net === 'xhttp' ? (xhttpHost ?? '') : (creds.transportHost ?? domain ?? ''),
+        path: net === 'ws' ? (creds.path || '/') : net === 'grpc' ? (creds.path ?? 'grpc') : net === 'xhttp' ? normalizeXhttpPath(creds.path) : '',
         ...(net === 'xhttp' ? { mode: xhttpMode } : {}),
         ...(net === 'xhttp' && creds.xhttpExtra !== undefined ? { extra: creds.xhttpExtra } : {}),
         tls: tls === 'TLS' ? 'tls' : tls === 'REALITY' ? 'reality' : '',
@@ -66,7 +66,7 @@ export function buildShareUri(node: NodeExportInfo): string | null {
       addTransportParams(params, net, domain, creds);
       addTlsParams(params, tls, domain, creds);
       const qs = params.toString();
-      return `trojan://${creds.password ?? ''}@${authorityHost}:${port}${qs ? '?' + qs : ''}#${tag}`;
+      return `trojan://${encodeURIComponent(creds.password ?? '')}@${authorityHost}:${port}${qs ? '?' + qs : ''}#${tag}`;
     }
 
     case 'SHADOWSOCKS': {
@@ -101,8 +101,11 @@ export function buildShareUri(node: NodeExportInfo): string | null {
       return `socks5://${userInfo}${authorityHost}:${port}#${tag}`;
     }
 
-    case 'HTTP':
-      return `http://${authorityHost}:${port}#${tag}`;
+    case 'HTTP': {
+      const auth = creds.username !== undefined
+        ? `${encodeURIComponent(creds.username)}:${encodeURIComponent(creds.password ?? '')}@` : '';
+      return `${tls === 'TLS' ? 'https' : 'http'}://${auth}${authorityHost}:${port}#${tag}`;
+    }
 
     default:
       return null;
@@ -142,12 +145,14 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       if (sni) add('servername', sni);
       if (net === 'ws') {
         lines.push(`    ws-opts:`);
-        lines.push(`      path: /`);
-        if (sni) lines.push(`      headers:`);
-        if (sni) lines.push(`        Host: ${sni}`);
+        lines.push(`      path: ${yamlScalar(creds.path || '/')}`);
+        if (creds.transportHost ?? domain) {
+          lines.push(`      headers:`);
+          lines.push(`        Host: ${yamlScalar(creds.transportHost ?? domain!)}`);
+        }
       } else if (net === 'grpc') {
         lines.push(`    grpc-opts:`);
-        lines.push(`      grpc-service-name: grpc`);
+        lines.push(`      grpc-service-name: ${yamlScalar(creds.path ?? 'grpc')}`);
       } else if (net === 'xhttp') {
         addClashXhttpOptions(lines, creds);
       }
@@ -172,10 +177,14 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       if (sni) add('servername', sni);
       if (net === 'ws') {
         lines.push(`    ws-opts:`);
-        lines.push(`      path: /`);
+        lines.push(`      path: ${yamlScalar(creds.path || '/')}`);
+        if (creds.transportHost ?? domain) {
+          lines.push(`      headers:`);
+          lines.push(`        Host: ${yamlScalar(creds.transportHost ?? domain!)}`);
+        }
       } else if (net === 'grpc') {
         lines.push(`    grpc-opts:`);
-        lines.push(`      grpc-service-name: grpc`);
+        lines.push(`      grpc-service-name: ${yamlScalar(creds.path ?? 'grpc')}`);
       } else if (net === 'xhttp') {
         addClashXhttpOptions(lines, creds);
       }
@@ -199,10 +208,14 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
       add('network', net);
       if (net === 'ws') {
         lines.push(`    ws-opts:`);
-        lines.push(`      path: /`);
+        lines.push(`      path: ${yamlScalar(creds.path || '/')}`);
+        if (creds.transportHost ?? domain) {
+          lines.push(`      headers:`);
+          lines.push(`        Host: ${yamlScalar(creds.transportHost ?? domain!)}`);
+        }
       } else if (net === 'grpc') {
         lines.push(`    grpc-opts:`);
-        lines.push(`      grpc-service-name: grpc`);
+        lines.push(`      grpc-service-name: ${yamlScalar(creds.path ?? 'grpc')}`);
       } else if (net === 'xhttp') {
         addClashXhttpOptions(lines, creds);
       }
@@ -268,6 +281,8 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
 
     case 'HTTP': {
       add('type', 'http');
+      if (tlsEnabled) add('tls', true);
+      if (sni) add('sni', sni);
       add('server', host);
       add('port', port);
       if (creds.username) add('username', creds.username);
@@ -292,7 +307,7 @@ export function buildSingboxOutbound(node: NodeExportInfo): Record<string, unkno
   if (transport === 'XHTTP') return null;
 
   const tlsObj = buildSingboxTls(tls, domain, creds);
-  const transportObj = buildSingboxTransport(transport);
+  const transportObj = buildSingboxTransport(transport, creds, domain);
 
   switch (protocol) {
     case 'VMESS':
@@ -391,6 +406,7 @@ export function buildSingboxOutbound(node: NodeExportInfo): Record<string, unkno
     case 'HTTP':
       return {
         type: 'http',
+        ...(tlsObj ? { tls: tlsObj } : {}),
         tag: name,
         server: host,
         server_port: port,
@@ -422,10 +438,10 @@ function addTransportParams(
 ) {
   params.set('type', net);
   if (net === 'ws') {
-    params.set('path', '/');
-    if (domain) params.set('host', domain);
+    params.set('path', creds.path || '/');
+    if (creds.transportHost ?? domain) params.set('host', creds.transportHost ?? domain!);
   } else if (net === 'grpc') {
-    params.set('serviceName', 'grpc');
+    params.set('serviceName', creds.path ?? 'grpc');
   } else if (net === 'xhttp') {
     params.set('path', normalizeXhttpPath(creds.path));
     const xhttpHost = parseXhttpHost(creds.xhttpHost);
@@ -651,12 +667,12 @@ function buildSingboxTls(
   return null;
 }
 
-function buildSingboxTransport(transport: string | null): Record<string, unknown> | null {
+function buildSingboxTransport(transport: string | null, creds: Record<string, string>, domain: string | null): Record<string, unknown> | null {
   switch (transport) {
     case 'WS':
-      return { type: 'ws', path: '/' };
+      return { type: 'ws', path: creds.path || '/', ...((creds.transportHost ?? domain) ? { headers: { Host: creds.transportHost ?? domain } } : {}) };
     case 'GRPC':
-      return { type: 'grpc', service_name: 'grpc' };
+      return { type: 'grpc', service_name: creds.path ?? 'grpc' };
     case 'QUIC':
       return { type: 'quic' };
     default:

@@ -71,13 +71,14 @@ pnpm dev
 # Build all packages
 pnpm build
 
-# Start backend (requires PORT=3001 in .env)
+# Production: backend 3201, frontend 3200; development remains 3001 / 3400.
+# On managed hosts prefer: pm2 start ecosystem.config.cjs
 cd apps/server
-pnpm start
+NODE_ENV=production PORT=3201 pnpm start
 
 # In separate terminal, start frontend
 cd apps/web
-pnpm start
+NODE_ENV=production PORT=3200 pnpm start
 ```
 
 ## Database Management
@@ -169,7 +170,7 @@ openssl rand -hex 32
 
 ```bash
 # Health check
-curl http://localhost:3001/api/health
+curl -f http://localhost:3001/api/health/ready
 
 # API docs (Swagger UI)
 open http://localhost:3001/api/docs

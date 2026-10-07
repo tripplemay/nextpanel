@@ -1,113 +1,42 @@
 name: Deploy — 项目自动部署
 
-# 目标机：deploysvr (194.238.26.173)，全 Docker 共享机。
-# 本 workflow 只更新代码 + 重建 + 重启 PM2，绝不生成 .env、绝不装原生 PostgreSQL/nginx、绝不动证书。
-#   - .env 已在服务器上（含 ENCRYPTION_KEY 等），永不覆盖
-#   - 数据库：独立 Docker 容器 nextpanel-postgres @ 127.0.0.1:5433（由 /opt/apps/nextpanel-db 管理，与本 workflow 无关）
-#   - 端口：server 3201 / web 3200（由 ecosystem.config.cjs 注入）；agent 直连 nginx :3205
-#   - 证书：certbot DNS-01(Cloudflare) 自动续期，独立于本 workflow
-
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '*.md'
-      - 'docs/**'
-      - 'scripts/**'
-      - '.gitignore'
-      - 'LICENSE'
+    paths-ignore: ['*.md', 'docs/**', '.gitignore', 'LICENSE']
   workflow_dispatch:
+
+concurrency:
+  group: nextpanel-production
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup SSH key
+      - uses: actions/checkout@v4
+      - name: Setup pinned SSH identity
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: |
+          test -n "$SSH_KNOWN_HOSTS"
           mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.SSH_KEY }}" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          ssh-keyscan -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_deploy ~/.ssh/known_hosts
 
-      - name: Copy files to VPS
+      - name: Stage, build, snapshot, migrate and verify
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
         run: |
-          SSH="ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=no -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}"
-          # 清空 src/app/packages，确保已从 git 删除的文件不残留（保留 .env / node_modules / .next / dist）
-          $SSH "rm -rf /opt/apps/nextpanel/apps/server/src /opt/apps/nextpanel/apps/web/src /opt/apps/nextpanel/apps/web/app /opt/apps/nextpanel/packages"
-          tar czf - --exclude='.git' --exclude='node_modules' --exclude='.next' --exclude='dist' --exclude='*.tsbuildinfo' . | \
-            $SSH "mkdir -p /opt/apps/nextpanel && tar xzf - -C /opt/apps/nextpanel"
-
-      - name: Build and restart on VPS
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          port: ${{ secrets.SSH_PORT }}
-          key: ${{ secrets.SSH_KEY }}
-          command_timeout: 30m
-          script: |
-            set -e
-            trap 'echo ">>> DEPLOY FAILED at line $LINENO (exit $?)" >&2' ERR
-            APP_DIR="/opt/apps/nextpanel"
-            export DEBIAN_FRONTEND=noninteractive
-
-            # 工具链兜底（幂等）
-            command -v pnpm >/dev/null 2>&1 || npm install -g pnpm@10
-            command -v pm2  >/dev/null 2>&1 || npm install -g pm2
-
-            cd $APP_DIR
-            export NODE_OPTIONS="--max-old-space-size=2048"
-            export NEXT_TELEMETRY_DISABLED=1
-            pnpm install
-            cd $APP_DIR/apps/server && pnpm exec prisma generate && cd $APP_DIR
-            find $APP_DIR -name "*.tsbuildinfo" -delete
-            pnpm -r --workspace-concurrency=1 build
-            unset NODE_OPTIONS NEXT_TELEMETRY_DISABLED
-
-            # 旧后端必须在迁移清理历史明文 ConfigSnapshot 前停止写入。
-            echo ">>> Pausing backend writes before migration..."
-            if pm2 describe nextpanel-server > /dev/null 2>&1; then
-              pm2 stop nextpanel-server
-            fi
-
-            cd $APP_DIR/apps/server
-            if ! MIGRATE_OUTPUT=$(pnpm exec prisma migrate deploy 2>&1); then
-              echo "$MIGRATE_OUTPUT"
-              echo ">>> Migration failed; backend remains stopped to prevent incompatible writes." >&2
-              exit 1
-            fi
-            echo "$MIGRATE_OUTPUT"
-
-            # 新后端只写加密快照；先恢复 API，再执行较慢的测试内核检查。
-            cd $APP_DIR
-            if pm2 describe nextpanel-server > /dev/null 2>&1; then
-              pm2 restart nextpanel-server --update-env
-            else
-              pm2 start $APP_DIR/ecosystem.config.cjs --only nextpanel-server
-            fi
-
-            if [ -f "$APP_DIR/scripts/proxy-core-utils.sh" ]; then
-              apt-get install -y unzip 2>/dev/null || true
-              info() { echo ">>> $*"; }
-              ok() { echo ">>> $*"; }
-              warn() { echo ">>> WARNING: $*"; }
-              source "$APP_DIR/scripts/proxy-core-utils.sh"
-              if ! ensure_proxy_test_cores; then
-                echo ">>> WARNING: Some proxy test cores are unavailable; related connectivity tests will be disabled."
-              fi
-            else
-              echo ">>> WARNING: Proxy core installer is missing; skipping version checks."
-            fi
-
-            # 重启（端口/环境来自 ecosystem.config.cjs：server 3201 / web 3200）
-            pm2 delete nextpanel-server nextpanel-web 2>/dev/null || true
-            pm2 start $APP_DIR/ecosystem.config.cjs
-            pm2 save
-
-            sleep 5
-            echo "=== PM2 ==="; pm2 list
-            echo "=== server 日志 ==="; pm2 logs nextpanel-server --lines 15 --nostream
-            echo ">>> Deploy completed at $(date) — https://${{ vars.DOMAIN }}"
+          set -euo pipefail
+          SSH=(ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -p "$SSH_PORT" "$SSH_USER@$SSH_HOST")
+          CANDIDATE="/opt/apps/nextpanel-candidate-$GITHUB_SHA"
+          "${SSH[@]}" "test ! -e '$CANDIDATE' && mkdir -m 700 '$CANDIDATE'"
+          tar czf - --exclude='.git' --exclude='node_modules' --exclude='.next' --exclude='dist' --exclude='*.tsbuildinfo' . |
+            "${SSH[@]}" "tar xzf - -C '$CANDIDATE'"
+          "${SSH[@]}" "bash '$CANDIDATE/scripts/deploy-release.sh' deploy '$GITHUB_SHA'"

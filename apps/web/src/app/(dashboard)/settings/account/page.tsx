@@ -11,7 +11,7 @@ import type { AxiosError } from 'axios';
 const { Text } = Typography;
 
 export default function AccountSettingsPage() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const qc = useQueryClient();
   const { isMobile } = useIsMobile();
   const [form] = Form.useForm();
@@ -57,14 +57,24 @@ export default function AccountSettingsPage() {
     },
   });
 
-  async function handleBind() {
+  async function startBind(currentPassword: string) {
     try {
       const device = isMobile ? 'mobile' : 'desktop';
-      const res = await wxWorkApi.loginUrl(device, `${window.location.origin}/wxwork/bind-callback`);
+      const res = await wxWorkApi.bindUrl(device, currentPassword);
       window.location.href = res.data.url;
-    } catch {
+    } catch (error) {
       message.error('获取企业微信授权链接失败');
+      throw error;
     }
+  }
+
+  function handleBind() {
+    let password = '';
+    modal.confirm({
+      title: '绑定前请确认当前账户密码',
+      content: <Input.Password autoComplete="current-password" onChange={(event) => { password = event.target.value; }} />,
+      onOk: () => startBind(password),
+    });
   }
 
   return (

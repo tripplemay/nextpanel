@@ -271,7 +271,8 @@ export interface ExternalNode {
 export interface Subscription {
   id: string;
   name: string;
-  token: string;
+  /** Owner-only credential; never present in shared responses. */
+  token?: string;
   nodes: Array<{ node: Pick<Node, 'id' | 'name' | 'protocol' | 'status' | 'enabled' | 'listenPort' | 'serverId' | 'server'> }>;
   externalNodes: Array<{ externalNode: Pick<ExternalNode, 'id' | 'name' | 'protocol' | 'address' | 'port'> }>;
   /** Present for owner view — list of user IDs this subscription is shared with */
@@ -283,7 +284,7 @@ export interface Subscription {
 
 export interface ViewerSubscriptionList {
   mine: Subscription[];
-  shared: Subscription[];
+  shared: Array<Omit<Subscription, 'token'> & { shareToken: string }>;
 }
 
 export interface SubscriptionShare {

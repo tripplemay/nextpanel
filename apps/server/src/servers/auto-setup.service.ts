@@ -13,11 +13,16 @@ export class AutoSetupService {
     private crypto: CryptoService,
   ) {}
 
-  setupStream(
+  async setupStream(
     serverId: string,
     _templateIds: string[],
-    _actorId?: string,
-  ): Observable<MessageEvent> {
+    actorId: string,
+  ): Promise<Observable<MessageEvent>> {
+    const server = await this.prisma.server.findFirst({ where: { id: serverId, userId: actorId } });
+    if (!server) throw new NotFoundException(`Server ${serverId} not found`);
+    if (_templateIds.length > 0) {
+      throw new BadRequestException('模板自动配置已停用，请使用节点协议预设创建并部署节点');
+    }
     return new Observable((subscriber) => {
       const emit = (log: string) =>
         subscriber.next({ data: { log } } as MessageEvent);
@@ -48,7 +53,7 @@ export class AutoSetupService {
     }
     const sshAuth = this.crypto.decrypt(server.sshAuthEnc);
 
-    log(`=== 开始自动配置服务器: ${server.name} (${server.ip}) ===`);
+    log(`=== 开始 SSH 连接检查: ${server.name} (${server.ip}) ===`);
 
     log('正在建立 SSH 连接...');
     const ssh = await connectSsh({
@@ -62,7 +67,7 @@ export class AutoSetupService {
     log(`SSH 已连接到 ${server.ip}:${server.sshPort}`);
     ssh.dispose();
 
-    log('\n=== 自动配置完成 ===');
+    log('\n=== SSH 连接检查完成；未修改服务器配置，请使用节点协议预设部署 ===');
     return true;
   }
 }

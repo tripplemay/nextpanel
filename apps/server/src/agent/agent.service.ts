@@ -7,6 +7,7 @@ import { IpCheckService } from '../ip-check/ip-check.service';
 export interface HeartbeatPayload {
   agentToken: string;
   agentVersion: string;
+  architecture?: 'amd64' | 'arm64';
   cpu: number;
   mem: number;
   disk: number;
@@ -21,6 +22,7 @@ interface LatestVersionCache {
   tagName: string;
   releaseNotes: string;
   fetchedAt: number;
+  digests?: Record<string, string>;
 }
 
 @Injectable()
@@ -55,12 +57,15 @@ export class AgentService {
         signal: AbortSignal.timeout(10_000),
       });
       if (!releaseRes.ok) throw new Error(`GitHub API returned ${releaseRes.status}`);
-      const data = await releaseRes.json() as { tag_name: string };
+      const data = await releaseRes.json() as { tag_name: string; assets?: { name: string; digest?: string }[] };
 
       // Extract semver from tag like "agent/v1.4.0" or "v1.4.0"
       const match = data.tag_name.match(/(\d+\.\d+\.\d+)/);
       const version = match ? match[1] : data.tag_name;
       const tagName = data.tag_name;
+      const digests = Object.fromEntries((data.assets ?? [])
+        .filter((asset) => /^sha256:[a-f0-9]{64}$/.test(asset.digest ?? ''))
+        .map((asset) => [asset.name, asset.digest!.slice(7)]));
 
       // Step 2: fetch RELEASE_NOTES.md for Chinese release notes
       const notesRes = await fetch(
@@ -73,7 +78,7 @@ export class AgentService {
         releaseNotes = this.parseReleaseNotes(md, version);
       }
 
-      this.latestVersionCache = { version, tagName, releaseNotes, fetchedAt: Date.now() };
+      this.latestVersionCache = { version, tagName, releaseNotes, fetchedAt: Date.now(), digests };
       return { version, releaseNotes };
     } catch (err) {
       this.logger.warn(`Failed to fetch latest agent version: ${err}`);
@@ -126,7 +131,7 @@ export class AgentService {
     // disappearing immediately after the first heartbeat while the agent is still downloading.
     // Safety valve: clear the flag after 15 minutes regardless of reason (GitHub unreachable,
     // agent too old to support self-update like v1.3.0, or download stuck) to unblock the UI.
-    let updateCommand: { version: string; downloadUrl: string } | undefined;
+    let updateCommand: { version: string; downloadUrl: string; sha256: string } | undefined;
     if (server.pendingAgentUpdate) {
       const now = Date.now();
       if (!this.pendingUpdateSince.has(server.id)) {
@@ -153,10 +158,18 @@ export class AgentService {
           // Agent hasn't updated yet — keep the flag set and re-deliver the command.
           // The agent guards against concurrent updates with selfUpdateRunning, so re-sending is safe.
           const repo = this.config.get<string>('GITHUB_REPO') ?? 'tripplemay/nextpanel-releases';
-          updateCommand = {
-            version,
-            downloadUrl: `https://github.com/${repo}/releases/download/${tagName}/agent-linux-amd64`,
-          };
+          const arch = payload.architecture;
+          const asset = arch && ['amd64', 'arm64'].includes(arch) ? `agent-linux-${arch}` : '';
+          const sha256 = this.latestVersionCache?.digests?.[asset];
+          if (asset && sha256) {
+            updateCommand = {
+              version,
+              downloadUrl: `https://github.com/${repo}/releases/download/${tagName}/${asset}`,
+              sha256,
+            };
+          } else {
+            this.logger.warn(`Agent update withheld for ${server.id}: architecture or release digest unavailable; reinstall via SSH`);
+          }
         }
       } else if (elapsed > this.PENDING_UPDATE_TIMEOUT_MS) {
         // Can't fetch latest version (GitHub unreachable) and 15 min have elapsed — give up to unblock UI.
@@ -168,7 +181,11 @@ export class AgentService {
       this.pendingUpdateSince.delete(server.id);
     }
 
-    await this.prisma.server.update({ where: { id: server.id }, data: updateData });
+    // Test the current DB state at write time, not the earlier heartbeat snapshot.
+    const updated = await this.prisma.server.updateMany({
+      where: { id: server.id, status: { notIn: ['DELETING', 'ERROR'] } }, data: updateData,
+    });
+    if (updated.count !== 1) return { ok: true, xrayNodes: [] };
 
     await this.metricsService.record(
       server.id,
