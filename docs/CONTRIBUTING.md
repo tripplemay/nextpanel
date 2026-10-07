@@ -8,7 +8,7 @@ This guide will help you set up the development environment and contribute to Ne
 
 Before you begin, ensure you have the following installed:
 
-- **Node.js** >= 20.0.0 — [Download](https://nodejs.org/)
+- **Node.js** 20.19+ (20.x), 22.13+ (22.x), or 24+ — [Download](https://nodejs.org/); CI uses Node 22
 - **pnpm** >= 9.0.0 — Install with `npm install -g pnpm`
 - **PostgreSQL** >= 16 — [Download](https://www.postgresql.org/download/)
 - **Docker & Docker Compose** (optional, for containerized PostgreSQL)

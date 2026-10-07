@@ -8,7 +8,7 @@ Quick reference guide for running, deploying, and troubleshooting NextPanel.
 
 ### Prerequisites
 
-- Node.js >= 20.0.0
+- Node.js 20.19+ (20.x), 22.13+ (22.x), or 24+; Node 22 is used in CI
 - pnpm >= 9.0.0
 - PostgreSQL >= 16 (or Docker)
 
