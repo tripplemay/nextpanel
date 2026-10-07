@@ -48,7 +48,7 @@ describe('real HTTP routing, JWT, roles and ownership (isolated persistence)', (
         { provide: ConfigService, useValue: { getOrThrow: () => 'isolated-test-key' } },
         { provide: AuthService, useValue: {
           isTokenRevoked: async () => false,
-          validateById: async (id: string) => ({ id, role: id === 'admin' ? 'ADMIN' : 'VIEWER' }),
+          validateById: async (id: string) => ({ id, role: id === 'admin' ? 'ADMIN' : 'VIEWER', tokenVersion: 0 }),
         } },
         { provide: ServersService, useValue: servers },
         { provide: AutoSetupService, useValue: new AutoSetupService(db as any, {} as any) },

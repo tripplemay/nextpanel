@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   App, Button, Table, Tag, Space, Modal, Input, Popconfirm, Typography, Tooltip, Select, theme as antdTheme,
 } from 'antd';
-import { DeleteOutlined, ApiOutlined, EditOutlined } from '@ant-design/icons';
+import { DeleteOutlined, ApiOutlined, EditOutlined, KeyOutlined } from '@ant-design/icons';
+import CredentialDialog from './CredentialDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { externalNodesApi } from '@/lib/api';
 import PageHeader from '@/components/common/PageHeader';
@@ -71,6 +72,8 @@ export default function ExternalNodesPage() {
   const [testResults, setTestResults] = useState<Record<string, ConnectivityResult>>({});
   const [renameNode, setRenameNode] = useState<ExternalNode | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [credentialNode, setCredentialNode] = useState<ExternalNode | null>(null);
+  const closeCredentials = useCallback(() => setCredentialNode(null), []);
 
   const { data = [], isLoading } = useQuery({
     queryKey: ['external-nodes'],
@@ -193,9 +196,12 @@ export default function ExternalNodesPage() {
     },
     {
       title: '操作',
-      width: 150,
+      width: 190,
       render: (_: unknown, r: ExternalNode) => (
         <Space size={4}>
+          <Tooltip title="验证密码并查看凭据">
+            <Button size="small" aria-label="查看节点凭据" icon={<KeyOutlined />} onClick={() => setCredentialNode(r)} />
+          </Tooltip>
           <Tooltip title="重命名">
             <Button
               size="small"
@@ -233,6 +239,7 @@ export default function ExternalNodesPage() {
 
   return (
     <AppCard>
+      {credentialNode && <CredentialDialog key={credentialNode.id} node={credentialNode} onClose={closeCredentials} />}
       <style>{STATUS_DOT_CSS}</style>
       <PageHeader
         title="外部节点"

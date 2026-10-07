@@ -2,7 +2,7 @@
 // Always creates its own Unix-socket-only cluster; never reads project DATABASE_URL.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, copyFileSync, symlinkSync, cpSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -13,6 +13,10 @@ import { createRequire } from 'node:module';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(join(root, 'apps/server/package.json'));
 const { PrismaClient } = require('@prisma/client');
+require('ts-node').register({ project: join(root, 'apps/server/tsconfig.json'), transpileOnly: true });
+const { CryptoService } = require(join(root, 'apps/server/src/common/crypto/crypto.service.ts'));
+const { migrateExternalSecrets } = require(join(root, 'apps/server/src/external-nodes/migrate-external-secrets.ts'));
+const { sealExternalSecrets, openExternalSecrets, externalNodePublicSelect } = require(join(root, 'apps/server/src/external-nodes/external-credentials.ts'));
 const bin = process.env.PG_BIN;
 assert.ok(bin, 'PG_BIN must explicitly point at a PostgreSQL toolchain');
 
@@ -49,6 +53,9 @@ test('isolated PostgreSQL migration, concurrency and restore drill', { timeout: 
         VALUES ('known', 'node', 'node', 'fixture', 'DEPLOY', true), ('orphan', 'node', 'gone', 'deleted', 'DEPLOY', true);
       INSERT INTO "Subscription" (id, name, token, "ownerId", "updatedAt") VALUES ('sub', 'fixture', 'leaked-owner-token', 'owner', now());
       INSERT INTO "SubscriptionShare" (id, "subscriptionId", "userId", "shareToken") VALUES ('share', 'sub', 'owner', 'recipient-token');
+      INSERT INTO "ExternalNode" (id, "userId", name, protocol, address, port, username, password, "rawUri", "shortId", "xhttpExtra", "updatedAt")
+        VALUES ('ext-a', 'owner', 'legacy', 'HTTP', 'proxy.test', 80, 'proxy-user', 'proxy-pass', 'http://proxy-user:proxy-pass@proxy.test:80', '0123456789abcdef', '{"headers":{"Authorization":"private"}}', now()),
+               ('ext-b', 'owner', 'legacy', 'HTTP', 'proxy.test', 80, NULL, NULL, NULL, NULL, NULL, now());
     `);
     for (const name of names.filter(n => n >= '20261007000000')) {
       run('psql', ['-X', '-v', 'ON_ERROR_STOP=1', '-f', join(migrations, name, 'migration.sql')]);
@@ -59,6 +66,48 @@ test('isolated PostgreSQL migration, concurrency and restore drill', { timeout: 
     assert.equal(sql('SELECT "shareToken" FROM "SubscriptionShare" WHERE id=\'share\''), 'recipient-token');
 
     prisma = new PrismaClient({ datasources: { db: { url: `postgresql://review@localhost:55432/nextpanel?host=${encodeURIComponent(socket)}` } } });
+    const cipher = new CryptoService({ getOrThrow: () => 'ab'.repeat(32) });
+    await prisma.externalNode.create({ data: { id: 'zzz', userId: 'owner', name: 'encrypted', protocol: 'HTTP', address: 'proxy.test', port: 80,
+      credentialsEnc: sealExternalSecrets(cipher, 'owner', { password: 'existing-secret' }) } });
+    const wrongKey = new CryptoService({ getOrThrow: () => 'cd'.repeat(32) });
+    await assert.rejects(migrateExternalSecrets(prisma, wrongKey));
+    assert.equal((await prisma.externalNode.findUnique({ where: { id: 'ext-a' } })).password, 'proxy-pass', 'failed migration must roll back earlier updates');
+    assert.equal((await prisma.externalNode.findUnique({ where: { id: 'ext-a' } })).credentialsEnc, null);
+    assert.equal(sql(`SELECT convalidated FROM pg_constraint WHERE conname='ExternalNode_encrypted_credentials'`), 'f');
+    assert.equal(await migrateExternalSecrets(prisma, cipher), 2);
+    assert.equal(await migrateExternalSecrets(prisma, cipher), 0, 'rerun must verify existing ciphertext without changing it');
+    assert.equal(sql(`SELECT convalidated FROM pg_constraint WHERE conname='ExternalNode_encrypted_credentials'`), 't');
+    const encrypted = await prisma.externalNode.findUnique({ where: { id: 'ext-a' } });
+    for (const field of ['uuid', 'username', 'password', 'rawUri', 'xhttpExtra', 'shortId']) assert.equal(encrypted[field], null);
+    assert.equal(openExternalSecrets(cipher, encrypted).password, 'proxy-pass');
+    assert.equal(openExternalSecrets(cipher, encrypted).shortId, '0123456789abcdef');
+    assert.equal(openExternalSecrets(cipher, encrypted).xhttpExtra, '{"headers":{"Authorization":"private"}}');
+    const safeList = await prisma.externalNode.findMany({ select: externalNodePublicSelect });
+    assert.ok(!JSON.stringify(safeList).includes('proxy-pass'));
+    assert.ok(!('credentialsEnc' in safeList[0]));
+    await assert.rejects(prisma.externalNode.update({ where: { id: 'ext-a' }, data: { password: 'plaintext' } }));
+    await assert.rejects(prisma.externalNode.create({ data: { userId: 'owner', name: 'old-code', protocol: 'HTTP', address: 'proxy.test', port: 80 } }));
+    const revoke = () => prisma.user.updateMany({ where: { id: 'owner', tokenVersion: 0 }, data: { tokenVersion: { increment: 1 } } });
+    assert.deepEqual((await Promise.all([revoke(), revoke()])).map(r => r.count).sort(), [0, 1]);
+    assert.equal((await prisma.user.findUnique({ where: { id: 'owner' } })).tokenVersion, 1);
+    if (process.env.SERVER_BUILD_DIR) {
+      const runnerRoot = join(temp, 'cli');
+      mkdirSync(join(runnerRoot, 'apps/server'), { recursive: true });
+      mkdirSync(join(runnerRoot, 'scripts'));
+      copyFileSync(join(root, 'apps/server/package.json'), join(runnerRoot, 'apps/server/package.json'));
+      symlinkSync(join(root, 'apps/server/node_modules'), join(runnerRoot, 'apps/server/node_modules'));
+      cpSync(resolve(process.env.SERVER_BUILD_DIR), join(runnerRoot, 'apps/server/dist'), { recursive: true });
+      const runner = join(runnerRoot, 'scripts/migrate-external-secrets.cjs');
+      copyFileSync(join(root, 'scripts/migrate-external-secrets.cjs'), runner);
+      const cliEnv = { ...env, DATABASE_URL: `postgresql://review@localhost:55432/nextpanel?host=${encodeURIComponent(socket)}`, ENCRYPTION_KEY: 'ab'.repeat(32) };
+      const verified = spawnSync(process.execPath, [runner], { env: cliEnv, encoding: 'utf8' });
+      assert.equal(verified.status, 0, verified.stdout + verified.stderr);
+      assert.match(verified.stdout, /migrated 0 rows/);
+      const failed = spawnSync(process.execPath, [runner], { env: { ...cliEnv, ENCRYPTION_KEY: 'cd'.repeat(32) }, encoding: 'utf8' });
+      assert.equal(failed.status, 1);
+      assert.match(failed.stderr, /transaction rolled back/);
+      assert.ok(!failed.stderr.includes('proxy-pass') && !failed.stderr.includes('existing-secret'));
+    }
     await prisma.oAuthState.create({ data: { id: 'state', browserHash: 'browser', purpose: 'login', expiresAt: new Date(Date.now() + 60000) } });
     const consume = () => prisma.oAuthState.deleteMany({ where: { id: 'state', browserHash: 'browser', purpose: 'login', userId: null, expiresAt: { gt: new Date() } } });
     const counts = (await Promise.all([consume(), consume()])).map(r => r.count).sort();

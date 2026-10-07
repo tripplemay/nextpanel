@@ -13,6 +13,7 @@ model User {
   id            String    @id @default(cuid())
   username      String    @unique
   passwordHash  String
+  tokenVersion  Int       @default(0)
   role          UserRole  @default(VIEWER)
   wxWorkUserId  String?   @unique
   wxWorkName    String?
@@ -318,6 +319,8 @@ model ExternalNode {
   protocol         String
   address          String
   port             Int
+  /// AES-GCM envelope; legacy credential columns are cleared by the data migration.
+  credentialsEnc   String?
   uuid             String?
   username         String?
   password         String?
@@ -374,6 +377,7 @@ model AuditLog {
 }
 
 enum AuditAction {
+  CREDENTIAL_READ
   CREATE
   UPDATE
   DELETE

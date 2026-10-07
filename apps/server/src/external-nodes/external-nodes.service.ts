@@ -5,6 +5,8 @@ import { SingboxTestService } from '../nodes/singbox-test/singbox-test.service';
 import { importedTransportHost, parseSubscriptionText, type BareProxyProtocol } from './uri-parser';
 import { SocksExitResolverService } from '../nodes/socks-exit-resolver.service';
 import { fetchPublicText } from '../common/http/public-fetch';
+import { CryptoService } from '../common/crypto/crypto.service';
+import { externalNodePublicSelect, openExternalSecrets, sealExternalSecrets } from './external-credentials';
 
 @Injectable()
 export class ExternalNodesService {
@@ -15,12 +17,14 @@ export class ExternalNodesService {
     private readonly xrayTest: XrayTestService,
     private readonly singboxTest: SingboxTestService,
     private readonly socksExitResolver: SocksExitResolverService,
+    private readonly crypto: CryptoService,
   ) {}
 
   list(userId: string) {
     return this.prisma.externalNode.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
+      select: externalNodePublicSelect,
     });
   }
 
@@ -51,21 +55,16 @@ export class ExternalNodesService {
         protocol: n.protocol,
         address: n.address,
         port: n.port,
-        uuid: n.uuid,
-        username: n.username,
-        password: n.password,
+        credentialsEnc: sealExternalSecrets(this.crypto, userId, n),
         method: n.method,
         transport: n.transport,
         transportHost: n.transportHost,
         tls: n.tls,
         realityPublicKey: n.realityPublicKey,
-        shortId: n.shortId,
         xhttpMode: n.xhttpMode,
         xhttpHost: n.xhttpHost,
-        xhttpExtra: n.xhttpExtra,
         sni: n.sni,
         path: n.path,
-        rawUri: n.rawUri,
       })),
     });
 
@@ -73,9 +72,10 @@ export class ExternalNodesService {
   }
 
   async test(id: string, userId: string) {
-    const node = await this.prisma.externalNode.findUnique({ where: { id } });
-    if (!node) throw new NotFoundException(`ExternalNode ${id} not found`);
-    if (node.userId !== userId) throw new ForbiddenException();
+    const stored = await this.prisma.externalNode.findUnique({ where: { id } });
+    if (!stored) throw new NotFoundException(`ExternalNode ${id} not found`);
+    if (stored.userId !== userId) throw new ForbiddenException();
+    const node = { ...stored, ...openExternalSecrets(this.crypto, stored) };
 
     const credentials: Record<string, string> = {};
     if (node.uuid) credentials.uuid = node.uuid;
@@ -155,6 +155,7 @@ export class ExternalNodesService {
     return this.prisma.externalNode.update({
       where: { id },
       data: { name: trimmed },
+      select: externalNodePublicSelect,
     });
   }
 
@@ -163,5 +164,11 @@ export class ExternalNodesService {
     if (!node) throw new NotFoundException(`ExternalNode ${id} not found`);
     if (node.userId !== userId) throw new ForbiddenException();
     await this.prisma.externalNode.delete({ where: { id } });
+  }
+
+  async getCredentials(id: string, userId: string) {
+    const node = await this.prisma.externalNode.findFirst({ where: { id, userId } });
+    if (!node) throw new NotFoundException('External node not found');
+    return openExternalSecrets(this.crypto, node);
   }
 }

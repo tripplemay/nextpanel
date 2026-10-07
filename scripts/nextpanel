@@ -164,7 +164,10 @@ cmd_update() {
     echo "$MIGRATE_OUTPUT"
     fail "数据库迁移失败；后端保持停止以避免以不兼容 schema 写入，请修复后重试更新"
   }
-  ok "数据库迁移完成"
+  node --env-file=.env "$APP_DIR/scripts/migrate-external-secrets.cjs" || {
+    fail "外部节点凭据迁移失败；后端保持停止，请核对原有加密密钥或恢复完整发布备份"
+  }
+  ok "数据库迁移及凭据加密校验完成"
 
   # 新后端只写加密快照，可在后续较慢的测试内核升级期间恢复服务。
   pm2 restart nextpanel-server > /dev/null 2>&1

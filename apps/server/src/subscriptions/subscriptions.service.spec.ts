@@ -2,6 +2,8 @@ import { SubscriptionsService } from './subscriptions.service';
 import { PrismaService } from '../prisma.service';
 import { NodesService } from '../nodes/nodes.service';
 import { NotFoundException } from '@nestjs/common';
+import { CryptoService } from '../common/crypto/crypto.service';
+import { sealExternalSecrets } from '../external-nodes/external-credentials';
 
 const mockPrisma = {
   subscription: {
@@ -25,7 +27,8 @@ const mockNodes = {
 } as unknown as NodesService;
 
 const mockConfig = { get: jest.fn((key: string) => key === 'PANEL_URL' ? 'http://localhost:3001' : undefined) } as unknown as import('@nestjs/config').ConfigService;
-const svc = new SubscriptionsService(mockPrisma, mockNodes, mockConfig);
+const cipher = new CryptoService({ getOrThrow: () => 'ab'.repeat(32) } as any);
+const svc = new SubscriptionsService(mockPrisma, mockNodes, mockConfig, cipher);
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -305,9 +308,16 @@ describe('SubscriptionsService – CRUD', () => {
 
 // ── External nodes in subscription content ────────────────────────────────────
 
-function makeExternalNode(protocol: string) {
+function makeExternalNode(protocol: string, secrets = {}) {
   return {
     externalNode: {
+      userId: 'owner-1',
+      credentialsEnc: sealExternalSecrets(cipher, 'owner-1', {
+        uuid: protocol === 'VLESS' ? 'ext-uuid' : null,
+        username: protocol === 'SOCKS5' ? 'proxy-user' : null,
+        password: protocol === 'TROJAN' ? 'ext-pass' : protocol === 'SOCKS5' ? 'proxy-pass' : null,
+        ...secrets,
+      }),
       name: 'Ext Node',
       protocol,
       address: '5.6.7.8',
@@ -316,9 +326,9 @@ function makeExternalNode(protocol: string) {
       tls: 'TLS',
       sni: 'ext.example.com',
       path: null,
-      uuid: protocol === 'VLESS' ? 'ext-uuid' : null,
-      username: protocol === 'SOCKS5' ? 'proxy-user' : null,
-      password: protocol === 'TROJAN' ? 'ext-pass' : null,
+      uuid: null,
+      username: null,
+      password: null,
       method: null,
       realityPublicKey: null,
       shortId: null,
@@ -332,15 +342,13 @@ function makeExternalNode(protocol: string) {
 function makeExternalXhttpNode() {
   return {
     externalNode: {
-      ...makeExternalNode('VLESS').externalNode,
+      ...makeExternalNode('VLESS', { xhttpExtra: '{"xPaddingBytes":"100-1000"}', shortId: '0123456789abcdef' }).externalNode,
       transport: 'XHTTP',
       tls: 'REALITY',
       path: '/api/v1',
       realityPublicKey: 'public-key',
-      shortId: '0123456789abcdef',
       xhttpMode: 'stream-up',
       xhttpHost: 'edge.example.com',
-      xhttpExtra: '{"xPaddingBytes":"100-1000"}',
     },
   };
 }
@@ -407,7 +415,6 @@ describe('SubscriptionsService – external nodes in content', () => {
 
   it('retains external SOCKS5 authentication in all subscription formats', async () => {
     const external = makeExternalNode('SOCKS5');
-    external.externalNode.password = 'proxy-pass';
     (mockPrisma.subscription.findUnique as jest.Mock).mockResolvedValue({
       token: 'tok', ownerId: 'owner-1', name: 'My Sub', nodes: [], externalNodes: [external],
     });

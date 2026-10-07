@@ -4,6 +4,7 @@ import type {
   Server,
   Node,
   ExternalNode,
+  ExternalNodeCredentials,
   WxWorkSetting,
   UpsertWxWorkSettingDto,
   Subscription,
@@ -40,6 +41,8 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+let sessionRotation: { token: string | null; done: Promise<void> } | undefined;
+
 api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token;
   if (token) {
@@ -50,9 +53,18 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (res) => res,
-  (error) => {
+  async (error) => {
+    const rotation = sessionRotation;
+    if (error.response?.status === 401 && rotation &&
+        error.config?.headers?.Authorization === `Bearer ${rotation.token}` &&
+        error.config?.url !== '/auth/revoke-other-sessions') {
+      // A concurrent request can fail after server-side revocation but before
+      // the replacement JWT arrives. Wait before deciding to clear this session.
+      await rotation.done;
+    }
     if (
       error.response?.status === 401 &&
+      error.config?.headers?.Authorization === `Bearer ${useAuthStore.getState().token}` &&
       typeof window !== 'undefined' &&
       !window.location.pathname.startsWith('/login')
     ) {
@@ -74,6 +86,24 @@ export const authApi = {
     api.post<{ id: string; username: string; role: string }>('/auth/register', data),
   changePassword: (currentPassword: string, newPassword: string) =>
     api.patch<void>('/auth/change-password', { currentPassword, newPassword }),
+  revokeOtherSessions: async (currentPassword: string) => {
+    if (sessionRotation) throw new Error('Session rotation already in progress');
+    const token = useAuthStore.getState().token;
+    let finish!: () => void;
+    sessionRotation = { token, done: new Promise<void>(resolve => { finish = resolve; }) };
+    try {
+      const response = await api.post<{ accessToken: string; user: { id: string; username: string; role: string } }>(
+        '/auth/revoke-other-sessions', { currentPassword }, { timeout: 15_000 },
+      );
+      if (useAuthStore.getState().token === token) {
+        useAuthStore.getState().setAuth(response.data.accessToken, response.data.user);
+      }
+      return response;
+    } finally {
+      sessionRotation = undefined;
+      finish();
+    }
+  },
   logout: () => api.post<void>('/auth/logout'),
 };
 
@@ -183,6 +213,8 @@ export const agentApi = {
 // ── External Nodes ────────────────────────────────────
 export const externalNodesApi = {
   list: () => api.get<ExternalNode[]>('/external-nodes'),
+  credentials: (id: string, currentPassword: string, signal?: AbortSignal) =>
+    api.post<ExternalNodeCredentials>(`/external-nodes/${id}/credentials`, { currentPassword }, { signal }),
   import: (text: string, protocol: 'HTTP' | 'SOCKS5' = 'HTTP') =>
     api.post<{ success: number; failed: number; errors: string[] }>('/external-nodes/import', { text, protocol }),
   test: (id: string) => api.post<ConnectivityResult>(`/external-nodes/${id}/test`),

@@ -60,12 +60,7 @@ export class AuthService {
       });
     }
 
-    const jti = randomUUID();
-    const token = this.jwt.sign({ sub: user.id, role: user.role, jti });
-    return {
-      accessToken: token,
-      user: { id: user.id, username: user.username, role: user.role },
-    };
+    return this.issueToken(user);
   }
 
   async logout(jti: string, expiresAt: Date): Promise<void> {
@@ -149,8 +144,11 @@ export class AuthService {
       });
     }
 
-    const jti = randomUUID();
-    const token = this.jwt.sign({ sub: user.id, role: user.role, jti });
+    return this.issueToken(user);
+  }
+
+  private issueToken(user: { id: string; username: string; role: string; tokenVersion: number }) {
+    const token = this.jwt.sign({ sub: user.id, role: user.role, jti: randomUUID(), tokenVersion: user.tokenVersion });
     return {
       accessToken: token,
       user: { id: user.id, username: user.username, role: user.role },
@@ -196,15 +194,34 @@ export class AuthService {
     };
   }
 
-  async changePassword(userId: string, dto: ChangePasswordDto) {
+  async changePassword(userId: string, dto: ChangePasswordDto, tokenVersion: number) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new UnauthorizedException();
+    if (!user || user.tokenVersion !== tokenVersion) throw new UnauthorizedException();
 
     const valid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
     if (!valid) throw new BadRequestException('当前密码不正确');
 
     const passwordHash = await bcrypt.hash(dto.newPassword, 12);
-    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+    const updated = await this.prisma.user.updateMany({
+      where: { id: userId, passwordHash: user.passwordHash, tokenVersion },
+      data: { passwordHash, tokenVersion: { increment: 1 } },
+    });
+    if (updated.count !== 1) throw new UnauthorizedException('会话已失效，请重新登录');
+    return { message: '密码已修改，所有设备需重新登录' };
+  }
+
+  async revokeOtherSessions(userId: string, currentPassword: string, tokenVersion: number) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.tokenVersion !== tokenVersion) throw new UnauthorizedException();
+    if (!user.passwordHash || !(await bcrypt.compare(currentPassword, user.passwordHash))) {
+      throw new BadRequestException('当前密码不正确');
+    }
+    const updated = await this.prisma.user.updateMany({
+      where: { id: userId, passwordHash: user.passwordHash, tokenVersion },
+      data: { tokenVersion: { increment: 1 } },
+    });
+    if (updated.count !== 1) throw new UnauthorizedException('会话已失效，请重新登录');
+    return this.issueToken({ ...user, tokenVersion: tokenVersion + 1 });
   }
 
   async verifyPassword(userId: string, password: string) {

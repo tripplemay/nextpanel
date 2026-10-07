@@ -5,8 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-for (const fail of [false, true]) {
-  test(`release transaction: migration ${fail ? 'failure restores exact release' : 'success retains rollback'}`, async () => {
+for (const phase of ['success', 'schema', 'credentials']) {
+  const fail = phase !== 'success';
+  test(`release transaction: ${phase} ${fail ? 'failure restores exact release' : 'retains rollback'}`, async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nextpanel-deploy-test-'));
     try {
       const app = path.join(root, 'apps/nextpanel');
@@ -26,7 +27,8 @@ for (const fail of [false, true]) {
       await fs.mkdir(bin);
       const mocks = {
         flock: 'exit 0', pm2: 'exit 0', curl: 'printf 401',
-        pnpm: `if [[ "$*" == 'exec prisma migrate deploy' ]]; then exit ${fail ? 9 : 0}; fi`,
+        pnpm: `if [[ "$*" == 'exec prisma migrate deploy' ]]; then exit ${phase === 'schema' ? 9 : 0}; fi`,
+        node: `[[ "$*" == *migrate-external-secrets.cjs* ]] || exit 8\nexit ${phase === 'credentials' ? 9 : 0}`,
         docker: `printf '%s\\n' "$*" >> '${root}/docker.log'\nif [[ "$*" == *pg_dump* ]]; then echo fake-dump; else cat >/dev/null; fi`,
         sha256sum: 'echo checksum',
       };

@@ -7,6 +7,8 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import PageHeader from '@/components/common/PageHeader';
 import AppCard from '@/components/common/AppCard';
 import type { AxiosError } from 'axios';
+import { useState } from 'react';
+import { useAuthStore } from '@/store/auth';
 
 const { Text } = Typography;
 
@@ -16,20 +18,45 @@ export default function AccountSettingsPage() {
   const { isMobile } = useIsMobile();
   const [form] = Form.useForm();
 
-  const mutation = useMutation({
-    mutationFn: (values: { currentPassword: string; newPassword: string }) =>
-      authApi.changePassword(values.currentPassword, values.newPassword),
-    onSuccess: () => {
-      message.success('密码已修改');
+  const [changingPassword, setChangingPassword] = useState(false);
+
+  async function changePassword(values: { currentPassword: string; newPassword: string }) {
+    setChangingPassword(true);
+    try {
+      await authApi.changePassword(values.currentPassword, values.newPassword);
+      message.success('密码已修改，所有旧会话已退出，请重新登录');
       form.resetFields();
-    },
-    onError: (err) => {
+      useAuthStore.getState().logout();
+      qc.clear();
+      window.location.replace('/login');
+    } catch (err) {
       const axiosErr = err as AxiosError<{ message: string | string[] }>;
       const msgs = axiosErr.response?.data?.message;
       const text = Array.isArray(msgs) ? msgs[0] : typeof msgs === 'string' ? msgs : '修改失败';
       message.error(text);
-    },
-  });
+    } finally { setChangingPassword(false); }
+  }
+
+  function revokeOtherSessions() {
+    let password = '';
+    modal.confirm({
+      title: '退出其他设备',
+      content: <Input.Password aria-label="确认当前密码" placeholder="请输入当前密码" autoComplete="current-password"
+        onChange={event => { password = event.target.value; }} />,
+      onCancel: () => { password = ''; },
+      onOk: async () => {
+        try {
+          await authApi.revokeOtherSessions(password);
+          password = '';
+          message.success('其他旧会话已退出，当前设备保持登录');
+        } catch (err) {
+          const detail = (err as AxiosError<{ message: string }>).response?.data?.message;
+          message.error(typeof detail === 'string' ? detail : '操作失败，请重试或重新登录');
+          throw err;
+        }
+      },
+    });
+  }
 
   // WeChat Work bind status
   const { data: wxConfig } = useQuery({
@@ -85,9 +112,8 @@ export default function AccountSettingsPage() {
         <Form
           form={form}
           layout="vertical"
-          onFinish={(v) =>
-            mutation.mutate(v as { currentPassword: string; newPassword: string })
-          }
+          onFinish={changePassword}
+          disabled={changingPassword}
         >
           <Form.Item
             name="currentPassword"
@@ -127,10 +153,17 @@ export default function AccountSettingsPage() {
             <Input.Password />
           </Form.Item>
 
-          <Button type="primary" htmlType="submit" loading={mutation.isPending}>
+          <Button type="primary" htmlType="submit" loading={changingPassword}>
             修改密码
           </Button>
         </Form>
+      </Card>
+
+      <Card title="登录会话" size="small" style={{ maxWidth: 400, marginTop: 16 }}>
+        <Space direction="vertical">
+          <Text type="secondary">撤销此前签发的登录凭证，仅当前设备获得新会话。修改密码则会退出所有设备。</Text>
+          <Button onClick={revokeOtherSessions}>退出其他设备</Button>
+        </Space>
       </Card>
 
       {/* TODO: 企业微信绑定暂时屏蔽，等可信IP配置完成后恢复 */}

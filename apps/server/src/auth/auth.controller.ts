@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Post, Patch, Delete, Query, UseGuards, Req, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Patch, Delete, Query, UseGuards, Req, Res, Header } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
@@ -6,6 +6,8 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { ConfirmPasswordDto } from './dto/confirm-password.dto';
+import { Audit } from '../common/decorators/audit.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { WxWorkService } from '../wxwork/wxwork.service';
@@ -45,11 +47,22 @@ export class AuthController {
 
   @Patch('change-password')
   @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Audit('UPDATE', 'account-password')
   changePassword(
-    @CurrentUser() user: { id: string },
+    @CurrentUser() user: { id: string; tokenVersion: number },
     @Body() dto: ChangePasswordDto,
   ) {
-    return this.authService.changePassword(user.id, dto);
+    return this.authService.changePassword(user.id, dto, user.tokenVersion);
+  }
+
+  @Post('revoke-other-sessions')
+  @Header('Cache-Control', 'no-store')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Audit('LOGOUT', 'other-sessions')
+  revokeOtherSessions(@CurrentUser() user: { id: string; tokenVersion: number }, @Body() dto: ConfirmPasswordDto) {
+    return this.authService.revokeOtherSessions(user.id, dto.currentPassword, user.tokenVersion);
   }
 
   // ─── WeChat Work OAuth ────────────────────────────────────────────────────

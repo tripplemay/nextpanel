@@ -55,7 +55,7 @@ async function main() {
   if (existing) {
     await prisma.user.update({
       where: { username },
-      data: { passwordHash, role: 'ADMIN' },
+      data: { passwordHash, role: 'ADMIN', tokenVersion: { increment: 1 } },
     });
     console.log(`\n✅ 用户 "${username}" 密码已重置，角色确认为 ADMIN。`);
   } else {

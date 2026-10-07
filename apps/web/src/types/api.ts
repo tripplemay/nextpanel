@@ -247,25 +247,22 @@ export interface ExternalNode {
   protocol: string;
   address: string;
   port: number;
-  uuid: string | null;
-  username: string | null;
-  password: string | null;
-  method: string | null;
   transport: string | null;
   tls: string;
-  realityPublicKey: string | null;
-  shortId: string | null;
-  xhttpMode: string | null;
-  xhttpHost: string | null;
-  xhttpExtra: string | null;
-  sni: string | null;
-  path: string | null;
-  rawUri: string | null;
   lastReachable: boolean | null;
   lastLatency: number | null;
   lastTestedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ExternalNodeCredentials {
+  uuid: string | null;
+  username: string | null;
+  password: string | null;
+  rawUri: string | null;
+  xhttpExtra: string | null;
+  shortId: string | null;
 }
 
 export interface Subscription {

@@ -5,6 +5,8 @@ import { NodesService } from '../nodes/nodes.service';
 import { buildShareUri, buildClashSubscription, buildSingboxOutbound, buildFullSingboxConfig, buildHomeProxyConfig } from './uri-builder';
 import type { NodeExportInfo } from './uri-builder';
 import { importedTransportHost } from '../external-nodes/uri-parser';
+import { CryptoService } from '../common/crypto/crypto.service';
+import { externalNodePublicSelect, openExternalSecrets } from '../external-nodes/external-credentials';
 
 type SubscriptionNode = {
   node: {
@@ -28,6 +30,7 @@ export class SubscriptionsService {
     private prisma: PrismaService,
     private nodesService: NodesService,
     private config: ConfigService,
+    private crypto: CryptoService,
   ) {}
 
   async create(name: string, nodeIds: string[], ownerId: string, externalNodeIds?: string[]) {
@@ -65,7 +68,7 @@ export class SubscriptionsService {
       },
       include: {
         nodes: { include: { node: true } },
-        externalNodes: { include: { externalNode: true } },
+        externalNodes: { include: { externalNode: { select: externalNodePublicSelect } } },
       },
     });
   }
@@ -296,7 +299,7 @@ export class SubscriptionsService {
       externalNodes: { include: { externalNode: true } },
     };
 
-    let sub: { ownerId: string; nodes: SubscriptionNode[]; externalNodes: { externalNode: { name: string; protocol: string; address: string; port: number; transport: string | null; transportHost: string | null; tls: string; sni: string | null; path: string | null; uuid: string | null; username: string | null; password: string | null; method: string | null; realityPublicKey: string | null; shortId: string | null; xhttpMode: string | null; xhttpHost: string | null; xhttpExtra: string | null } }[] } | null = null;
+    let sub: { ownerId: string; nodes: SubscriptionNode[]; externalNodes: { externalNode: import('@prisma/client').ExternalNode }[] } | null = null;
 
     if (by.shareToken) {
       const share = await this.prisma.subscriptionShare.findUnique({
@@ -328,7 +331,9 @@ export class SubscriptionsService {
       });
     }
 
-    for (const { externalNode: en } of sub.externalNodes) {
+    for (const { externalNode: stored } of sub.externalNodes) {
+      if (stored.userId !== sub.ownerId) throw new ForbiddenException();
+      const en = { ...stored, ...openExternalSecrets(this.crypto, stored) };
       const credentials: Record<string, string> = {};
       if (en.uuid) credentials.uuid = en.uuid;
       if (en.username) credentials.username = en.username;

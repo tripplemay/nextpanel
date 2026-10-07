@@ -3,6 +3,7 @@ import { ExternalNodesService } from '../external-nodes/external-nodes.service';
 import { importedTransportHost, parseUri } from '../external-nodes/uri-parser';
 import { buildClashProxy, buildSingboxOutbound, NodeExportInfo } from './uri-builder';
 import { buildXrayClientConfig } from '../nodes/xray-test/config-builder';
+import { CryptoService } from '../common/crypto/crypto.service';
 
 describe('subscription security and import/export round trips', () => {
   const db = {
@@ -10,8 +11,9 @@ describe('subscription security and import/export round trips', () => {
     subscription: { findUnique: jest.fn() },
     subscriptionShare: { findMany: jest.fn(), findUnique: jest.fn() },
   };
-  const service = new SubscriptionsService(db as any, {} as any, {} as any);
-  const importer = new ExternalNodesService(db as any, {} as any, {} as any, {} as any);
+  const cipher = new CryptoService({ getOrThrow: () => 'ab'.repeat(32) } as any);
+  const service = new SubscriptionsService(db as any, {} as any, {} as any, cipher);
+  const importer = new ExternalNodesService(db as any, {} as any, {} as any, {} as any, cipher);
   beforeEach(() => jest.resetAllMocks());
 
   it('never sends the owner token to a recipient', async () => {
@@ -47,6 +49,8 @@ describe('subscription security and import/export round trips', () => {
     let stored: any;
     db.externalNode.createMany.mockImplementation(async ({ data }) => { stored = data[0]; return { count: 1 }; });
     await importer.import('owner', uri);
+    for (const key of ['uuid', 'username', 'password', 'rawUri', 'xhttpExtra', 'shortId']) expect(stored[key]).toBeUndefined();
+    expect(stored.credentialsEnc).toEqual(expect.any(String));
     db.subscription.findUnique.mockResolvedValue({ ownerId: 'owner', nodes: [], externalNodes: [{ externalNode: stored }] });
     const encoded = await service.generateContent('owner-token');
     const exported = parseUri(Buffer.from(encoded, 'base64').toString('utf8'));
@@ -54,6 +58,27 @@ describe('subscription security and import/export round trips', () => {
     for (const field of ['protocol', 'address', 'port', 'uuid', 'username', 'password', 'transport', 'transportHost', 'tls', 'sni', 'path'] as const) {
       expect(exported?.[field] ?? '').toEqual(original[field] ?? '');
     }
+  });
+
+  it('keeps owner/share exports identical after encryption without changing bearer tokens', async () => {
+    let stored: any;
+    db.externalNode.createMany.mockImplementation(async ({ data }) => { stored = data[0]; return { count: 1 }; });
+    await importer.import('owner', http);
+    const subscription = { ownerId: 'owner', name: 'fixture', nodes: [], externalNodes: [{ externalNode: stored }] };
+    db.subscription.findUnique.mockResolvedValue(subscription);
+    db.subscriptionShare.findUnique.mockResolvedValue({ shareToken: 'recipient-token', subscription });
+    const exporter = new SubscriptionsService(db as any, {} as any, { get: () => 'https://panel.test' } as any, cipher);
+    expect(await exporter.generateContentByShareToken('recipient-token')).toBe(await exporter.generateContent('owner-token'));
+    expect(await exporter.generateClashContentByShareToken('recipient-token')).toEqual(await exporter.generateClashContent('owner-token'));
+    expect(await exporter.generateSingboxContentByShareToken('recipient-token')).toBe(await exporter.generateSingboxContent('owner-token'));
+  });
+
+  it('fails closed on a foreign node accidentally linked to an owner subscription', async () => {
+    let stored: any;
+    db.externalNode.createMany.mockImplementation(async ({ data }) => { stored = data[0]; return { count: 1 }; });
+    await importer.import('foreign', http);
+    db.subscription.findUnique.mockResolvedValue({ ownerId: 'owner', nodes: [], externalNodes: [{ externalNode: stored }] });
+    await expect(service.generateContent('owner-token')).rejects.toThrow('Forbidden');
   });
 
   function info(uri: string): NodeExportInfo {

@@ -28,6 +28,7 @@ const ACTION_OPTIONS = [
   { value: 'DEPLOY', label: 'DEPLOY' },
   { value: 'ROLLBACK', label: 'ROLLBACK' },
   { value: 'SSH_TEST', label: 'SSH_TEST' },
+  { value: 'CREDENTIAL_READ', label: '查看凭据' },
 ];
 
 const ACTION_COLOR: Record<string, string> = {
@@ -39,6 +40,7 @@ const ACTION_COLOR: Record<string, string> = {
   DEPLOY: 'purple',
   ROLLBACK: 'orange',
   SSH_TEST: 'geekblue',
+  CREDENTIAL_READ: 'volcano',
 };
 
 // ── SSH log pane (lazy-loaded) ────────────────────────────────────────────────

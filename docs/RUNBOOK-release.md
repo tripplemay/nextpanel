@@ -27,6 +27,60 @@ post-snapshot writes. It also restores the previous subscription tokens. Distrib
 client updates only after release acceptance. If database restore fails, keep the panel
 stopped; never mark a rollback successful from PM2 status alone.
 
+## External credential and session migration (2026-10-07)
+
+The `20261007020000_security_closeout` schema migration must be followed by the
+application data migration **before restarting the backend**. `deploy-release.sh`,
+`nextpanel update` and `install.sh` run both steps automatically. Do not deploy only
+the frontend, restore only the old executable, or start an old backend against the
+new constraint: old plaintext writes are rejected and old exports cannot read the
+encrypted records.
+
+For a manual release, first build the matching server and Prisma client, stop backend
+writers, and snapshot the database plus the existing environment. From `apps/server`:
+
+```sh
+pnpm exec prisma migrate deploy
+node --env-file=.env ../../scripts/migrate-external-secrets.cjs
+```
+
+Use Node 20.6+ and the **existing** `ENCRYPTION_KEY`; do not regenerate it during this
+upgrade. The runner encrypts UUID, username, password, raw URI, XHTTP extra data and
+REALITY short ID, verifies decryption, clears the six legacy fields, and validates the DB constraint
+in one transaction. Reruns verify existing ciphertext. Failure rolls back the data
+transaction and must keep the backend stopped. The release transaction additionally
+restores the previous code and database snapshot on failure. Large inventories may
+require a longer maintenance window; the data transaction timeout is five minutes.
+
+Release acceptance additionally requires:
+
+- List, rename and subscription-create responses contain neither plaintext external
+  credentials nor `credentialsEnc`.
+- Owner-only credential reveal rejects missing/wrong passwords and other users,
+  returns `Cache-Control: no-store`, and records a redacted credential-read audit.
+- Existing owner/share URLs export equivalent connection parameters in supported
+  formats; no subscription token rotation is part of this migration.
+- Two independent logins: password change rejects both old JWTs; "sign out other
+  devices" rejects both old JWTs while retaining its replacement JWT.
+- Run external subscription smoke and compare node forwarding against the saved
+  baseline. Local tests do not substitute for these production checks.
+
+Legacy JWTs without a version remain valid while `User.tokenVersion` is zero; password
+change, administrator password reset through seed, or session revocation increments it.
+Already-authorized requests/streams are not forcibly cancelled; subsequent JWT checks
+reject the old version. Revocation does not rotate Agent tokens or subscription links.
+
+Rollback after users have resumed writing restores earlier passwords/session versions,
+not just earlier code. If an accepted security release must be rolled back, block public
+panel access during the rollback and rotate `JWT_SECRET` before reopening it, forcing a
+fresh login. The old release restores its historical security limitations; this is not
+a security-equivalent rollback. Keep `ENCRYPTION_KEY` paired with the chosen DB snapshot.
+
+Old dumps, release directories, WAL and storage snapshots can still contain historical
+plaintext. Restrict/encrypt their storage and expire them under the backup retention
+policy; clearing live columns does not securely erase historical copies. Never print
+decrypted values or copy them into deployment logs/reports.
+
 ## Legacy Agent SSH migration
 
 `scripts/fleet-ops.cjs` runs from `apps/server` with Node's `--env-file=.env` option.

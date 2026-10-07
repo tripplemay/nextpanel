@@ -117,6 +117,7 @@ fi
 PHASE=switched
 cd "$APP/apps/server"
 pnpm exec prisma migrate deploy
+node --env-file=.env "$APP/scripts/migrate-external-secrets.cjs"
 cd "$APP"
 start_panel
 wait_health

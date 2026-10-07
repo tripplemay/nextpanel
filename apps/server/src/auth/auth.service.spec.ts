@@ -14,6 +14,7 @@ const mockPrisma = {
     findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
   },
   inviteCode: {
     findUnique: jest.fn(),
@@ -29,7 +30,7 @@ const mockJwt = {
 const svc = new AuthService(mockPrisma, mockJwt);
 
 const fakeUser = {
-  id: 'u1', username: 'admin', passwordHash: 'hashed', role: 'ADMIN',
+  id: 'u1', username: 'admin', passwordHash: 'hashed', role: 'ADMIN', tokenVersion: 0,
 };
 
 const fakeInvite = { id: 'inv1', code: 'valid-code', maxUses: 5, usedCount: 2 };
@@ -82,7 +83,7 @@ describe('AuthService', () => {
 
       await svc.login({ username: 'admin', password: 'correct' });
 
-      expect(mockJwt.sign).toHaveBeenCalledWith(expect.objectContaining({ sub: 'u1', role: 'ADMIN' }));
+      expect(mockJwt.sign).toHaveBeenCalledWith(expect.objectContaining({ sub: 'u1', role: 'ADMIN', tokenVersion: 0 }));
     });
   });
 
@@ -152,27 +153,72 @@ describe('AuthService', () => {
 
     it('throws UnauthorizedException when user is not found', async () => {
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
-      await expect(svc.changePassword('u1', dto)).rejects.toThrow(UnauthorizedException);
+      await expect(svc.changePassword('u1', dto, 0)).rejects.toThrow(UnauthorizedException);
     });
 
     it('throws BadRequestException when current password is wrong', async () => {
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(fakeUser);
       bcryptCompare.mockResolvedValue(false);
-      await expect(svc.changePassword('u1', dto)).rejects.toThrow(BadRequestException);
+      await expect(svc.changePassword('u1', dto, 0)).rejects.toThrow(BadRequestException);
     });
 
     it('updates password hash when credentials are valid', async () => {
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(fakeUser);
       bcryptCompare.mockResolvedValue(true);
       bcryptHash.mockResolvedValue('new-hash');
-      (mockPrisma.user.update as jest.Mock).mockResolvedValue(fakeUser);
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
-      await svc.changePassword('u1', dto);
+      await svc.changePassword('u1', dto, 0);
 
-      expect(mockPrisma.user.update).toHaveBeenCalledWith({
-        where: { id: 'u1' },
-        data: { passwordHash: 'new-hash' },
+      expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
+        where: { id: 'u1', passwordHash: 'hashed', tokenVersion: 0 },
+        data: { passwordHash: 'new-hash', tokenVersion: { increment: 1 } },
       });
     });
+
+    it('rejects a session revoked between guard and password change', async () => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ ...fakeUser, tokenVersion: 1 });
+      await expect(svc.changePassword('u1', dto, 0)).rejects.toThrow(UnauthorizedException);
+      expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects a concurrent password or session update without overwriting it', async () => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(fakeUser);
+      bcryptCompare.mockResolvedValue(true);
+      bcryptHash.mockResolvedValue('new-hash');
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      await expect(svc.changePassword('u1', dto, 0)).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('revokeOtherSessions', () => {
+    it('requires the current password and never updates on failure', async () => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(fakeUser);
+      bcryptCompare.mockResolvedValue(false);
+      await expect(svc.revokeOtherSessions('u1', 'wrong', 0)).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('increments the version and issues only the caller a replacement JWT', async () => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(fakeUser);
+      bcryptCompare.mockResolvedValue(true);
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      expect((await svc.revokeOtherSessions('u1', 'correct', 0)).accessToken).toBe('mock-token');
+      expect(mockJwt.sign).toHaveBeenCalledWith(expect.objectContaining({ tokenVersion: 1 }));
+    });
+
+    it('never signs a replacement when the concurrent CAS loses', async () => {
+      (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(fakeUser);
+      bcryptCompare.mockResolvedValue(true);
+      (mockPrisma.user.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      await expect(svc.revokeOtherSessions('u1', 'correct', 0)).rejects.toThrow(UnauthorizedException);
+      expect(mockJwt.sign).not.toHaveBeenCalled();
+    });
+  });
+
+  it('includes the current version in enterprise WeChat login', async () => {
+    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({ ...fakeUser, tokenVersion: 7 });
+    await svc.wxWorkLogin('wx-user', 'Name');
+    expect(mockJwt.sign).toHaveBeenCalledWith(expect.objectContaining({ tokenVersion: 7 }));
   });
 });

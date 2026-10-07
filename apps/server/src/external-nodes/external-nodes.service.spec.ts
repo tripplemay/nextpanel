@@ -6,11 +6,20 @@ import { XrayTestService } from '../nodes/xray-test/xray-test.service';
 import { SingboxTestService } from '../nodes/singbox-test/singbox-test.service';
 import { NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { SocksExitResolverService } from '../nodes/socks-exit-resolver.service';
+import { CryptoService } from '../common/crypto/crypto.service';
+import { ExternalSecrets, externalNodePublicSelect, openExternalSecrets, sealExternalSecrets } from './external-credentials';
+
+const cipher = new CryptoService({ getOrThrow: () => 'ab'.repeat(32) } as any);
+function encrypted<T extends { userId: string } & Partial<ExternalSecrets>>(node: T) {
+  return { ...node, credentialsEnc: sealExternalSecrets(cipher, node.userId, node),
+    uuid: null, username: null, password: null, rawUri: null, xhttpExtra: null, shortId: null };
+}
 
 const mockPrisma = {
   externalNode: {
     findMany: jest.fn(),
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     createMany: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
@@ -34,6 +43,7 @@ const svc = new ExternalNodesService(
   mockXrayTest,
   mockSingboxTest,
   mockSocksExitResolver,
+  cipher,
 );
 
 const fakeNode = {
@@ -68,10 +78,12 @@ beforeEach(() => {
 describe('ExternalNodesService', () => {
   describe('list', () => {
     it('returns nodes for userId', async () => {
-      (mockPrisma.externalNode.findMany as jest.Mock).mockResolvedValue([fakeNode]);
+      const safe = { id: fakeNode.id, userId: fakeNode.userId, address: fakeNode.address, port: fakeNode.port };
+      (mockPrisma.externalNode.findMany as jest.Mock).mockResolvedValue([safe]);
       const result = await svc.list('user-1');
-      expect(result).toEqual([fakeNode]);
+      expect(result).toEqual([safe]);
       expect((mockPrisma.externalNode.findMany as jest.Mock).mock.calls[0][0].where).toEqual({ userId: 'user-1' });
+      expect((mockPrisma.externalNode.findMany as jest.Mock).mock.calls[0][0].select).toEqual(externalNodePublicSelect);
     });
   });
 
@@ -114,11 +126,14 @@ describe('ExternalNodesService', () => {
           path: '/api',
           xhttpHost: 'edge.example.com',
           xhttpMode: 'stream-up',
-          xhttpExtra: extra,
           realityPublicKey: 'public-key',
-          shortId: '0123456789abcdef',
         })],
       });
+      const stored = (mockPrisma.externalNode.createMany as jest.Mock).mock.calls[0][0].data[0];
+      expect(stored.xhttpExtra).toBeUndefined();
+      expect(stored.shortId).toBeUndefined();
+      expect(openExternalSecrets(cipher, stored).xhttpExtra).toBe(extra);
+      expect(openExternalSecrets(cipher, stored).shortId).toBe('0123456789abcdef');
     });
 
     it('persists authenticated SOCKS5 credentials', async () => {
@@ -136,11 +151,14 @@ describe('ExternalNodesService', () => {
           protocol: 'SOCKS5',
           address: 'proxy.example.com',
           port: 1080,
-          username: 'proxy-user',
-          password: 'proxy-pass',
           tls: 'NONE',
         })],
       });
+      const stored = (mockPrisma.externalNode.createMany as jest.Mock).mock.calls[0][0].data[0];
+      expect(stored.username).toBeUndefined();
+      expect(stored.password).toBeUndefined();
+      expect(stored.rawUri).toBeUndefined();
+      expect(openExternalSecrets(cipher, stored)).toMatchObject({ username: 'proxy-user', password: 'proxy-pass' });
     });
 
     it('fetches URL when text starts with https://', async () => {
@@ -171,7 +189,7 @@ describe('ExternalNodesService', () => {
     });
 
     it('calls xrayTest for non-HYSTERIA2 protocol and persists result', async () => {
-      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(fakeNode);
+      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(encrypted(fakeNode));
       const testResult = { reachable: true, latency: 42, testedAt: new Date().toISOString() };
       (mockXrayTest.testWithParams as jest.Mock).mockResolvedValue(testResult);
       (mockPrisma.externalNode.update as jest.Mock).mockResolvedValue(fakeNode);
@@ -189,7 +207,7 @@ describe('ExternalNodesService', () => {
 
     it('calls singboxTest for HYSTERIA2 protocol', async () => {
       const hy2Node = { ...fakeNode, protocol: 'HYSTERIA2', password: 'secret', uuid: null };
-      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(hy2Node);
+      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(encrypted(hy2Node));
       const testResult = { reachable: false, latency: null, testedAt: new Date().toISOString() };
       (mockSingboxTest.testHysteria2 as jest.Mock).mockResolvedValue(testResult);
       (mockPrisma.externalNode.update as jest.Mock).mockResolvedValue(hy2Node);
@@ -216,7 +234,7 @@ describe('ExternalNodesService', () => {
         xhttpHost: 'edge.example.com',
         xhttpExtra: '{"noSSEHeader":true}',
       };
-      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(nodeWithAll);
+      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(encrypted(nodeWithAll));
       (mockXrayTest.testWithParams as jest.Mock).mockResolvedValue({ reachable: true, latency: 10, testedAt: new Date().toISOString() });
       (mockPrisma.externalNode.update as jest.Mock).mockResolvedValue(nodeWithAll);
 
@@ -248,7 +266,7 @@ describe('ExternalNodesService', () => {
         transport: null,
         tls: 'NONE',
       };
-      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(socksNode);
+      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(encrypted(socksNode));
       (mockXrayTest.testWithParams as jest.Mock).mockResolvedValue({
         reachable: true,
         latency: 20,
@@ -281,7 +299,7 @@ describe('ExternalNodesService', () => {
         transport: null,
         tls: 'NONE',
       };
-      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(socksNode);
+      (mockPrisma.externalNode.findUnique as jest.Mock).mockResolvedValue(encrypted(socksNode));
       (mockSocksExitResolver.resolve as jest.Mock).mockResolvedValue({
         candidates: [
           { address: '1.1.1.1', sources: ['global'] },
@@ -323,6 +341,7 @@ describe('ExternalNodesService', () => {
       expect(mockPrisma.externalNode.update).toHaveBeenCalledWith({
         where: { id: 'en-1' },
         data: { name: 'Miya US 01' },
+        select: externalNodePublicSelect,
       });
     });
 
@@ -349,5 +368,13 @@ describe('ExternalNodesService', () => {
       await svc.remove('en-1', 'user-1');
       expect(mockPrisma.externalNode.delete).toHaveBeenCalledWith({ where: { id: 'en-1' } });
     });
+  });
+
+  it('scopes credential reads to the authenticated owner', async () => {
+    (mockPrisma.externalNode.findFirst as jest.Mock).mockResolvedValue(encrypted(fakeNode));
+    expect(await svc.getCredentials('en-1', 'user-1')).toMatchObject({ uuid: 'some-uuid' });
+    expect(mockPrisma.externalNode.findFirst).toHaveBeenCalledWith({ where: { id: 'en-1', userId: 'user-1' } });
+    (mockPrisma.externalNode.findFirst as jest.Mock).mockResolvedValue(null);
+    await expect(svc.getCredentials('en-1', 'other')).rejects.toThrow(NotFoundException);
   });
 });

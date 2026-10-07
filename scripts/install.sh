@@ -348,7 +348,8 @@ MIGRATE_OUTPUT=$(pnpm exec prisma migrate deploy 2>&1) || {
   echo "$MIGRATE_OUTPUT"
   fail "数据库迁移失败"
 }
-ok "数据库迁移完成"
+node --env-file=.env "$APP_DIR/scripts/migrate-external-secrets.cjs" || fail "外部节点凭据迁移失败"
+ok "数据库迁移及凭据加密校验完成"
 
 # ── 步骤 19：创建管理员账号 ──────────────────────────────────────────────
 
