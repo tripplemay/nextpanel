@@ -41,6 +41,8 @@ export default function DeployDrawer({
           <CloseCircleFilled /> {actionLabel}失败
         </Text>
       )}
+      {deployStatus === 'interrupted' && <Badge status="warning" text="连接中断，结果未知" />}
+      {deployStatus === 'cancelled' && <Badge status="default" text="已停止接收日志" />}
     </Space>
   );
 

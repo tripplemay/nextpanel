@@ -1,15 +1,8 @@
 'use client';
 
 import { useAuthStore } from '@/store/auth';
-
-export interface SseStreamResult {
-  /** 流正常结束（含后端主动 done） */
-  ok: boolean;
-  /** HTTP 非 2xx 时的状态码 */
-  status?: number;
-  /** 网络层错误信息（AbortError 不算） */
-  error?: string;
-}
+import { readSse, type SseStreamResult } from './sse-client';
+export type { SseStreamResult } from './sse-client';
 
 /**
  * 通用 SSE 流式读取。
@@ -22,45 +15,5 @@ export async function streamSse(
   onEvent: (json: Record<string, unknown>) => void,
   signal?: AbortSignal,
 ): Promise<SseStreamResult> {
-  const token = useAuthStore.getState().token ?? '';
-
-  try {
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal,
-    });
-
-    if (!res.ok || !res.body) {
-      return { ok: false, status: res.status };
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const chunks = buffer.split('\n\n');
-      buffer = chunks.pop() ?? '';
-
-      for (const chunk of chunks) {
-        const dataLine = chunk.split('\n').find((l) => l.startsWith('data:'));
-        if (!dataLine) continue;
-        try {
-          onEvent(JSON.parse(dataLine.slice(5).trim()) as Record<string, unknown>);
-        } catch {
-          // 忽略无法解析的事件，流继续
-        }
-      }
-    }
-    return { ok: true };
-  } catch (err: unknown) {
-    if ((err as Error).name === 'AbortError') {
-      return { ok: true };
-    }
-    return { ok: false, error: (err as Error).message };
-  }
+  return readSse(url, useAuthStore.getState().token ?? '', onEvent, signal);
 }

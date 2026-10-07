@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service';
 import { MetricsService } from '../metrics/metrics.service';
 import { IpCheckService } from '../ip-check/ip-check.service';
+import { performance } from 'node:perf_hooks';
+import { NetworkRateTracker } from './network-rate';
 
 export interface HeartbeatPayload {
   agentToken: string;
@@ -28,8 +30,7 @@ interface LatestVersionCache {
 @Injectable()
 export class AgentService {
   private readonly logger = new Logger(AgentService.name);
-  /** Stores previous cumulative network bytes per server for rate calculation */
-  private readonly prevNetwork = new Map<string, { in: number; out: number }>();
+  private readonly networkRates = new NetworkRateTracker();
   /** Cache latest GitHub release for 1 hour */
   private latestVersionCache: LatestVersionCache | null = null;
   /** Tracks when each server's pendingAgentUpdate was first observed, for timeout purposes */
@@ -99,6 +100,7 @@ export class AgentService {
   }
 
   async handleHeartbeat(payload: HeartbeatPayload) {
+    const receivedAt = performance.now();
     const server = await this.prisma.server.findUnique({
       where: { agentToken: payload.agentToken },
     });
@@ -107,12 +109,9 @@ export class AgentService {
       throw new UnauthorizedException('Unknown agent token');
     }
 
-    // Agent sends cumulative bytes; calculate bytes/sec rate from delta
-    const INTERVAL = 10; // heartbeat interval in seconds
-    const prev = this.prevNetwork.get(server.id);
-    const netInRate  = prev ? Math.max(0, (payload.networkIn  - prev.in)  / INTERVAL) : 0;
-    const netOutRate = prev ? Math.max(0, (payload.networkOut - prev.out) / INTERVAL) : 0;
-    this.prevNetwork.set(server.id, { in: payload.networkIn, out: payload.networkOut });
+    const { input: netInRate, output: netOutRate } = this.networkRates.sample(
+      server.id, payload.networkIn, payload.networkOut, receivedAt,
+    );
 
     const updateData: Record<string, unknown> = {
       agentVersion: payload.agentVersion,

@@ -6,7 +6,7 @@ import { CopyOutlined, DownloadOutlined, LoadingOutlined } from '@ant-design/ico
 import { useThemeTokens } from '@/theme/ThemeContext';
 import type { NpTokens } from '@/theme/tokens';
 
-export type LogStatus = 'idle' | 'running' | 'success' | 'failed';
+export type LogStatus = 'idle' | 'running' | 'success' | 'failed' | 'interrupted' | 'cancelled';
 
 interface LogTerminalProps {
   lines: string[];
@@ -141,6 +141,12 @@ export default function LogTerminal({
         )}
         {status === 'failed' && failedText && (
           <div style={{ color: tokens.logError, marginTop: 8 }}>✗ {failedText}</div>
+        )}
+        {status === 'interrupted' && (
+          <div style={{ color: tokens.logError, marginTop: 8 }}>连接中断，远端任务结果未知；请核对状态，勿直接重复操作。</div>
+        )}
+        {status === 'cancelled' && (
+          <div style={{ color: tokens.logMuted, marginTop: 8 }}>已停止接收日志，不代表远端任务已取消。</div>
         )}
         <div ref={endRef} />
       </div>

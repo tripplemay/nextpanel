@@ -27,7 +27,7 @@ export default function AutoSetupDrawer({
   templateIds,
   onClose,
 }: Props) {
-  const { logLines, deployStatus, startStream, reset } = useDeployStream();
+  const { logLines, deployStatus, startStream, reset, abort } = useDeployStream();
 
   const start = () => {
     const query = templateIds.length > 0 ? `?templateIds=${templateIds.join(',')}` : '';
@@ -39,19 +39,22 @@ export default function AutoSetupDrawer({
       reset();
       start();
     }
+    return abort;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, serverId]);
 
   const drawerTitle = (
     <Space>
       <span>SSH 连接检查 — {serverName}</span>
-      {deployStatus === 'running' && <Badge status="processing" text="配置中" />}
+      {deployStatus === 'running' && <Badge status="processing" text="检查中" />}
       {deployStatus === 'success' && (
-        <Text type="success"><CheckCircleFilled /> 配置完成</Text>
+        <Text type="success"><CheckCircleFilled /> 检查完成</Text>
       )}
       {deployStatus === 'failed' && (
-        <Text type="danger"><CloseCircleFilled /> 配置失败</Text>
+        <Text type="danger"><CloseCircleFilled /> 检查失败</Text>
       )}
+      {deployStatus === 'interrupted' && <Badge status="warning" text="连接中断，结果未知" />}
+      {deployStatus === 'cancelled' && <Badge status="default" text="已停止接收日志" />}
     </Space>
   );
 
@@ -76,7 +79,7 @@ export default function AutoSetupDrawer({
         lines={logLines}
         status={deployStatus}
         successText="SSH 检查完成；未部署节点，请使用节点协议预设"
-        failedText="配置失败，请查看上方日志"
+        failedText="SSH 检查失败，请查看上方日志"
         minHeight={300}
         maxHeight="calc(100vh - 280px)"
       />

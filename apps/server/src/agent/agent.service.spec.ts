@@ -4,6 +4,7 @@ import { MetricsService } from '../metrics/metrics.service';
 import { IpCheckService } from '../ip-check/ip-check.service';
 import { ConfigService } from '@nestjs/config';
 import { UnauthorizedException } from '@nestjs/common';
+import { performance } from 'node:perf_hooks';
 
 const mockPrisma = {
   server: {
@@ -36,6 +37,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   svc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
 });
+afterEach(() => jest.restoreAllMocks());
 
 describe('AgentService', () => {
   const heartbeat = { agentToken: 'tok-abc', agentVersion: '1.7.0', cpu: 0, mem: 0, disk: 0, networkIn: 0, networkOut: 0 };
@@ -98,6 +100,7 @@ describe('AgentService', () => {
     });
 
     it('calls metricsService.record with correct values', async () => {
+      jest.spyOn(performance, 'now').mockReturnValueOnce(1000).mockReturnValueOnce(26000);
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
       (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
@@ -110,13 +113,13 @@ describe('AgentService', () => {
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(fakeServer);
       (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
-      // Second call: delta = 10240 bytes over 10s → rate = 1024 bytes/s; delta = 20480 → 2048/s
+      // Delayed heartbeat: use 25 actual seconds, not the nominal 10 seconds.
       await svc.handleHeartbeat({
         agentToken: 'tok-abc', agentVersion: 'v1',
         cpu: 55, mem: 70, disk: 40, networkIn: 10240, networkOut: 20480,
       });
 
-      expect(mockMetrics.record).toHaveBeenCalledWith('srv-1', 55, 70, 40, 1024, 2048);
+      expect(mockMetrics.record).toHaveBeenCalledWith('srv-1', 55, 70, 40, 409.6, 819.2);
     });
 
     it('updates node statuses when nodeStatuses provided', async () => {

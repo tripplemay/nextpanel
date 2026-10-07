@@ -2,6 +2,31 @@
 
 ## Panel
 
+`Deploy` first calls `.github/workflows/validate.yml`; its SSH job has
+`needs: validate` and cannot start after a failed/cancelled validation job. Pull
+requests run the same reusable checks without deployment credentials. Validation
+uses Node 22, pnpm 9.15.9 with the frozen lockfile, PostgreSQL 16 and pinned Python
+Playwright/Chromium. It runs backend HTTP/unit tests, SSE/ops/fail-closed gate tests,
+type checks, production builds, isolated database migration/restore and browser
+security/P1 flows. Fixture-only logs are retained for seven days.
+
+Reproduce the gate in a clean checkout with dependencies and Chromium installed:
+
+```sh
+python3 -m pip install -r scripts/tests/browser-requirements.txt
+python3 -m playwright install chromium
+PG_BIN=/path/to/postgresql/16/bin bash scripts/ci/verify.sh
+```
+
+The database tests require a non-root user, create their own Unix-socket-only
+cluster and never use the project database. The frontend smoke starts its own
+loopback-only server and mocks API requests. `verify.sh` deliberately overrides
+`DATABASE_URL` and `API_URL` with non-serving fixture addresses. Prefer an isolated
+checkout because Prisma generation and production builds write generated artifacts.
+The workflow gate does not enforce manual SSH/CLI operations outside GitHub; those
+operators must run it before a release. Branch protection remains a repository
+setting, not something this workflow silently changes.
+
 `Deploy` stages a full commit in an isolated directory, installs the frozen lockfile,
 generates Prisma and builds before stopping either production process. SSH host keys
 must be pinned in `SSH_KNOWN_HOSTS`; the job fails closed when it is missing.

@@ -163,8 +163,8 @@ export const ipCheckApi = {
 // ── Metrics ───────────────────────────────────────────
 export const metricsApi = {
   overview: () => api.get<Record<string, unknown>>('/metrics/overview'),
-  server: (id: string, limit?: number) =>
-    api.get<Metric[]>(`/metrics/servers/${id}`, { params: { limit } }),
+  server: (id: string, limit?: number, range?: '1h' | '6h' | '24h' | '7d' | '14d') =>
+    api.get<Metric[]>(`/metrics/servers/${id}`, { params: { limit, range } }),
 };
 
 // ── Audit ─────────────────────────────────────────────

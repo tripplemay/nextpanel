@@ -27,7 +27,7 @@ export default function AgentInstallDrawer({
   serverName,
   onClose,
 }: Props) {
-  const { logLines, deployStatus, startStream, reset } = useDeployStream();
+  const { logLines, deployStatus, startStream, reset, abort } = useDeployStream();
   const { isMobile } = useIsMobile();
   const [manualCmd, setManualCmd] = useState('');
 
@@ -47,6 +47,7 @@ export default function AgentInstallDrawer({
       setManualCmd('');
       start();
     }
+    return abort;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, serverId]);
 
@@ -60,6 +61,8 @@ export default function AgentInstallDrawer({
       {deployStatus === 'failed' && (
         <Text type="danger"><CloseCircleFilled /> 安装失败</Text>
       )}
+      {deployStatus === 'interrupted' && <Badge status="warning" text="连接中断，结果未知" />}
+      {deployStatus === 'cancelled' && <Badge status="default" text="已停止接收日志" />}
     </Space>
   );
 

@@ -3,6 +3,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { MetricsService } from './metrics.service';
+import { MetricsQueryDto } from './metrics-query.dto';
 
 @ApiTags('metrics')
 @ApiBearerAuth()
@@ -19,9 +20,9 @@ export class MetricsController {
   @Get('servers/:id')
   getServerMetrics(
     @Param('id') id: string,
-    @Query('limit') limit = 60,
+    @Query() query: MetricsQueryDto,
     @CurrentUser() user: { id: string },
   ) {
-    return this.metricsService.getServerMetrics(id, user.id, +limit);
+    return this.metricsService.getServerMetrics(id, user.id, query.limit, query.range);
   }
 }

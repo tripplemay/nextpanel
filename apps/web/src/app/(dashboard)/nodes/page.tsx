@@ -369,11 +369,11 @@ export default function NodesPage() {
   const batchTestButton = (
     <Button
       icon={<ApiOutlined />}
-      loading={batchTesting}
+      aria-label={batchTesting ? '停止接收测试结果' : '批量测试'}
       onClick={() => void nodeActions.startBatchTest()}
     >
       {!isMobile && (batchTesting && batchProgress
-        ? `测试中 ${batchProgress.done}/${batchProgress.total}`
+        ? `停止接收 ${batchProgress.done}/${batchProgress.total}`
         : '批量测试')}
     </Button>
   );

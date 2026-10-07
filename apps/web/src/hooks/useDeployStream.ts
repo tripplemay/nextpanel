@@ -1,9 +1,9 @@
 'use client';
 
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import { streamSse } from '@/lib/sse';
 
-export type DeployStatus = 'idle' | 'running' | 'success' | 'failed';
+export type DeployStatus = 'idle' | 'running' | 'success' | 'failed' | 'interrupted' | 'cancelled';
 
 export interface UseDeployStreamResult {
   logLines: string[];
@@ -23,37 +23,44 @@ export function useDeployStream(): UseDeployStreamResult {
   }, []);
 
   const reset = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
     setLogLines([]);
     setDeployStatus('idle');
   }, []);
 
+  useEffect(() => () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }, []);
+
   const startStream = useCallback(async (url: string, onDone?: (success: boolean) => void, onRawEvent?: (json: Record<string, unknown>) => void) => {
     abortRef.current?.abort();
-    abortRef.current = new AbortController();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     setLogLines([]);
     setDeployStatus('running');
 
     const result = await streamSse(url, (json) => {
+      if (abortRef.current !== controller || controller.signal.aborted) return;
       onRawEvent?.(json);
       if (json.log) {
         setLogLines((prev) => [...prev, json.log as string]);
       }
-      if (json.done) {
-        const success = (json.success as boolean) ?? false;
-        setDeployStatus(success ? 'success' : 'failed');
-        onDone?.(success);
-      }
-    }, abortRef.current.signal);
+    }, controller.signal);
 
-    if (!result.ok) {
+    // A cancelled/replaced request must never settle a newer operation.
+    if (abortRef.current !== controller) return;
+    abortRef.current = null;
+    setDeployStatus(result.outcome);
+    if (result.outcome === 'interrupted' || result.status) {
       setLogLines((prev) => [
         ...prev,
-        result.status ? `Error: HTTP ${result.status}` : `连接中断: ${result.error}`,
+        result.status ? `Error: HTTP ${result.status}` : `连接中断，远端结果未知，请核对状态后再操作: ${result.error}`,
       ]);
-      setDeployStatus('failed');
-      onDone?.(false);
     }
+    if (result.outcome !== 'cancelled') onDone?.(result.outcome === 'success');
   }, []);
 
   return { logLines, deployStatus, startStream, abort, reset };

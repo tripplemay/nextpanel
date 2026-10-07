@@ -15,6 +15,7 @@ const require = createRequire(join(root, 'apps/server/package.json'));
 const { PrismaClient } = require('@prisma/client');
 require('ts-node').register({ project: join(root, 'apps/server/tsconfig.json'), transpileOnly: true });
 const { CryptoService } = require(join(root, 'apps/server/src/common/crypto/crypto.service.ts'));
+const { MetricsService } = require(join(root, 'apps/server/src/metrics/metrics.service.ts'));
 const { migrateExternalSecrets } = require(join(root, 'apps/server/src/external-nodes/migrate-external-secrets.ts'));
 const { sealExternalSecrets, openExternalSecrets, externalNodePublicSelect } = require(join(root, 'apps/server/src/external-nodes/external-credentials.ts'));
 const bin = process.env.PG_BIN;
@@ -36,6 +37,7 @@ test('isolated PostgreSQL migration, concurrency and restore drill', { timeout: 
     run('pg_ctl', ['-D', join(temp, 'data'), '-l', join(temp, 'postgres.log'), '-o', `-h '' -k ${socket} -p 55432 -F`, '-w', 'start']);
     started = true;
     run('createdb', ['nextpanel']);
+    sql("ALTER DATABASE nextpanel SET timezone TO 'Asia/Jakarta';");
     sql('CREATE ROLE nextpanel;');
 
     const migrations = join(root, 'apps/server/prisma/migrations');
@@ -66,6 +68,35 @@ test('isolated PostgreSQL migration, concurrency and restore drill', { timeout: 
     assert.equal(sql('SELECT "shareToken" FROM "SubscriptionShare" WHERE id=\'share\''), 'recipient-token');
 
     prisma = new PrismaClient({ datasources: { db: { url: `postgresql://review@localhost:55432/nextpanel?host=${encodeURIComponent(socket)}` } } });
+    const metrics = new MetricsService(prisma);
+    const metricNow = new Date('2026-10-07T12:00:00Z');
+    await prisma.serverMetric.createMany({ data: [
+      { id: 'm1', serverId: 'srv', timestamp: new Date('2026-10-07T11:00:00Z'), cpu: 10, mem: 20, disk: 30, networkIn: 100, networkOut: 200 },
+      { id: 'm2', serverId: 'srv', timestamp: new Date('2026-10-07T11:29:59Z'), cpu: 30, mem: 40, disk: 50, networkIn: 300, networkOut: 400 },
+      { id: 'm3', serverId: 'srv', timestamp: new Date('2026-10-07T11:30:00Z'), cpu: 80, mem: 80, disk: 80, networkIn: 800, networkOut: 800 },
+      { id: 'old', serverId: 'srv', timestamp: new Date('2026-10-07T10:59:59Z'), cpu: 99, mem: 99, disk: 99, networkIn: 999, networkOut: 999 },
+      { id: 'future', serverId: 'srv', timestamp: metricNow, cpu: 99, mem: 99, disk: 99, networkIn: 999, networkOut: 999 },
+    ] });
+    const aggregate = await metrics.getServerMetrics('srv', 'owner', 2, '1h', metricNow);
+    assert.equal(aggregate.length, 2);
+    assert.equal(aggregate[0].timestamp.toISOString(), '2026-10-07T11:30:00.000Z');
+    assert.equal(aggregate[0].cpu, 80);
+    assert.equal(aggregate[1].cpu, 20);
+    assert.equal(aggregate[1].networkIn, 200);
+    assert.deepEqual(await metrics.getServerMetrics('srv', 'foreign', 2, '1h', metricNow), []);
+    assert.deepEqual(await metrics.getServerMetrics('missing', 'owner', 2, '1h', metricNow), []);
+    await prisma.serverMetric.deleteMany();
+    assert.deepEqual(await metrics.getServerMetrics('srv', 'owner', 2, '14d', metricNow), []);
+    // A full retention window is reduced in SQL, including a non-divisible bucket size.
+    sql(`INSERT INTO "ServerMetric" (id,"serverId",cpu,mem,disk,"networkIn","networkOut",timestamp)
+      SELECT 'bulk-' || n, 'srv', 20, 30, 40, 100, 200, timestamp '2026-09-23 12:00:00' + n * interval '10 seconds'
+      FROM generate_series(0, 120959) AS n;`);
+    const bounded = await metrics.getServerMetrics('srv', 'owner', 599, '14d', metricNow);
+    assert.ok(bounded.length > 590 && bounded.length <= 599);
+    assert.ok(bounded.every(point => point.cpu === 20 && point.networkIn === 100));
+    assert.ok(bounded[0].timestamp > bounded.at(-1).timestamp);
+    assert.equal((await metrics.getServerMetrics('srv', 'owner', 600)).length, 600);
+    await prisma.serverMetric.deleteMany();
     const cipher = new CryptoService({ getOrThrow: () => 'ab'.repeat(32) });
     await prisma.externalNode.create({ data: { id: 'zzz', userId: 'owner', name: 'encrypted', protocol: 'HTTP', address: 'proxy.test', port: 80,
       credentialsEnc: sealExternalSecrets(cipher, 'owner', { password: 'existing-secret' }) } });

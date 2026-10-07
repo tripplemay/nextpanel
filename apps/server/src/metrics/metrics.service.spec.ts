@@ -64,6 +64,22 @@ describe('MetricsService', () => {
   });
 
   describe('getServerMetrics', () => {
+    it.each([0, -1, 601, 1.5, NaN, Infinity])('rejects limit %s even for internal callers', async (limit) => {
+      await expect(svc.getServerMetrics('srv-1', 'user-1', limit)).rejects.toThrow('limit must');
+      expect(mockPrisma.server.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.serverMetric.findMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid ranges even for internal callers', async () => {
+      await expect(svc.getServerMetrics('srv-1', 'user-1', 60, 'all' as any)).rejects.toThrow('Invalid metric range');
+    });
+
+    it('does not read metrics for another owner', async () => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(null);
+      expect(await svc.getServerMetrics('srv-1', 'other')).toEqual([]);
+      expect(mockPrisma.server.findFirst).toHaveBeenCalledWith({ where: { id: 'srv-1', userId: 'other' } });
+      expect(mockPrisma.serverMetric.findMany).not.toHaveBeenCalled();
+    });
     it('returns metrics for specified server', async () => {
       const fakeMetrics = [{ id: 'm1', cpu: 50, mem: 60 }];
       (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue({ id: 'srv-1' });

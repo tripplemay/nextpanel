@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { App, Input, Modal, Select } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { AxiosError } from 'axios';
@@ -66,6 +66,10 @@ export function useNodeActions({ nodes }: UseNodeActionsOptions): UseNodeActions
   const [batchTesting, setBatchTesting] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
   const abortBatchRef = useRef<AbortController | null>(null);
+  useEffect(() => () => {
+    abortBatchRef.current?.abort();
+    abortBatchRef.current = null;
+  }, []);
 
   const { logLines, deployStatus, startStream, abort, reset } = useDeployStream();
   const {
@@ -159,7 +163,7 @@ export function useNodeActions({ nodes }: UseNodeActionsOptions): UseNodeActions
   });
 
   const startBatchTest = useCallback(async () => {
-    if (batchTesting) {
+    if (abortBatchRef.current) {
       abortBatchRef.current?.abort();
       return;
     }
@@ -169,11 +173,14 @@ export function useNodeActions({ nodes }: UseNodeActionsOptions): UseNodeActions
     setBatchTesting(true);
     setBatchProgress({ done: 0, total: nodes.length });
     setTestResults({});
-    abortBatchRef.current = new AbortController();
+    const controller = new AbortController();
+    abortBatchRef.current = controller;
+    let total = 0;
 
     const result = await streamSse(
       '/api/nodes/test-all',
       (event) => {
+        if (abortBatchRef.current !== controller || controller.signal.aborted) return;
         if (event.type === 'result') {
           const id = event.nodeId as string;
           setTestResults((prev) => ({
@@ -187,19 +194,25 @@ export function useNodeActions({ nodes }: UseNodeActionsOptions): UseNodeActions
           }));
           setBatchProgress((prev) => prev ? { ...prev, done: prev.done + 1 } : null);
         } else if (event.type === 'done') {
-          void message.success(`批量测试完成，共 ${event.total as number} 个节点`);
-          qc.invalidateQueries({ queryKey: ['nodes'] });
+          total = event.total as number;
         }
       },
-      abortBatchRef.current.signal,
+      controller.signal,
     );
 
-    if (!result.ok) {
+    if (abortBatchRef.current !== controller) return;
+    abortBatchRef.current = null;
+    if (result.outcome === 'success') {
+      void message.success(`批量测试完成，共 ${total} 个节点`);
+    } else if (result.outcome === 'cancelled') {
+      void message.info('已停止接收测试结果，远端测试可能仍在执行');
+    } else {
       void message.error(result.status ? '批量测试请求失败' : '批量测试连接中断');
     }
+    void qc.invalidateQueries({ queryKey: ['nodes'] });
     setBatchTesting(false);
     setBatchProgress(null);
-  }, [batchTesting, message, nodes.length, qc]);
+  }, [message, nodes.length, qc]);
 
   const openDeploy = useCallback((node: Node) => {
     reset();

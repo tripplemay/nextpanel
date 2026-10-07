@@ -1,0 +1,52 @@
+name: Validation
+
+on:
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI: 'true'
+      NEXT_TELEMETRY_DISABLED: '1'
+      PG_BIN: /usr/lib/postgresql/16/bin
+      DATABASE_URL: postgresql://fixture:fixture@127.0.0.1:1/fixture
+      API_URL: http://127.0.0.1:1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install locked application dependencies and isolated test tools
+        run: |
+          pnpm install --frozen-lockfile
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16
+          python -m pip install -r scripts/tests/browser-requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Test, build, restore and browser gates
+        run: |
+          set -euo pipefail
+          mkdir -p out/ci
+          bash scripts/ci/verify.sh 2>&1 | tee out/ci/verification.log
+      - name: Preserve fixture-only verification logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-${{ github.sha }}
+          path: out/ci/
+          retention-days: 7
+          if-no-files-found: ignore

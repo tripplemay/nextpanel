@@ -17,6 +17,8 @@ import { AgentService } from './agent/agent.service';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { AuditService } from './audit/audit.service';
 import { connectSsh } from './nodes/ssh/ssh.util';
+import { MetricsController } from './metrics/metrics.controller';
+import { MetricsService } from './metrics/metrics.service';
 
 jest.mock('./nodes/ssh/ssh.util', () => ({ connectSsh: jest.fn() }));
 
@@ -25,6 +27,8 @@ describe('real HTTP routing, JWT, roles and ownership (isolated persistence)', (
   let base: string;
   let jwt: JwtService;
   const db = {
+    serverMetric: { findMany: jest.fn(async () => []) },
+    $queryRaw: jest.fn(async () => []),
     server: {
       findFirst: jest.fn(async ({ where }) => where.id === 'srv-1' && where.userId === 'owner'
         ? { id: 'srv-1', userId: 'owner', sshAuthEnc: 'encrypted', agentToken: 'SECRET' } : null),
@@ -42,7 +46,7 @@ describe('real HTTP routing, JWT, roles and ownership (isolated persistence)', (
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       imports: [PassportModule, JwtModule.register({ secret: 'isolated-test-key' })],
-      controllers: [ServersController, OperationLogController, AgentController],
+      controllers: [ServersController, OperationLogController, AgentController, MetricsController],
       providers: [
         JwtStrategy, ServerOwnerGuard,
         { provide: ConfigService, useValue: { getOrThrow: () => 'isolated-test-key' } },
@@ -54,6 +58,7 @@ describe('real HTTP routing, JWT, roles and ownership (isolated persistence)', (
         { provide: AutoSetupService, useValue: new AutoSetupService(db as any, {} as any) },
         { provide: OperationLogService, useValue: new OperationLogService(db as any) },
         { provide: AgentService, useValue: { handleHeartbeat: heartbeat } },
+        { provide: MetricsService, useValue: new MetricsService(db as any) },
         { provide: AuditService, useValue: { log: jest.fn() } },
         { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
       ],
@@ -68,6 +73,30 @@ describe('real HTTP routing, JWT, roles and ownership (isolated persistence)', (
   afterAll(async () => { await app?.close(); });
   beforeEach(() => jest.clearAllMocks());
   const headers = (id: string) => ({ Authorization: `Bearer ${jwt.sign({ sub: id, jti: id })}` });
+
+  it.each(['0', '-1', '1.5', '601', 'Infinity', 'NaN', 'abc', '', '60&limit=61'])('rejects invalid metric limit %s before querying data', async (limit) => {
+    const response = await fetch(`${base}/api/metrics/servers/srv-1?limit=${limit}`, { headers: headers('owner') });
+    expect(response.status).toBe(400);
+    expect(db.serverMetric.findMany).not.toHaveBeenCalled();
+    expect(db.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('enforces metric authentication, tenant boundaries, defaults and bounded ranges', async () => {
+    const url = `${base}/api/metrics/servers/srv-1`;
+    expect((await fetch(url)).status).toBe(401);
+    for (const query of ['', '?range=14d']) {
+      expect(await (await fetch(url + query, { headers: headers('other') })).json()).toEqual([]);
+    }
+    expect(db.serverMetric.findMany).not.toHaveBeenCalled();
+    expect(db.$queryRaw).not.toHaveBeenCalled();
+    expect((await fetch(url, { headers: headers('owner') })).status).toBe(200);
+    expect(db.serverMetric.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ take: 60 }));
+    expect((await fetch(url + '?limit=600', { headers: headers('owner') })).status).toBe(200);
+    expect(db.serverMetric.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ take: 600 }));
+    expect((await fetch(url + '?range=all', { headers: headers('owner') })).status).toBe(400);
+    expect((await fetch(url + '?range=14d&limit=120', { headers: headers('owner') })).status).toBe(200);
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+  });
 
   it.each(['install-agent', 'auto-setup'])('rejects unauthenticated and cross-tenant %s before SSE headers/SSH', async (path) => {
     expect((await fetch(`${base}/api/servers/srv-1/${path}`)).status).toBe(401);

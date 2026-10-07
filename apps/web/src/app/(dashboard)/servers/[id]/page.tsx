@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useState, useEffect, useCallback } from 'react';
+import { use, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import dayjs from '@/lib/dayjs';
 import {
@@ -78,7 +78,7 @@ function GfwDot({ gfwBlocked }: { gfwBlocked: boolean | null | undefined }) {
   );
 }
 
-const CHART_WINDOW = 60;
+type MetricRange = 'latest' | '1h' | '6h' | '24h' | '7d' | '14d';
 
 function formatRate(bytes: number): string {
   if (bytes < 1024) return `${bytes} B/s`;
@@ -152,9 +152,11 @@ export default function ServerDetailPage({
     refetchInterval: 30_000,
   });
 
-  const { data: latestMetrics = [] } = useQuery({
-    queryKey: ['metrics', id],
-    queryFn: () => metricsApi.server(id, 60).then((r) => r.data as Metric[]),
+  const [metricRange, setMetricRange] = useState<MetricRange>('latest');
+  const { data: latestMetrics = [], isLoading: metricsLoading, isError: metricsError } = useQuery({
+    queryKey: ['metrics', id, metricRange],
+    queryFn: () => metricsApi.server(id, metricRange === 'latest' ? 60 : 120,
+      metricRange === 'latest' ? undefined : metricRange).then((r) => r.data as Metric[]),
     refetchInterval: 30_000,
     enabled: !!id,
   });
@@ -172,25 +174,9 @@ export default function ServerDetailPage({
     enabled: !!id,
   });
 
-  // 滑窗：追加新数据点，保留最近 CHART_WINDOW 条，按时间升序
-  const [accMetrics, setAccMetrics] = useState<Metric[]>([]);
-  useEffect(() => {
-    if (latestMetrics.length === 0) return;
-    setAccMetrics((prev) => {
-      const existingIds = new Set(prev.map((m) => m.id));
-      const newPoints = latestMetrics.filter((m) => !existingIds.has(m.id));
-      if (newPoints.length === 0) return prev;
-      const combined = [...prev, ...newPoints];
-      combined.sort(
-        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-      );
-      return combined.slice(-CHART_WINDOW);
-    });
-  }, [latestMetrics]);
-
-  // 图表数据（已是升序）
-  const chartData = accMetrics.map((m) => ({
-    time: dayjs(m.timestamp).format('HH:mm'),
+  // Query keys isolate servers/ranges; replace snapshots so empty responses clear stale data.
+  const chartData = [...latestMetrics].reverse().map((m) => ({
+    time: dayjs(m.timestamp).format(metricRange === '7d' || metricRange === '14d' ? 'MM-DD HH:mm' : 'HH:mm'),
     CPU: parseFloat(m.cpu.toFixed(1)),
     内存: parseFloat(m.mem.toFixed(1)),
     磁盘: parseFloat(m.disk.toFixed(1)),
@@ -475,8 +461,23 @@ export default function ServerDetailPage({
       <AppCard
         title={`资源使用趋势${timeRange ? `（${timeRange}）` : ''}`}
         size="small"
+        extra={<Select
+          aria-label="指标时间范围"
+          value={metricRange}
+          onChange={setMetricRange}
+          style={{ minWidth: 120 }}
+          options={[
+            { value: 'latest', label: '最近 60 点' },
+            { value: '1h', label: '最近 1 小时' },
+            { value: '6h', label: '最近 6 小时' },
+            { value: '24h', label: '最近 24 小时' },
+            { value: '7d', label: '最近 7 天' },
+            { value: '14d', label: '最近 14 天' },
+          ]}
+        />}
       >
-        {chartData.length === 0 ? (
+        {metricRange !== 'latest' && <Text type="secondary">按时间桶展示已收到样本的平均值；缺失时段不补零。</Text>}
+        {metricsError ? <Alert type="error" message="监控数据加载失败" /> : metricsLoading ? <Skeleton active /> : chartData.length === 0 ? (
           <EmptyState title="暂无监控数据" />
         ) : (
           <MetricsChart data={chartData} timeRange={timeRange} />
