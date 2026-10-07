@@ -2,13 +2,21 @@
   "name": "nextpannel",
   "version": "0.0.1",
   "private": true,
+  "packageManager": "pnpm@9.15.9",
   "scripts": {
     "dev": "sh -c '(nc -z localhost 5433 2>/dev/null || (ssh -N -f nextpanel-db && sleep 1)) && pnpm --parallel -r dev'",
     "build": "pnpm -r build",
-    "lint": "pnpm -r lint"
+    "lint": "eslint apps/server/src apps/web/src packages/shared/src --max-warnings 0"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "eslint": "9.39.1",
+    "eslint-plugin-react-hooks": "5.2.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.56.1"
   },
   "engines": {
-    "node": ">=20.0.0",
+    "node": "^20.19.0 || ^22.13.0 || >=24.0.0",
     "pnpm": ">=9.0.0"
   },
   "pnpm": {

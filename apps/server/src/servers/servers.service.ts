@@ -337,7 +337,7 @@ export class ServersService {
     if (!githubRepo) throw new Error('未配置 GITHUB_REPO 环境变量');
 
     // Sanitize values to prevent command injection
-    if (!/^https?:\/\/[a-zA-Z0-9._:@\/-]+$/.test(panelUrl)) {
+    if (!/^https?:\/\/[a-zA-Z0-9._:@/-]+$/.test(panelUrl)) {
       throw new Error('PANEL_URL 包含无效字符');
     }
     if (!/^[a-zA-Z0-9_-]+$/.test(server.agentToken)) {

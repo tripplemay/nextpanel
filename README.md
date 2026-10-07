@@ -300,7 +300,7 @@ pm2 restart nextpanel-server
 ## 本地开发
 
 ```bash
-# 前置要求：Node.js 20+, pnpm 9+, PostgreSQL
+# 前置要求：Node.js 20.19+ (20.x)、22.13+ (22.x) 或 24+；pnpm 9.15.9；PostgreSQL
 
 git clone https://github.com/tripplemay/nextpanel.git
 cd nextpanel

@@ -75,6 +75,7 @@ export default function LoginPage() {
       </Form>
 
       {/* TODO: 企业微信登录暂时屏蔽，等可信IP配置完成后恢复 */}
+      {/* eslint-disable-next-line no-constant-binary-expression -- Keep enterprise login disabled pending real OAuth acceptance. */}
       {false && wxConfig?.configured && (
         <>
           <Divider plain style={{ margin: '24px 0 16px', color: '#8c8c8c', fontSize: 13 }}>

@@ -93,7 +93,7 @@ export default function MetricsChart({ data, timeRange }: MetricsChartProps) {
       </Col>
       <Col xs={24} xl={12}>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          网络流量 (KB/s){timeRange ? `　${timeRange}` : ''}
+          网络流量 (KB/s){timeRange ? `\u3000${timeRange}` : ''}
         </Text>
         <ResponsiveContainer width="100%" height={220}>
           <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>

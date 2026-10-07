@@ -357,7 +357,7 @@ export default function NodesPage() {
         );
       },
     },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   ], [isMobile, testResults, testingId, batchTesting, togglingId, toggleMutation, testMutation, modal, openDeploy, openDelete, openRename, openEgressPolicy]);
 
   // Tablet: hide low-priority columns; mobile uses card layout (table not rendered)

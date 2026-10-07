@@ -685,7 +685,8 @@ function yamlScalar(v: string | number | boolean): string {
   if (typeof v === 'number' || typeof v === 'boolean') return String(v);
   if (v === '') return '""';
   // Quote if contains YAML special characters
-  if (/[\u0000-\u001f\u007f]|[:{}\[\],#&*?|<>=!%@`'"\\]/.test(v) || /^\s|\s$/.test(v)) {
+  // eslint-disable-next-line no-control-regex -- Control characters require quoted YAML escaping.
+  if (/[\u0000-\u001f\u007f]|[:{}[\],#&*?|<>=!%@`'"\\]/.test(v) || /^\s|\s$/.test(v)) {
     return JSON.stringify(v);
   }
   return v;

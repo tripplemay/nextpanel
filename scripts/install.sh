@@ -126,17 +126,19 @@ info "正在安装基础工具..."
 apt-get install -y -qq curl git openssl build-essential python3 wget unzip dnsutils > /dev/null
 ok "基础工具安装完成"
 
-# ── 步骤 5：安装 Node.js 20 ─────────────────────────────────────────────
+# ── 步骤 5：安装 Node.js 22 ─────────────────────────────────────────────
 
 if ! command -v node &>/dev/null; then
-  info "正在安装 Node.js 20..."
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
+  info "正在安装 Node.js 22..."
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - > /dev/null 2>&1
   apt-get install -y -qq nodejs > /dev/null
 fi
 
 # 校验 Node.js 版本
-NODE_MAJOR=$(node --version | cut -dv -f2 | cut -d. -f1)
-[ "$NODE_MAJOR" -ge 18 ] || fail "需要 Node.js 18+，当前版本：$(node --version)"
+node -e '
+  const [major, minor] = process.versions.node.split(".").map(Number);
+  process.exit((major === 20 && minor >= 19) || (major === 22 && minor >= 13) || major >= 24 ? 0 : 1);
+' || fail "需要 Node.js 20.19+ (20.x)、22.13+ (22.x) 或 24+，请先升级；当前版本：$(node --version)"
 ok "Node.js $(node --version)"
 
 # ── 步骤 6：安装 pnpm 和 PM2 ────────────────────────────────────────────

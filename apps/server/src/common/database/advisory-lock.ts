@@ -82,6 +82,7 @@ export async function withPostgresAdvisoryLocks<T>(
             [key],
           );
           if (result.rows[0]?.unlocked !== true) {
+            // eslint-disable-next-line no-unsafe-finally -- Caught below and retained as cleanupError.
             throw new Error(`PostgreSQL advisory lock was not held: ${key}`);
           }
         } catch (err) {
@@ -99,11 +100,13 @@ export async function withPostgresAdvisoryLocks<T>(
 
     const connectionError = connectionErrors[0];
     if (connectionError) {
+      // eslint-disable-next-line no-unsafe-finally -- Lock loss must invalidate a result, preserving the original error as cause.
       throw new AdvisoryLockLostError(
         `PostgreSQL advisory lock connection was lost: ${connectionError.message}`,
         primaryError ?? cleanupError ?? connectionError,
       );
     }
+    // eslint-disable-next-line no-unsafe-finally -- Never replace an existing primary error with a cleanup error.
     if (cleanupError && primaryError === undefined) throw cleanupError;
   }
 }

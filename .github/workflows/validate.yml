@@ -37,6 +37,16 @@ jobs:
           sudo apt-get install -y postgresql-16
           python -m pip install -r scripts/tests/browser-requirements.txt
           python -m playwright install --with-deps chromium
+      - name: Install checksum-pinned sing-box for native config validation
+        run: |
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/sing-box-1.13.0-linux-amd64.tar.gz"
+          curl --fail --location --retry 3 --max-time 120 \
+            https://github.com/SagerNet/sing-box/releases/download/v1.13.0/sing-box-1.13.0-linux-amd64.tar.gz \
+            --output "$ARCHIVE"
+          printf '%s  %s\n' 86db0f9df3f822ca2adccde2f7c1c9e21d64e646a77bf258274fde3be399025b "$ARCHIVE" | sha256sum --check -
+          tar -xzf "$ARCHIVE" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/sing-box-1.13.0-linux-amd64" >> "$GITHUB_PATH"
       - name: Test, build, restore and browser gates
         run: |
           set -euo pipefail

@@ -12,6 +12,7 @@ export function parseXhttpMode(value: string | null | undefined): XhttpMode | nu
 
 export function parseXhttpHost(value: string | null | undefined): string | undefined {
   if (value === null || value === undefined || value === '') return undefined;
+  // eslint-disable-next-line no-control-regex -- Host validation must reject control characters.
   if (value !== value.trim() || /[\u0000-\u001f\u007f]/.test(value)) {
     throw new Error('XHTTP host contains invalid characters');
   }
