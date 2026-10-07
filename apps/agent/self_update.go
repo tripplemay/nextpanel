@@ -150,13 +150,19 @@ func confirmSelfUpdate() error {
 	if err != nil {
 		return err
 	}
-	if _, err = os.Stat(exePath + ".previous"); os.IsNotExist(err) {
+	return confirmUpdateAt(exePath)
+}
+
+func confirmUpdateAt(exePath string) error {
+	_, err := os.Stat(exePath + ".previous")
+	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if err = runUpdateCommand("systemctl", "stop", rollbackUnit+".timer", rollbackUnit+".service"); err != nil {
+	// --collect may unload the never-started service when its timer stops.
+	if err = runUpdateCommand("systemctl", "stop", rollbackUnit+".timer"); err != nil {
 		return err
 	}
 	return os.Remove(exePath + ".previous")

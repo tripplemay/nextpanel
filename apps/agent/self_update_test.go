@@ -140,3 +140,22 @@ func TestRollbackRestoresOnlyItsOwnExecutable(t *testing.T) {
 		t.Fatal("rollback did not restore and restart")
 	}
 }
+
+func TestConfirmationDoesNotRequireUnloadedTransientService(t *testing.T) {
+	oldRun := runUpdateCommand
+	defer func() { runUpdateCommand = oldRun }()
+	exe := filepath.Join(t.TempDir(), "agent")
+	os.WriteFile(exe+".previous", []byte("previous"), 0700)
+	runUpdateCommand = func(name string, args ...string) error {
+		if name != "systemctl" || strings.Join(args, " ") != "stop nextpanel-agent-rollback.timer" {
+			t.Fatal("confirmation depends on unloaded service")
+		}
+		return nil
+	}
+	if err := confirmUpdateAt(exe); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(exe + ".previous"); !os.IsNotExist(err) {
+		t.Fatal("confirmed backup blocks the next update")
+	}
+}
