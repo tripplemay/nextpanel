@@ -2,7 +2,7 @@
 
 日期：2026-10-07。基线：`f5d4a12`。
 
-状态：第 1、2 项已完成本地实现与验证；未提交、推送、发布 Agent 或部署面板。原有 338 项文件权限变化保持不动。
+状态：本报告记录第 1、2 项的实现及发布前本地验证。后续已提交、推送、部署面板并完成批准范围内的 Agent 升级；生产证据及边界见 [发布验收报告](2026-10-07-production-release.md)。原有 338 项文件权限变化保持不动，未进入提交。
 
 ## 1. 安全边界
 
@@ -66,7 +66,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -o /tmp/agent-linux
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -mod=readonly -o /tmp/agent-linux-arm64 .
 ```
 
-## 升级影响与发布前门槛
+## 升级影响与发布前门槛（本地验收时记录）
 
 1. 新增 `20261007000000_security_boundaries`、`20261007010000_transport_host` 两个迁移。上线需先备份、暂停旧后端，再执行迁移和启动新版本，不能让旧分享接口在轮换后继续提供服务。
 2. **安全迁移会轮换所有订阅主 token**：历史已撤销分享也可能曾泄漏主 token，无法仅凭现存分享记录识别，因此全部主链接失效，需要所有者重新复制链接。每位接收者的 shareToken 不变。
