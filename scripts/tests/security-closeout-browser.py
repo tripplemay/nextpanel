@@ -22,10 +22,13 @@ seed = """if (!localStorage.getItem('qa-initialized')) {
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
 
-    def fixture(width=1440, hold_config=False, hold_revoke=False):
+    def fixture(width=1440, hold_config=False, hold_revoke=False, clock=False):
         context = browser.new_context(viewport={'width': width, 'height': 900})
         context.add_init_script(seed)
         page = context.new_page()
+        if clock:
+            # Install before application timers exist; replacing live timers is undefined.
+            page.clock.install()
         state = {'held': [], 'revocations': [], 'errors': [], 'calls': [], 'hold': hold_config}
         page.on('pageerror', lambda error: state['errors'].append(str(error)))
 
@@ -60,7 +63,7 @@ with sync_playwright() as p:
 
     for width in (1440, 390):
         print(f'START credential reveal flow: {width}px', flush=True)
-        context, page, state = fixture(width)
+        context, page, state = fixture(width, clock=width == 1440)
         page.goto(base + '/external-nodes')
         page.wait_for_load_state('networkidle')
         expect(page.get_by_role('button', name='查看节点凭据')).to_be_visible()
@@ -89,7 +92,6 @@ with sync_playwright() as p:
         expect(page.get_by_role('dialog')).to_have_count(0)
         if width == 1440:
             print('START credential expiry clock check', flush=True)
-            page.clock.install()
             page.get_by_role('button', name='查看节点凭据').click()
             page.get_by_label('确认当前密码').fill('current-password')
             page.get_by_role('button', name='验证并查看').click()
