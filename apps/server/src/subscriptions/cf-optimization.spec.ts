@@ -159,6 +159,25 @@ describe('optimization service boundaries', () => {
     }
     expect(sync).toHaveBeenCalledTimes(6);
   });
+  it('confirms delayed low-budget jobs in the next slot without duplicate same-slot attempts', async () => {
+    process.env.CF_OPTIMIZATION_ENABLED = 'true'; process.env.CF_OPTIMIZATION_LOW_BUDGET = 'true';
+    const second = Date.parse('2026-10-31T08:05:00Z');
+    jest.spyOn(Date, 'now').mockReturnValue(second);
+    jest.spyOn(service, 'syncRanges').mockResolvedValue();
+    const measure = jest.spyOn(service, 'measure').mockResolvedValue();
+    db.node.findMany.mockResolvedValue([node, { ...node, id: 'delayed' }]);
+    db.cfOptimization.findMany.mockResolvedValue([
+      { nodeId: node.id, probeId: probe.id, attemptedAt: new Date(second - 300_000) },
+      { nodeId: 'delayed', probeId: probe.id, attemptedAt: new Date(second - 210_000) },
+    ]);
+    db.cfOptimizationState.deleteMany = jest.fn();
+    await service.tick();
+    expect(measure).toHaveBeenCalledTimes(2);
+    expect(measure).toHaveBeenCalledWith(expect.objectContaining({ id: 'delayed' }), probe);
+    db.cfOptimization.findMany.mockResolvedValue([node.id, 'delayed'].map(nodeId =>
+      ({ nodeId, probeId: probe.id, attemptedAt: new Date(second) })));
+    await service.tick(); expect(measure).toHaveBeenCalledTimes(2);
+  });
   it('checks ownership before returning measurements or rolling back', async () => {
     db.node.findFirst.mockResolvedValue(null);
     await expect(service.status('foreign', 'owner')).rejects.toThrow('Node not found');

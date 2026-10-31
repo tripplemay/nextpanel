@@ -175,7 +175,8 @@ export class CfOptimizationService {
   async tick(): Promise<void> {
     if (this.running || process.env.CF_OPTIMIZATION_ENABLED !== 'true') return;
     const time = new Date(Date.now());
-    if (process.env.CF_OPTIMIZATION_LOW_BUDGET === 'true' && (time.getUTCHours() % 8 !== 0 || time.getUTCMinutes() >= 10)) return;
+    const lowBudget = process.env.CF_OPTIMIZATION_LOW_BUDGET === 'true';
+    if (lowBudget && (time.getUTCHours() % 8 !== 0 || time.getUTCMinutes() >= 10)) return;
     this.running = true;
     try {
       await withPostgresAdvisoryLocks(['cf-optimization'], async () => {
@@ -191,7 +192,10 @@ export class CfOptimizationService {
           .sort((a, b) => a.last - b.last);
         for (const job of jobs) {
           if (Date.now() - started > 180_000) break;
-          if (started - job.last < 240_000 || await this.prisma.cfOptimizationState.findUnique({ where: { key: `pause:${job.node.id}` } })) continue;
+          // Deduplicate paired rounds by slot, not elapsed time since a queued job started.
+          const alreadyAttempted = lowBudget ? Math.floor(job.last / 300_000) >= Math.floor(started / 300_000)
+            : started - job.last < 240_000;
+          if (alreadyAttempted || await this.prisma.cfOptimizationState.findUnique({ where: { key: `pause:${job.node.id}` } })) continue;
           const retry = (await this.prisma.cfOptimizationState.findUnique({ where: { key: `retry:${job.node.id}:${job.probe.id}` } }))?.value as { nextAt?: number } | undefined;
           if ((retry?.nextAt ?? 0) > started) continue;
           await this.measure(job.node, job.probe);
