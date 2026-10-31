@@ -1,7 +1,9 @@
 # Resource lifecycle implementation - 2026-10-31
 
-Status: implemented and locally verified; not committed, pushed or deployed.
-No production host, process, firewall rule, DNS record or database was changed.
+Status at the implementation checkpoint: locally verified, before commit or release.
+No production changes had been made at that checkpoint. The subsequent protected
+PR, production release and remaining acceptance gates are recorded in
+[the release report](2026-10-31-resource-lifecycle-release.md).
 
 ## Delivered
 
