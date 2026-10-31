@@ -47,6 +47,51 @@ measure CF/VLESS availability or represent three mainland carriers.
 
 ## Probe registry and honest carrier attribution
 
+### CNY 10/month pilot controls
+
+For the approved single-node/single-generic-probe pilot, set:
+
+```dotenv
+CF_OPTIMIZATION_LOW_BUDGET=true
+CF_OPTIMIZATION_MAX_MONTHLY_BATCHES=200
+```
+
+Low-budget mode visits nodes only at UTC 00:00/00:05, 08:00/08:05 and
+16:00/16:05. This pairs promotion checks while reducing scheduled cloud work to
+six batches/day for one node/probe. It is **not** continuous five-minute server
+refresh. Client provider/health-check intervals remain unchanged, as do the
+30-minute attribution and 24-hour hard expiry rules. Use a GENERIC cloud probe;
+this cadence is not an accepted three-carrier measurement service.
+
+The UTC-month ceiling is global across all nodes/probes. Each reservation is
+durable and serialized by a separate PostgreSQL lock **before /capabilities**;
+failed calls consume quota too. At the cap, no new worker calls occur and retry
+waits until the next UTC month. A batch makes at most one capability call and
+one measurement call. Zero disables new batches; invalid values fail closed.
+Low-budget mode defaults to 200 when no explicit cap is supplied; otherwise an
+unset cap preserves the original uncapped-month behavior. Never reset counters
+to retry or remove the cap without reviewing the budget.
+
+SCF settings: 512 MB, 120-second execution timeout, 65-second initialization
+timeout, one maximum concurrency, no provisioned instances, no CLS delivery,
+0.5 GB temporary storage. At the current published Web runtime price of
+CNY 0.00011108/GB-second, conservatively reserving two full 185-second calls per
+batch gives `200 * 2 * 185 * 0.5 * 0.00011108 = CNY 4.10996` of runtime allowance.
+Invocation, network/response traffic, manual checks and contingency must fit the
+remaining budget. Do not assume a free tier. See the
+[official SCF prices](https://cloud.tencent.com/document/product/583/12281).
+
+**This is not a provider-enforced CNY 10 billing cap.** Application authentication
+does not prevent SCF billing for rejected public requests, and external/manual
+calls do not pass through the panel counter. Check the actual bill during the
+pilot; pause the panel scheduler and freeze only this new function before
+exceeding the budget. Never freeze or modify `gfw-check`. If a strict monetary
+ceiling is required, keep scheduling off until a provider-side spend cutoff is
+available and verified. No guarantee of a fastest IP or three real ISP exits is
+made under this low-budget cloud pilot.
+
+### Registry
+
 `CF_OPTIMIZATION_PROBES` is administrator-managed JSON (maximum nine probes):
 
 ```json

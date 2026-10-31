@@ -45,6 +45,30 @@ export class CfOptimizationService {
     return fingerprint([nodeFingerprint(node), this.probeFingerprint(probe)]);
   }
 
+  private monthlyLimit(): number | null {
+    const raw = process.env.CF_OPTIMIZATION_MAX_MONTHLY_BATCHES
+      ?? (process.env.CF_OPTIMIZATION_LOW_BUDGET === 'true' ? '200' : undefined);
+    if (raw === undefined) return null;
+    if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) > 1_000_000) {
+      throw new Error('INVALID_MONTHLY_BUDGET');
+    }
+    return Number(raw);
+  }
+
+  private async reserveMonthlyBatch(now: number, limit: number): Promise<boolean> {
+    // Independent lock also protects bounded manual validation and multiple panel replicas.
+    return withPostgresAdvisoryLocks(['cf-optimization-monthly-budget'], async () => {
+      const key = `monthly:${new Date(now).toISOString().slice(0, 7)}`;
+      const row = await this.prisma.cfOptimizationState.findUnique({ where: { key } });
+      const used = (row?.value as { batches?: number } | undefined)?.batches ?? 0;
+      if (!Number.isSafeInteger(used) || used < 0) throw new Error('INVALID_MONTHLY_USAGE');
+      if (used >= limit) return false;
+      const value = { batches: used + 1 };
+      await this.prisma.cfOptimizationState.upsert({ where: { key }, create: { key, value }, update: { value } });
+      return true;
+    }, { lockWaitMs: 1000 });
+  }
+
   async ranges(): Promise<string[]> {
     const row = await this.prisma.cfOptimizationState.findUnique({ where: { key: 'ranges' } });
     const value = row?.value as { cidrs?: string[] } | undefined;
@@ -97,10 +121,13 @@ export class CfOptimizationService {
     const ranges = await this.prisma.cfOptimizationState.findUnique({ where: { key: 'ranges' } });
     const rangeError = await this.prisma.cfOptimizationState.findUnique({ where: { key: 'ranges-error' } });
     const paused = !!await this.prisma.cfOptimizationState.findUnique({ where: { key: `pause:${nodeId}` } });
+    let monthlyLimit: number | null = null; let budgetError = false;
+    try { monthlyLimit = this.monthlyLimit(); } catch { budgetError = true; }
     let probes: CfProbe[] = []; let registryError = false;
     try { probes = this.probes(); } catch { registryError = true; }
     return {
       enabled: process.env.CF_OPTIMIZATION_ENABLED === 'true', paused, registryError,
+      budget: { lowBudget: process.env.CF_OPTIMIZATION_LOW_BUDGET === 'true', monthlyLimit, error: budgetError },
       rangeUpdatedAt: ranges?.updatedAt ?? null, rangeError: !!rangeError,
       profiles: probes.map(p => {
         const row = rows.find(r => r.probeId === p.id && r.fingerprint === this.rowFingerprint(node, p));
@@ -147,6 +174,8 @@ export class CfOptimizationService {
   @Cron('0 */5 * * * *')
   async tick(): Promise<void> {
     if (this.running || process.env.CF_OPTIMIZATION_ENABLED !== 'true') return;
+    const time = new Date(Date.now());
+    if (process.env.CF_OPTIMIZATION_LOW_BUDGET === 'true' && (time.getUTCHours() % 8 !== 0 || time.getUTCMinutes() >= 10)) return;
     this.running = true;
     try {
       await withPostgresAdvisoryLocks(['cf-optimization'], async () => {
@@ -186,6 +215,15 @@ export class CfOptimizationService {
       assertCfManagedNode(node);
       const token = process.env[probe.tokenEnv];
       if (!token || token.length < 32) throw new Error('Missing authenticated probe');
+      phase = 'INVALID_MONTHLY_BUDGET';
+      const monthlyLimit = this.monthlyLimit();
+      phase = 'MONTHLY_BUDGET_UNAVAILABLE';
+      if (monthlyLimit !== null && !await this.reserveMonthlyBatch(now, monthlyLimit)) {
+        phase = 'MONTHLY_BUDGET_EXHAUSTED';
+        throw new Error('Monthly budget exhausted');
+      }
+      // Count before even /capabilities: failed/auth-rejected cloud calls still incur costs.
+      phase = 'PROBE_UNAVAILABLE';
       const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
       const capabilities = JSON.parse(await boundedText(await fetch(`${probe.url.replace(/\/$/, '')}/capabilities`,
         { headers, redirect: 'error', signal: AbortSignal.timeout(10_000) }), 8192));
@@ -246,6 +284,7 @@ export class CfOptimizationService {
       const retry = (await this.prisma.cfOptimizationState.findUnique({ where: { key } }))?.value as { failures?: number } | undefined;
       const failures = Math.min(8, (retry?.failures ?? 0) + 1);
       const nextAt = phase === 'DAILY_BUDGET_EXHAUSTED' ? (Math.floor(now / 86400_000) + 1) * 86400_000
+        : phase === 'MONTHLY_BUDGET_EXHAUSTED' ? Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth() + 1, 1)
         : now + Math.min(3600_000, 300_000 * 2 ** (failures - 1));
       const value = { failures, nextAt };
       await this.prisma.cfOptimizationState.upsert({ where: { key }, create: { key, value }, update: { value } });

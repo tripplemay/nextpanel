@@ -135,6 +135,21 @@ describe('optimization service boundaries', () => {
     delete process.env.CF_OPTIMIZATION_ENABLED;
     await service.tick(); expect(db.node.findMany).not.toHaveBeenCalled();
   });
+  it('limits low-budget scheduling to two five-minute rounds every eight hours', async () => {
+    process.env.CF_OPTIMIZATION_ENABLED = 'true'; process.env.CF_OPTIMIZATION_LOW_BUDGET = 'true';
+    const sync = jest.spyOn(service, 'syncRanges').mockResolvedValue();
+    db.node.findMany.mockResolvedValue([]);
+    db.cfOptimizationState.deleteMany = jest.fn();
+    const time = jest.spyOn(Date, 'now');
+    for (const value of ['00:00', '00:05', '08:00', '08:05', '16:00', '16:05']) {
+      time.mockReturnValue(Date.parse(`2026-10-31T${value}:00Z`)); await service.tick();
+    }
+    expect(sync).toHaveBeenCalledTimes(6);
+    for (const value of ['00:10', '07:55', '08:10', '16:10', '23:55']) {
+      time.mockReturnValue(Date.parse(`2026-10-31T${value}:00Z`)); await service.tick();
+    }
+    expect(sync).toHaveBeenCalledTimes(6);
+  });
   it('checks ownership before returning measurements or rolling back', async () => {
     db.node.findFirst.mockResolvedValue(null);
     await expect(service.status('foreign', 'owner')).rejects.toThrow('Node not found');
@@ -224,6 +239,44 @@ describe('probe to publication pipeline', () => {
     expect(states.get(`retry:${node.id}:${probe.id}`).failures).toBe(1);
     await service.measure(node as any, probe);
     expect(states.get(`retry:${node.id}:${probe.id}`).nextAt - Date.now()).toBe(600_000);
+  });
+  it('reserves a global monthly batch before capabilities and never refunds failed calls', async () => {
+    process.env.CF_OPTIMIZATION_MAX_MONTHLY_BATCHES = '1';
+    remote.mockImplementation(async () => {
+      expect(states.get('monthly:2026-10')).toEqual({ batches: 1 });
+      throw new Error('Unavailable');
+    });
+    await service.measure(node as any, probe);
+    expect(remote).toHaveBeenCalledTimes(1);
+    await service.measure({ ...node, id: 'second-node' } as any, { ...probe, id: 'second-probe' });
+    expect(remote).toHaveBeenCalledTimes(1); expect(row.error).toBe('MONTHLY_BUDGET_EXHAUSTED');
+    expect(states.get('retry:second-node:second-probe').nextAt).toBe(Date.parse('2026-11-01T00:00:00Z'));
+    clock.mockReturnValue(Date.parse('2026-11-01T00:00:00Z'));
+    await service.measure(node as any, probe);
+    expect(states.get('monthly:2026-11')).toEqual({ batches: 1 });
+    expect(remote).toHaveBeenCalledTimes(2);
+  });
+  it.each(['0', '-1', '1.5', 'NaN', '', '1e3', '1000001'])('fails closed before any cloud call with monthly limit %j', async limit => {
+    process.env.CF_OPTIMIZATION_MAX_MONTHLY_BATCHES = limit;
+    await service.measure(node as any, probe);
+    expect(remote).not.toHaveBeenCalled();
+    expect(row.error).toBe(limit === '0' ? 'MONTHLY_BUDGET_EXHAUSTED' : 'INVALID_MONTHLY_BUDGET');
+  });
+  it('defaults low-budget mode to 200 batches and blocks corrupted counters', async () => {
+    process.env.CF_OPTIMIZATION_LOW_BUDGET = 'true';
+    delete process.env.CF_OPTIMIZATION_MAX_MONTHLY_BATCHES;
+    states.set('monthly:2026-10', { batches: 200 });
+    await service.measure(node as any, probe);
+    expect(remote).not.toHaveBeenCalled(); expect(row.error).toBe('MONTHLY_BUDGET_EXHAUSTED');
+    states.set('monthly:2026-10', { batches: -1 });
+    await service.measure(node as any, probe);
+    expect(remote).not.toHaveBeenCalled(); expect(row.error).toBe('MONTHLY_BUDGET_UNAVAILABLE');
+  });
+  it('does not contact the cloud if durable budget reservation fails', async () => {
+    process.env.CF_OPTIMIZATION_MAX_MONTHLY_BATCHES = '200';
+    db.cfOptimizationState.upsert.mockRejectedValueOnce(new Error('Database unavailable'));
+    await service.measure(node as any, probe);
+    expect(remote).not.toHaveBeenCalled(); expect(row.error).toBe('MONTHLY_BUDGET_UNAVAILABLE');
   });
   it('does not publish results after node credentials change or the node is deleted', async () => {
     db.node.findUnique.mockResolvedValue({ ...node, credentialsEnc: 'rotated' });

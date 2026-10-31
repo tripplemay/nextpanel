@@ -73,6 +73,13 @@ export async function verifyCfAccess({ prisma, cipher, require, root, databaseUr
     await assert.rejects(optimizer.status(current.id, 'owner'), /not found/);
     assert.deepEqual((await optimizer.status(current.id, 'cf-owner')).missingCarriers, ['UNICOM', 'MOBILE']);
     process.env.DATABASE_URL = databaseUrl;
+    const budgetTime = Date.parse('2026-10-31T00:00:00Z');
+    const secondOptimizer = new CfOptimizationService(prisma, nodes, cf);
+    const reservations = await Promise.all(Array.from({ length: 12 }, (_, i) =>
+      (i % 2 ? optimizer : secondOptimizer).reserveMonthlyBatch(budgetTime, 3)));
+    assert.equal(reservations.filter(Boolean).length, 3);
+    assert.deepEqual((await prisma.cfOptimizationState.findUniqueOrThrow({ where: { key: 'monthly:2026-10' } })).value, { batches: 3 });
+    assert.equal(await secondOptimizer.reserveMonthlyBatch(Date.parse('2026-11-01T00:00:00Z'), 3), true);
     await optimizer.rollback(current.id, 'cf-owner');
     assert.equal((await optimizer.status(current.id, 'cf-owner')).paused, true);
     assert.ok((await subscriptions.generateCfProvider({ token: updated.token }, current.id)).includes('104.16.0.3'));

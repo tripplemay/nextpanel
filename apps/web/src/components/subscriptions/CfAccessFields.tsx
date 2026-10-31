@@ -89,6 +89,9 @@ export default function CfAccessFields({ form, nodes, locked }: {
           {optimization.data && <Alert type="warning" showIcon title={optimization.data.paused ? '该节点自动维护已暂停，候选仍受过期限制' : optimization.data.enabled ? '后台自动维护已开启' : '后台自动维护未开启，当前仅使用已有安全候选/默认 CDN'}
             description={<>
               <div>缺少有效实测：{optimization.data.missingCarriers.map(c => carrierNames[c] ?? c).join('、') || '无'}；机房测点不代表全国用户。</div>
+              {optimization.data.budget?.lowBudget && <div>低预算试点：后台每 8 小时复测两轮，并非每 5 分钟持续更新；客户端仍按原周期检查候选。</div>}
+              {optimization.data.budget?.monthlyLimit != null && <div>全局每月最多 {optimization.data.budget.monthlyLimit} 批，达到上限后暂停探测；不是云账单硬限额。</div>}
+              {optimization.data.budget?.error && <div>月度预算配置无效，已停止新探测，请联系管理员。</div>}
               {(optimization.data.registryError || optimization.data.rangeError) && <div>测点配置或官方网段同步异常，请联系管理员。</div>}
               {optimization.data.profiles.map(p => <div key={p.probeId} style={{ overflowWrap: 'anywhere' }}>
                 {carrierNames[p.carrier] ?? p.carrier} / {p.region}：{p.stale ? '未测或结果陈旧' : '近期实测'}，{p.checkedAt ?? '无检测时间'}

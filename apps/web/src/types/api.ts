@@ -297,6 +297,7 @@ export interface CfAccessCheckResult extends ConnectivityResult {
 
 export interface CfOptimizationStatus {
   paused: boolean;
+  budget?: { lowBudget: boolean; monthlyLimit: number | null; error: boolean };
   enabled: boolean; registryError: boolean; rangeError: boolean; rangeUpdatedAt: string | null;
   missingCarriers: string[];
   profiles: Array<{ probeId: string; carrier: string; region: string; checkedAt: string | null;
