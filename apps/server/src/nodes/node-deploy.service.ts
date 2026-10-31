@@ -2489,6 +2489,7 @@ export class NodeDeployService {
       const settings = await this.cfSettings.getDecryptedToken(job.ownerId);
       if (!settings) throw new CleanupBlockedError('Cloudflare credentials unavailable');
       const access = await this.cfService.verifyZoneAccess(settings.apiToken, payload.cfZoneId);
+      if (!access.valid && access.retryable) throw new Error('Original DNS zone verification temporarily unavailable; retry required');
       if (!access.valid) throw new CleanupBlockedError('Cannot verify access to the original DNS zone');
       await this.cfService.deleteRecord(settings.apiToken, payload.cfZoneId, payload.cfRecordId);
       return;

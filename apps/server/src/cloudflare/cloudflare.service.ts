@@ -19,6 +19,7 @@ export interface CfDnsRecord {
 
 export interface CfVerifyResult {
   valid: boolean;
+  retryable?: boolean;
   zoneName?: string;
   zoneStatus?: string;
   message: string;
@@ -107,6 +108,12 @@ export class CloudflareService {
     const url = `${CF_API}/zones/${zoneId}`;
     try {
       const res = await fetch(url, { headers: this.headers(apiToken), signal: AbortSignal.timeout(15000) });
+      if (res.status === 408 || res.status === 429 || res.status >= 500) {
+        return { valid: false, retryable: true, message: `Cloudflare temporarily unavailable (HTTP ${res.status})` };
+      }
+      if (res.status >= 400) {
+        return { valid: false, retryable: false, message: `Cloudflare zone verification rejected (HTTP ${res.status})` };
+      }
       const data = (await res.json()) as {
         success: boolean;
         errors: { message: string; code: number }[];
@@ -115,7 +122,7 @@ export class CloudflareService {
 
       if (!data.success) {
         const msg = data.errors.map((e) => e.message).join('; ');
-        return { valid: false, message: `验证失败：${msg}` };
+        return { valid: false, retryable: false, message: `验证失败：${msg}` };
       }
 
       return {
@@ -126,7 +133,7 @@ export class CloudflareService {
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return { valid: false, message: `请求失败：${msg}` };
+      return { valid: false, retryable: true, message: `请求失败：${msg}` };
     }
   }
 

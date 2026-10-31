@@ -120,6 +120,7 @@ describe('CloudflareService', () => {
 
       expect(result.valid).toBe(false);
       expect(result.message).toContain('Unauthorized');
+      expect(result.retryable).toBe(false);
     });
 
     it('returns valid=false when fetch throws (network error)', async () => {
@@ -129,6 +130,17 @@ describe('CloudflareService', () => {
 
       expect(result.valid).toBe(false);
       expect(result.message).toContain('Network failure');
+      expect(result.retryable).toBe(true);
+    });
+
+    it.each([408, 429, 500, 502, 503])('keeps HTTP %s failures retryable even with a non-JSON body', async status => {
+      global.fetch = jest.fn().mockResolvedValue({ status, json: jest.fn().mockRejectedValue(new Error('HTML error page')) });
+      expect(await svc.verifyZoneAccess('token', 'zone')).toMatchObject({ valid: false, retryable: true });
+    });
+
+    it.each([400, 401, 403, 404])('blocks HTTP %s authorization/target failures', async status => {
+      mockFetch({ success: true }, status);
+      expect(await svc.verifyZoneAccess('token', 'zone')).toMatchObject({ valid: false, retryable: false });
     });
   });
 });

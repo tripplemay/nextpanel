@@ -5,6 +5,7 @@ import { CryptoService } from '../common/crypto/crypto.service';
 import { NotFoundException } from '@nestjs/common';
 import { NodeSSH } from 'node-ssh';
 import { generateConfig, generateChainExitConfig } from './config/config-generator';
+import { CleanupBlockedError } from '../resources/resource-lifecycle.service';
 
 jest.mock('../common/database/advisory-lock', () => ({
   withPostgresAdvisoryLocks: (_keys: string[], work: () => Promise<unknown>) => work(),
@@ -351,6 +352,15 @@ describe('detached resource cleanup', () => {
 
   it('does not treat an unknown DNS zone as an already-deleted record', async () => {
     await expect(svc.cleanupDetachedResource({ ...job, role: 'DNS', payload: { cfRecordId: 'record' } } as any)).rejects.toThrow('original zone');
+    expect(mockCfService.deleteRecord).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('does not delete before verification and preserves retryable=%s', async retryable => {
+    (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({ apiToken: 'fixture', zoneId: 'zone' });
+    (mockCfService.verifyZoneAccess as jest.Mock).mockResolvedValueOnce({ valid: false, retryable });
+    const error = await svc.cleanupDetachedResource({ ...job, role: 'DNS', payload: { cfRecordId: 'record', cfZoneId: 'original-zone' } } as any).catch(e => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error instanceof CleanupBlockedError).toBe(!retryable);
     expect(mockCfService.deleteRecord).not.toHaveBeenCalled();
   });
 });
