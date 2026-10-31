@@ -84,6 +84,8 @@ pnpm -r --workspace-concurrency=1 build
 unset NODE_OPTIONS NEXT_TELEMETRY_DISABLED
 test -f apps/server/dist/main.js
 test -s apps/web/.next/BUILD_ID
+# Load the compiled runtime dependency graph before stopping the healthy release.
+(cd apps/server && node -e 'require("./dist/app.module"); require("./dist/common/http/body-parsers")')
 
 PHASE=stopping
 failed() {
