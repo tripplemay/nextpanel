@@ -37,8 +37,14 @@ export class UsageProvisioner {
     if (!target) throw new NotFoundException();
     return withPostgresAdvisoryLocks([`nextpanel:server-core:${target.serverId}`, `nextpanel:node:${nodeId}`, `nextpanel:usage:${nodeId}`], async () => {
       const node = await this.prisma.node.findFirst({ where: { id: nodeId, userId: ownerId }, include: { server: true, usageState: true } });
-      if (!node || !node.usageState || !usageEligible(node) || !node.statsPort || !node.enabled || node.status !== 'RUNNING'
+      if (!node || !usageEligible(node) || !node.statsPort || !node.enabled || node.status !== 'RUNNING'
         || node.server.retiredAt || ['DELETING', 'ERROR'].includes(node.server.status)) throw new BadRequestException('Node is not eligible for observation');
+      if (!node.usageState) {
+        const observed = await this.prisma.subscription.count({ where: { ownerId, usageEnabled: true, nodes: { some: { nodeId } },
+          OR: [{ cfOnly: true }, { cfProtectedNodeIds: { has: nodeId } }] } });
+        if (!observed) throw new BadRequestException('Node is not in an observed subscription');
+        await this.prisma.usageNode.upsert({ where: { nodeId }, create: { nodeId }, update: {} });
+      }
       await this.usage.revokeInvalidGrants(nodeId);
       const credentials = await this.prisma.usageCredential.findMany({ where: { nodeId, removedAt: null } });
       const users = credentials.filter(c => !c.revokedAt).map(c => ({ email: usageEmail(c.id), id: this.crypto.decrypt(c.uuidEnc) }));

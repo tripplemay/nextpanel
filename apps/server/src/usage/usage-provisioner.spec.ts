@@ -23,8 +23,9 @@ function fixture(prepared = true) {
   let failAdd = false; let failRestart = false;
   const prisma = {
     node: { findFirst: jest.fn().mockResolvedValue(node) },
+    subscription: { count: jest.fn().mockResolvedValue(1) },
     usageCredential: { findMany: jest.fn().mockResolvedValue([{ id: 'fixture', uuidEnc: 'new', revokedAt: null }]), updateMany: jest.fn() },
-    usageNode: { update: jest.fn() },
+    usageNode: { update: jest.fn(), upsert: jest.fn() },
     configSnapshot: { findFirst: jest.fn().mockResolvedValue({ version: 1 }), create: jest.fn() },
     $transaction: jest.fn(),
   };
@@ -47,11 +48,31 @@ function fixture(prepared = true) {
   });
   // Deliberately small mocks: no real SSH, DNS, or production database access.
   const service = new UsageProvisioner(prisma as never, crypto as never, resources as never, usage as never);
-  return { service, prisma, resources, rollback, runtime, files, calls, ssh, failAdd: () => { failAdd = true; }, failRestart: () => { failRestart = true; } };
+  return { service, prisma, node, resources, rollback, runtime, files, calls, ssh, failAdd: () => { failAdd = true; }, failRestart: () => { failRestart = true; } };
 }
 
 describe('usage provisioner publication gate', () => {
   beforeEach(() => jest.clearAllMocks());
+  it('initializes a newly added protected node without toggling its observed subscription', async () => {
+    const f = fixture(false);
+    f.prisma.node.findFirst.mockResolvedValue({ ...f.node, usageState: null });
+    await expect(f.service.sync('n', 'owner', true)).resolves.toMatchObject({ prepared: true, restarted: true });
+    expect(f.prisma.usageNode.upsert).toHaveBeenCalledWith({ where: { nodeId: 'n' }, create: { nodeId: 'n' }, update: {} });
+    expect(f.prisma.subscription.count).toHaveBeenCalledWith({ where: { ownerId: 'owner', usageEnabled: true,
+      nodes: { some: { nodeId: 'n' } }, OR: [{ cfOnly: true }, { cfProtectedNodeIds: { has: 'n' } }] } });
+  });
+  it('does not initialize an unobserved node or bypass restart consent for a newly added node', async () => {
+    const f = fixture(false);
+    f.prisma.node.findFirst.mockResolvedValue({ ...f.node, usageState: null });
+    f.prisma.subscription.count.mockResolvedValue(0);
+    await expect(f.service.sync('n', 'owner', true)).rejects.toThrow('not in an observed subscription');
+    expect(f.prisma.usageNode.upsert).not.toHaveBeenCalled();
+    expect(f.resources.connect).not.toHaveBeenCalled();
+    const g = fixture(false);
+    g.prisma.node.findFirst.mockResolvedValue({ ...g.node, usageState: null });
+    await expect(g.service.sync('n', 'owner', false)).rejects.toThrow('PREPARATION_REQUIRED');
+    expect(uploadText).not.toHaveBeenCalled();
+  });
   it('persists, verifies exact runtime UUID, then marks credentials ready without restarting', async () => {
     const f = fixture();
     const result = await f.service.sync('n', 'owner', false);

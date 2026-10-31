@@ -59,6 +59,25 @@ export async function verifyUsage({ prisma, cipher, require, root, databaseUrl }
     assert.ok(credentials.find(c => c.grantId === 'usage-share').revokedAt);
     assert.equal(credentials.find(c => c.grantId === 'owner').revokedAt, null);
     await assert.rejects(service.history(id, 'usage-viewer'));
+    await service.setEnabled('usage-sub', 'owner', true);
+    for (const removed of [false, true]) {
+      const old = await prisma.usageCredential.findFirstOrThrow({ where: { nodeId: 'usage-node', grantId: 'owner', revokedAt: null } });
+      await prisma.subscriptionNode.deleteMany({ where: { subscriptionId: 'usage-sub', nodeId: 'usage-node' } });
+      await service.revokeInvalidGrants('usage-node');
+      if (removed) await prisma.usageCredential.update({ where: { id: old.id }, data: { removedAt: new Date() } });
+      await prisma.subscriptionNode.create({ data: { subscriptionId: 'usage-sub', nodeId: 'usage-node' } });
+      const renewed = await Promise.all([service.decorate('usage-node', grant, [variant]), service.decorate('usage-node', grant, [variant])]);
+      assert.deepEqual(renewed, [[variant], [variant]], 'renewed identity must remain unpublished until installed');
+      const fresh = await prisma.usageCredential.findMany({ where: { nodeId: 'usage-node', grantId: 'owner', revokedAt: null } });
+      assert.equal(fresh.length, 1, 'renewed membership deduplicates concurrent downloads');
+      assert.notEqual(fresh[0].id, old.id); assert.notEqual(cipher.decrypt(fresh[0].uuidEnc), cipher.decrypt(old.uuidEnc));
+      const tombstone = await prisma.usageCredential.findUniqueOrThrow({ where: { id: old.id } });
+      assert.ok(tombstone.revokedAt); assert.equal(tombstone.uuidEnc, old.uuidEnc);
+      assert.equal(!!tombstone.removedAt, removed, 'old identity still requires removal when not yet confirmed');
+      await prisma.usageCredential.update({ where: { id: fresh[0].id }, data: { installedAt: new Date() } });
+      assert.equal((await service.decorate('usage-node', grant, [variant]))[0].credentials.uuid, cipher.decrypt(fresh[0].uuidEnc));
+    }
+    assert.equal((await service.history(id, 'owner')).reduce((sum, b) => sum + Number(b.upBytes), 0), 1000, 'renewal preserves old identity history');
     process.env.USAGE_OBSERVATION_ENABLED = 'false';
     assert.deepEqual(await service.decorate('usage-node', grant, [variant]), [variant]);
   } finally {

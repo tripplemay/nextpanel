@@ -54,19 +54,24 @@ export class UsageService {
       for (const variant of variants) {
         const key = candidateKey(variant);
         let credential = await this.prisma.usageCredential.findUnique({ where: { nodeId_grantVersion_candidateKey: { nodeId, grantVersion: version, candidateKey: key } } });
-        if (!credential) {
+        if (!credential || credential.revokedAt) {
           const count = await this.prisma.usageCredential.count({ where: { nodeId, removedAt: null } });
           if (count >= USAGE_LIMIT) {
             await this.prisma.usageNode.update({ where: { nodeId }, data: { error: 'CREDENTIAL_LIMIT' } });
             result.push(variant);
             continue;
           }
-          credential = await this.prisma.usageCredential.create({ data: {
-            nodeId, ownerId: grant.ownerId, subscriptionId: grant.subscriptionId, subjectUserId: grant.subjectUserId,
-            grantId: grant.grantId, grantVersion: version, candidateKey: key,
-            candidateIp: variant.host, carrier: variant.cfCarrier ?? 'MANUAL', label: variant.name,
-            uuidEnc: this.crypto.encrypt(randomUUID()),
-          } });
+          const revokedId = credential?.id;
+          credential = await this.prisma.$transaction(async tx => {
+            // Preserve the old UUID and its revocation/history while freeing the active lookup key.
+            if (revokedId) await tx.usageCredential.update({ where: { id: revokedId }, data: { candidateKey: `revoked:${revokedId}:${key}` } });
+            return tx.usageCredential.create({ data: {
+              nodeId, ownerId: grant.ownerId, subscriptionId: grant.subscriptionId, subjectUserId: grant.subjectUserId,
+              grantId: grant.grantId, grantVersion: version, candidateKey: key,
+              candidateIp: variant.host, carrier: variant.cfCarrier ?? 'MANUAL', label: variant.name,
+              uuidEnc: this.crypto.encrypt(randomUUID()),
+            } });
+          });
         }
         // A failed preparation never replaces a working CDN credential with an unusable one.
         if (node.usageState?.preparedAt && credential.installedAt && !credential.revokedAt) {
