@@ -13,7 +13,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 const node = {
-  id: 'n1', name: 'Telecom', protocol: 'VLESS', implementation: 'XRAY', transport: 'WS', tls: 'TLS',
+  id: 'n1', userId: 'owner', name: 'Telecom', protocol: 'VLESS', implementation: 'XRAY', transport: 'WS', tls: 'TLS',
   listenPort: 443, domain: 'cdn.example.com', cfDnsRecordId: 'record', server: { ip: '192.0.2.10' },
   enabled: true, status: 'RUNNING', exitType: 'MANAGED_SERVER', exitServer: { ip: '192.0.2.11' },
 };

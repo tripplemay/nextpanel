@@ -227,6 +227,7 @@ export interface Node {
   tls: string;
   listenPort: number;
   domain: string | null;
+  cfDnsRecordId?: string | null;
   egressIpPolicy: 'AUTO' | 'IPV4_ONLY';
   source: 'MANUAL' | 'AUTO';
   status: string;
@@ -279,6 +280,7 @@ export interface Subscription {
   cfOnly?: boolean;
   cfAuto?: boolean;
   cfPreferredIps?: string[];
+  cfProtectedNodeIds?: string[];
   nodes: Array<{ node: Pick<Node, 'id' | 'name' | 'protocol' | 'status' | 'enabled' | 'listenPort' | 'serverId' | 'server'> }>;
   externalNodes: Array<{ externalNode: Pick<ExternalNode, 'id' | 'name' | 'protocol' | 'address' | 'port'> }>;
   /** Present for owner view — list of user IDs this subscription is shared with */

@@ -165,7 +165,8 @@ describe('optimization service boundaries', () => {
     jest.spyOn(Date, 'now').mockReturnValue(second);
     jest.spyOn(service, 'syncRanges').mockResolvedValue();
     const measure = jest.spyOn(service, 'measure').mockResolvedValue();
-    db.node.findMany.mockResolvedValue([node, { ...node, id: 'delayed' }]);
+    db.node.findMany.mockResolvedValue([node, { ...node, id: 'delayed' }].map(n => ({ ...n,
+      subscriptionNodes: [{ subscription: { ownerId: 'owner', cfOnly: true, cfProtectedNodeIds: [] } }] })));
     db.cfOptimization.findMany.mockResolvedValue([
       { nodeId: node.id, probeId: probe.id, attemptedAt: new Date(second - 300_000) },
       { nodeId: 'delayed', probeId: probe.id, attemptedAt: new Date(second - 210_000) },
@@ -183,6 +184,17 @@ describe('optimization service boundaries', () => {
     await expect(service.status('foreign', 'owner')).rejects.toThrow('Node not found');
     await expect(service.rollback('foreign', 'owner')).rejects.toThrow('Node not found');
     expect(db.cfOptimization.findMany).not.toHaveBeenCalled();
+  });
+  it('schedules mixed protected CF nodes only, excluding ordinary and foreign nodes', async () => {
+    process.env.CF_OPTIMIZATION_ENABLED = 'true'; delete process.env.CF_OPTIMIZATION_LOW_BUDGET;
+    jest.spyOn(service, 'syncRanges').mockResolvedValue();
+    const measure = jest.spyOn(service, 'measure').mockResolvedValue();
+    db.cfOptimizationState.deleteMany = jest.fn();
+    const member = { ...node, subscriptionNodes: [{ subscription: { ownerId: 'owner', cfOnly: false, cfProtectedNodeIds: ['node'] } }] };
+    db.node.findMany.mockResolvedValue([member, { ...member, id: 'unprotected' }, { ...member, transport: 'TCP' }, { ...member, userId: 'foreign' }]);
+    await service.tick();
+    expect(measure).toHaveBeenCalledTimes(1); expect(measure).toHaveBeenCalledWith(member, probe);
+    expect(db.node.findMany.mock.calls[0][0].where.subscriptionNodes.some.subscription).toEqual({ cfAuto: true });
   });
   it('uses default CF only without any valid measured snapshots', async () => {
     expect((await service.variants(exported, node, '104.16.0.2')).map(n => n.cfCarrier)).toEqual(['DNS']);

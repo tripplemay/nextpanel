@@ -3,7 +3,7 @@ import { Resolver } from 'dns/promises';
 import { PrismaService } from '../prisma.service';
 import { NodesService } from '../nodes/nodes.service';
 import { XrayTestService } from '../nodes/xray-test/xray-test.service';
-import { assertCfManagedNode, isCloudflareIp, normalizeCfPreferredIps } from './cf-access.util';
+import { assertCfManagedNode, isCfManagedNode, isCloudflareIp, normalizeCfPreferredIps } from './cf-access.util';
 
 @Injectable()
 export class CfAccessService {
@@ -51,6 +51,16 @@ export class CfAccessService {
     const nodes = await this.prisma.node.findMany({ where: { id: { in: nodeIds }, userId: ownerId } });
     if (nodes.length !== new Set(nodeIds).size) throw new BadRequestException('CF node selection is not available');
     nodes.forEach(assertCfManagedNode);
+  }
+
+  async automaticSelection(nodeIds: string[], ownerId: string): Promise<string[]> {
+    const nodes = await this.prisma.node.findMany({ where: { id: { in: nodeIds }, userId: ownerId } });
+    if (nodes.length !== new Set(nodeIds).size) throw new BadRequestException('CF node selection is not available');
+    const eligible = nodes.filter(isCfManagedNode);
+    if (!eligible.length || eligible.length > 20) {
+      throw new BadRequestException('Automatic optimization requires 1-20 compatible managed CF nodes; other nodes may remain');
+    }
+    return eligible.map(node => node.id);
   }
 
   async inspect(nodeId: string, ownerId: string) {

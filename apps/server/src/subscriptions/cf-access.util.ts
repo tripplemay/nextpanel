@@ -42,13 +42,19 @@ export function normalizeCfPreferredIps(value: unknown): string[] {
   return normalized;
 }
 
-export function assertCfManagedNode(node: {
+type CfManagedNode = {
   protocol: string; transport: string | null; tls: string; domain: string | null;
   listenPort: number; cfDnsRecordId?: string | null;
-}): void {
-  if (node.protocol !== 'VLESS' || node.transport !== 'WS' || node.tls !== 'TLS'
-    || node.listenPort !== 443 || !node.cfDnsRecordId || !node.domain
-    || !isFQDN(node.domain) || node.domain.length > 253) {
+};
+
+export function isCfManagedNode(node: CfManagedNode): boolean {
+  return node.protocol === 'VLESS' && node.transport === 'WS' && node.tls === 'TLS'
+    && node.listenPort === 443 && !!node.cfDnsRecordId && !!node.domain
+    && node.domain.length <= 253 && isFQDN(node.domain);
+}
+
+export function assertCfManagedNode(node: CfManagedNode): void {
+  if (!isCfManagedNode(node)) {
     throw new BadRequestException('CF-only requires managed VLESS+WS+TLS nodes on port 443 with a Cloudflare domain');
   }
 }

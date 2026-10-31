@@ -3,7 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma.service';
 import { NodesService } from '../nodes/nodes.service';
 import { CfAccessService } from './cf-access.service';
-import { CF_IP_RANGES, assertCfManagedNode } from './cf-access.util';
+import { CF_IP_RANGES, assertCfManagedNode, isCfManagedNode } from './cf-access.util';
 import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
 import { allowedByRanges, automaticVariants, CARRIERS, CfMeasurement, CfObservation, CfProbe,
   discoverCandidates, fingerprint, FRESH_MS, probeRegistry, rangeList, rankCandidates, STALE_MS, updateObservations } from './cf-optimization.util';
@@ -184,8 +184,12 @@ export class CfOptimizationService {
         if (!probes.length) return;
         const started = Date.now();
         await this.syncRanges(started);
-        const nodes = await this.prisma.node.findMany({ where: { enabled: true, status: 'RUNNING',
-          subscriptionNodes: { some: { subscription: { cfOnly: true, cfAuto: true } } } } });
+        const selected = await this.prisma.node.findMany({ where: { enabled: true, status: 'RUNNING',
+          subscriptionNodes: { some: { subscription: { cfAuto: true } } } },
+          include: { subscriptionNodes: { where: { subscription: { cfAuto: true } },
+            select: { subscription: { select: { ownerId: true, cfOnly: true, cfProtectedNodeIds: true } } } } } });
+        const nodes = selected.filter(node => isCfManagedNode(node) && node.subscriptionNodes.some(({ subscription }) =>
+          subscription.ownerId === node.userId && (subscription.cfOnly || subscription.cfProtectedNodeIds.includes(node.id))));
         const previous = await this.prisma.cfOptimization.findMany({ where: { nodeId: { in: nodes.map(n => n.id) } } });
         const jobs = nodes.flatMap(node => probes.map(probe => ({ node, probe,
           last: previous.find(r => r.nodeId === node.id && r.probeId === probe.id)?.attemptedAt.getTime() ?? 0 })))

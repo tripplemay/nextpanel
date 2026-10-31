@@ -9,6 +9,7 @@ export async function verifyCfAccess({ prisma, cipher, require, root, databaseUr
   assert.equal(original.cfOnly, false);
   assert.equal(original.cfAuto, false);
   assert.deepEqual(original.cfPreferredIps, []);
+  assert.deepEqual(original.cfProtectedNodeIds, []);
   const resourceCount = await prisma.configSnapshot.count();
   const cleanupCount = await prisma.resourceCleanup.count();
   const nodeCount = await prisma.node.count();
@@ -30,6 +31,39 @@ export async function verifyCfAccess({ prisma, cipher, require, root, databaseUr
   const { fingerprint } = require(`${root}/apps/server/src/subscriptions/cf-optimization.util.ts`);
   const optimizer = new CfOptimizationService(prisma, nodes, cf);
   const subscriptions = new SubscriptionsService(prisma, nodes, { get: () => 'https://panel.example.com' }, cipher, cf, optimizer);
+  await prisma.node.create({ data: { id: 'cf-ordinary', userId: 'cf-owner', serverId: 'cf-entry', name: 'Ordinary fixture',
+    protocol: 'TROJAN', transport: 'TCP', tls: 'TLS', listenPort: 8443, status: 'RUNNING', credentialsEnc: cipher.encrypt(JSON.stringify({ password: 'fixture' })) } });
+  const { sealExternalSecrets } = require(`${root}/apps/server/src/external-nodes/external-credentials.ts`);
+  await prisma.externalNode.create({ data: { id: 'cf-external', userId: 'cf-owner', name: 'External fixture',
+    protocol: 'TROJAN', address: '192.0.2.92', port: 443, tls: 'TLS',
+    credentialsEnc: sealExternalSecrets(cipher, 'cf-owner', { password: 'fixture-external' }) } });
+  const mixed = await subscriptions.create('Mixed fixture', ['cf-node', 'cf-ordinary'], 'cf-owner', ['cf-external'], { cfAuto: true });
+  assert.equal(mixed.cfOnly, false); assert.deepEqual(mixed.cfProtectedNodeIds, ['cf-node']);
+  const mixedShare = await subscriptions.addShare(mixed.id, 'owner', 'cf-owner');
+  const mixedProvider = await subscriptions.generateCfProvider({ token: mixed.token }, 'cf-node');
+  assert.ok(mixedProvider.includes('104.16.0.2')); assert.ok(!mixedProvider.includes('192.0.2.92'));
+  assert.equal(mixedProvider, await subscriptions.generateCfProvider({ shareToken: mixedShare.shareToken }, 'cf-node'));
+  const mixedClash = (await subscriptions.generateClashContent(mixed.token)).content;
+  assert.ok(mixedClash.slice(mixedClash.indexOf('  - name: 🚀')).includes('Ordinary fixture'));
+  assert.ok(mixedClash.includes('External fixture'));
+  await subscriptions.update(mixed.id, undefined, undefined, 'cf-owner', undefined, { cfAuto: false });
+  const stopped = await prisma.subscription.findUniqueOrThrow({ where: { id: mixed.id } });
+  assert.deepEqual(stopped.cfProtectedNodeIds, ['cf-node']); assert.equal(stopped.token, mixed.token);
+  await assert.rejects(prisma.subscription.update({ where: { id: mixed.id, updatedAt: new Date(0) }, data: { cfProtectedNodeIds: [] } }));
+  await subscriptions.update(mixed.id, undefined, undefined, 'cf-owner', undefined, { cfAuto: true });
+  const savedDns = cf.defaultIp;
+  cf.defaultIp = async () => null;
+  const withoutCf = Buffer.from(await subscriptions.generateContent(mixed.token), 'base64').toString();
+  assert.equal(withoutCf.split('\n').length, 2); assert.ok(!withoutCf.includes('cdn.example.com'));
+  assert.equal(await subscriptions.generateCfProvider({ token: mixed.token }, 'cf-node'), buildCfUnavailableProvider('cf-node'));
+  cf.defaultIp = savedDns;
+  await prisma.node.update({ where: { id: 'cf-node' }, data: { transport: 'TCP' } });
+  assert.equal(await subscriptions.generateCfProvider({ token: mixed.token }, 'cf-node'), buildCfUnavailableProvider('cf-node'));
+  assert.ok(!Buffer.from(await subscriptions.generateContent(mixed.token), 'base64').toString().includes('cdn.example.com'));
+  await prisma.node.update({ where: { id: 'cf-node' }, data: { transport: 'WS' } });
+  await subscriptions.remove(mixed.id, 'cf-owner');
+  await prisma.node.delete({ where: { id: 'cf-ordinary' } });
+  await prisma.externalNode.delete({ where: { id: 'cf-external' } });
   await assert.rejects(subscriptions.create('foreign', ['cf-node'], 'owner', [], { cfOnly: true }), /selection is not available/);
   const created = await subscriptions.create('CF fixture', ['cf-node'], 'cf-owner', [], { cfOnly: true, cfPreferredIps: ['104.16.0.1'] });
   assert.equal(created.cfOnly, true);

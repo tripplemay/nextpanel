@@ -21,6 +21,7 @@ describe('CF access authenticated HTTP boundary', () => {
   } : null) } };
   const cf = new CfAccessService(db as any, { getCredentials: async () => ({ uuid: 'fixture' }) } as any, xray as any);
   const subscriptions = { create: jest.fn().mockResolvedValue({ id: 'created' }),
+    update: jest.fn().mockResolvedValue({ id: 'updated' }),
     generateCfProvider: jest.fn().mockResolvedValue('proxies: []'),
     generateHomeProxyContentByShareToken: jest.fn().mockResolvedValue('{"fixture":true}') };
   const optimizer = { status: jest.fn().mockResolvedValue({ enabled: false }), rollback: jest.fn().mockResolvedValue({ paused: true }), resume: jest.fn().mockResolvedValue({ paused: false }) };
@@ -97,6 +98,18 @@ describe('CF access authenticated HTTP boundary', () => {
       const response = await fetch(`${base}/subscriptions/${kind}/fixture/cf-provider/node`);
       expect(response.status).toBe(200); expect(response.headers.get('cache-control')).toContain('no-store');
       expect(subscriptions.generateCfProvider).toHaveBeenCalledWith({ [tokenKey]: 'fixture' }, 'node');
+    }
+  });
+  it('accepts independent mixed auto mode but rejects client-controlled protection scopes', async () => {
+    const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt.sign({ sub: 'owner' })}` };
+    for (const [method, suffix, status] of [['POST', '', 201], ['PATCH', '/mixed', 200]] as const) {
+      const body = { name: 'mixed', nodeIds: ['node', 'ordinary'], externalNodeIds: ['external'], cfOnly: false, cfAuto: true };
+      expect((await fetch(`${base}/subscriptions${suffix}`, { method, headers, body: JSON.stringify(body) })).status).toBe(status);
+      const action = method === 'POST' ? subscriptions.create : subscriptions.update;
+      const count = action.mock.calls.length;
+      expect((await fetch(`${base}/subscriptions${suffix}`, { method, headers,
+        body: JSON.stringify({ ...body, cfProtectedNodeIds: [] }) })).status).toBe(400);
+      expect(action).toHaveBeenCalledTimes(count);
     }
   });
 });

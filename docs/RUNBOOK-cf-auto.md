@@ -2,12 +2,33 @@
 
 ## Scope and compatibility
 
-Opt-in `cfAuto=true` requires `cfOnly=true` and the existing owned managed
-VLESS+WS+TLS/443 selection rules. The additive migration
+Opt-in `cfAuto=true` supports mixed subscriptions: ordinary managed nodes and
+external nodes remain unchanged. Only 1-20 owned managed VLESS+WS+TLS/443 nodes
+with provisioned CF records are optimized. `cfOnly=true` remains a separate,
+strict whole-subscription restriction; it cannot be switched off once enabled.
+The additive migration
 `20261031020000_cf_auto_optimization` defaults existing subscriptions to false.
 Manual preferred IPs and ordinary subscriptions retain their previous behavior.
-The UI defaults newly enabled CF-only subscriptions to automatic mode; no IP entry
-is needed. Existing manual configurations are not silently converted.
+The UI defaults newly enabled strict CF-only subscriptions to automatic mode;
+mixed subscriptions have an independent opt-in switch. No IP entry is needed.
+Existing configurations are not silently converted.
+
+Migration `20261031093000_cf_mixed_subscriptions` adds server-maintained
+`cfProtectedNodeIds`, empty by default. Enabling/saving mixed automatic mode
+captures the selected compatible node IDs. Disabling automatic mode retains
+this scope and uses validated default CDN addresses. Configuration drift cannot
+silently reclassify a protected node as direct: invalid/unavailable CF nodes are
+omitted in mixed exports, while unrelated proxies remain available. An export
+with no safe proxy still fails closed. Selection updates retain protection for
+remaining members and use an optimistic updatedAt guard against concurrent
+scope writes. Clients cannot set or clear the scope directly.
+
+Each dynamic provider is limited to one protected owned node; it never includes
+ordinary or external proxies. Mixed Clash selectors include both the CF groups
+and ordinary/external entries, but CF groups never fall back to those entries or
+DIRECT. Shared viewer responses redact protected origin IPs even with automatic
+mode off. Non-CF proxies retain their original visibility and routing semantics;
+mixed mode does not claim the entire subscription is CDN-only.
 
 This does not redeploy nodes, change origin DNS/firewalls/ports, rotate tokens or
 alter the old GFW function. The latter has been recovered under
@@ -172,11 +193,15 @@ an allegedly measured carrier IP.
    resurrected. A paused snapshot still expires; the UI shows the pause status.
    Resume is explicit. This affects all automatic subscriptions sharing that node.
 6. Global stop: unset/set false `CF_OPTIMIZATION_ENABLED`; no new probes run. For
-   full feature rollback set the affected subscription `cfAuto=false`, clear
-   `cfPreferredIps`, retain `cfOnly=true` and refresh the full client subscription.
+   feature rollback set the affected subscription `cfAuto=false`, clear
+   `cfPreferredIps`, retain strict `cfOnly` and/or its mixed `cfProtectedNodeIds`
+   scope, and refresh the full client subscription.
    Default CF DNS remains validated/pinned; no safe endpoint means export failure.
    Keep additive DB tables and the original GFW function unchanged.
-7. Do not roll back below a CF-aware application version while CF-only links are
+7. Do not deploy pre-mixed application code over live mixed protection scopes:
+   it ignores the new scope and can expose CF origins. A full rollback must use
+   the matching pre-enable database backup, or explicitly migrate every protected
+   subscription and client first. Do not roll back below a CF-aware application version while CF-only links are
    live. An earlier manual-CF build also lacks dynamic-provider routes, so migrate
    clients to manual/default CF exports before removing auto-provider support.
 
@@ -188,9 +213,11 @@ PG_BIN=/opt/homebrew/opt/postgresql@17/bin \
   bash scripts/ci/verify.sh
 ```
 
-Tests include mock probe-to-publication flows, actual isolated PostgreSQL defaults,
+Tests include mixed owner/share exports, retained ordinary proxies, scope drift,
+automatic-mode disable, provider isolation, mock probe-to-publication flows, actual isolated PostgreSQL defaults,
 ownership/share/rotation/rollback, worker loopback HTTP, native config validation
 and desktop/mobile browser fixtures. Mihomo tests also start an isolated core and
-assert all four CF groups select REJECT for empty providers. These tests replace
-HTTP with a local file provider and exclude external rule downloads; they do not prove a live SCF
+assert all four CF groups select REJECT after a populated loopback HTTP provider
+is replaced with a reject sentinel. Other fixtures use file providers and exclude
+external rule downloads; they do not prove a live SCF
 gateway, remote provider refresh timing or real ISP performance.

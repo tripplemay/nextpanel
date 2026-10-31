@@ -86,7 +86,7 @@ test('running Mihomo rejects empty providers for every CF group without COMPATIB
     rmSync(dir, { recursive: true, force: true });
   }
 });
-test('running Mihomo clears populated HTTP providers with a fail-closed sentinel', { skip: !process.env.MIHOMO_BINARY, timeout: 15000 }, async () => {
+test('running mixed Mihomo keeps ordinary proxies selectable and clears CF HTTP caches without direct fallback', { skip: !process.env.MIHOMO_BINARY, timeout: 15000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'np-cf-refresh-'));
   let payload = ['proxies:', ...variants.map(buildClashProxy)].join('\n');
   let sourceCalls = 0; let output = ''; let latest;
@@ -96,10 +96,11 @@ test('running Mihomo clears populated HTTP providers with a fail-closed sentinel
     source.listen(0, '127.0.0.1'); await once(source, 'listening');
     const socket = net.createServer(); socket.listen(0, '127.0.0.1'); await once(socket, 'listening');
     const port = socket.address().port; await new Promise(resolve => socket.close(resolve));
-    const exported = buildClashSubscription(variants, 'https://panel.example.com', 'https://panel.example.com/provider');
+    const ordinary = { name: 'ordinary fixture', protocol: 'SOCKS5', host: '127.0.0.1', port: 9, tls: 'NONE', credentials: {} };
+    const exported = buildClashSubscription([...variants, ordinary], 'https://panel.example.com', 'https://panel.example.com/provider');
     const groups = exported.slice(exported.indexOf('proxy-groups:'), exported.indexOf('\nrules:'))
       .replaceAll('https://www.gstatic.com/generate_204', `http://127.0.0.1:${port}/version`).replaceAll('lazy: false', 'lazy: true');
-    const config = `mode: rule\nexternal-controller: 127.0.0.1:${port}\nsecret: fixture\nproxies: []\nproxy-providers:\n  cf-fixture:\n    type: http\n    url: http://127.0.0.1:${source.address().port}/provider\n    proxy: DIRECT\n    path: ./provider.yaml\n    interval: 900\n    health-check:\n      enable: false\n${groups}\nrules:\n  - MATCH,REJECT\n`;
+    const config = `mode: rule\nexternal-controller: 127.0.0.1:${port}\nsecret: fixture\nproxies:\n${buildClashProxy(ordinary)}\nproxy-providers:\n  cf-fixture:\n    type: http\n    url: http://127.0.0.1:${source.address().port}/provider\n    proxy: DIRECT\n    path: ./provider.yaml\n    interval: 900\n    health-check:\n      enable: false\n${groups}\nrules:\n  - MATCH,REJECT\n`;
     const file = join(dir, 'config.yaml'); writeFileSync(file, config);
     child = spawn(process.env.MIHOMO_BINARY, ['-d', dir, '-f', file], { stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.on('data', chunk => { output = (output + chunk).slice(-12000); });
@@ -129,6 +130,8 @@ test('running Mihomo clears populated HTTP providers with a fail-closed sentinel
     const updated = await fetch(`http://127.0.0.1:${port}/providers/proxies/cf-fixture`, { method: 'PUT', headers });
     assert.ok(updated.ok, `Fail-closed HTTP update rejected: ${await updated.text()}`);
     const result = await (await fetch(`http://127.0.0.1:${port}/proxies`, { headers })).json();
+    assert.ok(result.proxies['🚀 节点选择'].all.includes(ordinary.name));
+    assert.ok(result.proxies['⚡ 自动选择'].all.includes(ordinary.name));
     const cfGroups = Object.entries(result.proxies).filter(([name]) => name.startsWith('fixture [CF fixture]'));
     assert.equal(cfGroups.length, 4);
     for (const [, group] of cfGroups) { assert.deepEqual(group.all, ['REJECT']); assert.equal(group.now, 'REJECT'); }
