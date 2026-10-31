@@ -51,6 +51,14 @@ export async function verifyUsage({ prisma, cipher, require, root, databaseUrl }
     for (const secret of ['uuidEnc', 'usage-owner-token', 'usage-share-token', ownerExport[0].credentials.uuid, shareExport[0].credentials.uuid]) assert.ok(!json.includes(secret));
     await service.setEnabled('usage-sub', 'owner', false);
     assert.ok((await service.overview('owner', 'usage-sub')).rows.every(r => r.status === 'PAUSED'));
+    await service.setEnabled('usage-sub', 'owner', true);
+    assert.equal((await prisma.usageCredential.findUniqueOrThrow({ where: { id } })).sampledAt, null);
+    await service.ingest('srv', [sample(20, 2100)]);
+    const resumed = await prisma.usageCredential.findUniqueOrThrow({ where: { id } });
+    assert.equal(resumed.upRate, null, 'a brief pause/resume requires a new baseline even inside the freshness window');
+    assert.equal(resumed.lastActiveAt, null, 'paused traffic must not appear as recent activity');
+    assert.equal((await service.history(id, 'owner')).reduce((sum, b) => sum + Number(b.upBytes), 0), 1000, 'paused bytes must not enter history');
+    await service.setEnabled('usage-sub', 'owner', false);
     await service.revokeInvalidGrants('usage-node');
     assert.equal(await prisma.usageCredential.count({ where: { nodeId: 'usage-node', revokedAt: { not: null } } }), 0, 'pausing observation must not revoke proxy access');
     await prisma.subscriptionShare.delete({ where: { id: 'usage-share' } });

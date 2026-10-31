@@ -37,10 +37,15 @@ export class UsageService {
     const nodes = sub.nodes.map(n => n.node).filter(n => n.userId === ownerId && usageEligible(n)
       && (sub.cfOnly || sub.cfProtectedNodeIds.includes(n.id)));
     if (enabled && !nodes.length) throw new BadRequestException('No protected VLESS WS TLS nodes available');
-    await this.prisma.$transaction([
+    const recorded = await this.prisma.usageCredential.findMany({ where: { subscriptionId: id, ownerId }, select: { nodeId: true }, distinct: ['nodeId'] });
+    // A queued sample must not restore the old baseline after a pause has committed.
+    await withPostgresAdvisoryLocks([...sub.nodes.map(n => n.nodeId), ...recorded.map(r => r.nodeId)]
+      .map(nodeId => `nextpanel:usage-sample:${nodeId}`), () => this.prisma.$transaction([
       this.prisma.subscription.update({ where: { id }, data: { usageEnabled: enabled } }),
+      ...(sub.usageEnabled !== enabled ? [this.prisma.usageCredential.updateMany({ where: { subscriptionId: id, ownerId },
+        data: { sampledAt: null, lastActiveAt: null, upRate: null, downRate: null } })] : []),
       ...nodes.map(n => this.prisma.usageNode.upsert({ where: { nodeId: n.id }, create: { nodeId: n.id }, update: {} })),
-    ]);
+    ]));
     return { id, enabled };
   }
 
