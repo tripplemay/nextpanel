@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -13,7 +13,7 @@ const root = resolve(import.meta.dirname, '../..');
 const require = createRequire(join(root, 'apps/server/package.json'));
 require('ts-node').register({ project: join(root, 'apps/server/tsconfig.json'), transpileOnly: true });
 const { generateXrayConfig } = require(join(root, 'apps/server/src/nodes/config/xray-config.ts'));
-const { usageConfig, runtimeUsers } = require(join(root, 'apps/server/src/usage/usage-config.ts'));
+const { usageConfig, runtimeUsers, usageStagingPaths } = require(join(root, 'apps/server/src/usage/usage-config.ts'));
 const binary = process.env.XRAY_BINARY;
 const delay = ms => new Promise(r => setTimeout(r, ms));
 async function port() { const s = net.createServer(); s.listen(0, '127.0.0.1'); await once(s, 'listening'); const p = s.address().port; await new Promise(r => s.close(r)); return p; }
@@ -37,14 +37,17 @@ test('native Xray identities, hot add/remove, traffic attribution and persistent
     config.inbounds[1].streamSettings.tlsSettings.certificates = [{ certificateFile: certificate, keyFile: key }];
     const file = join(dir, 'server.json');
     const prepared = usageConfig(JSON.stringify(config), 'fixture', api, []);
-    writeFileSync(file, prepared.config, { mode: 0o600 });
+    const staged = usageStagingPaths(file, 'fixture');
+    writeFileSync(staged.stage, prepared.config, { mode: 0o600 });
+    run(binary, ['run', '-test', '-config', staged.stage]);
+    renameSync(staged.stage, file);
     const start = () => { const child = spawn(binary, ['run', '-config', file], { stdio: 'ignore' }); children.push(child); return child; };
     let server = start();
     const address = `--server=127.0.0.1:${api}`;
     for (let i = 0; i < 30; i++) { const r = spawnSync(binary, ['api', 'inbounduser', address, '-tag=in-fixture'], { encoding: 'utf8', timeout: 1000 }); if (r.status === 0) break; await delay(100); }
     const users = () => runtimeUsers(run(binary, ['api', 'inbounduser', address, '-tag=in-fixture']));
     assert.equal(users().get('np-legacy'), legacy);
-    const add = join(dir, 'add.json');
+    const add = staged.additions;
     writeFileSync(add, JSON.stringify({ inbounds: [{ tag: 'in-fixture', listen: '127.0.0.1', port: listen, protocol: 'vless', settings: { decryption: 'none', clients: [first, second].map(u => ({ ...u, level: 4242 })) } }] }));
     const added = run(binary, ['api', 'adu', address, add]);
     assert.equal(users().get(first.email), first.id, `add result: ${added}; users: ${JSON.stringify([...users()])}`);

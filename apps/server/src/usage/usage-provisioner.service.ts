@@ -9,7 +9,7 @@ import { quote, resourcePaths } from '../resources/remote-inventory';
 import { remoteExec } from '../resources/remote-exec';
 import { uploadText } from '../nodes/ssh/ssh.util';
 import { UsageService } from './usage.service';
-import { runtimeUsers, usageConfig } from './usage-config';
+import { runtimeUsers, usageConfig, usageStagingPaths } from './usage-config';
 import { LEGACY_EMAIL, usageEligible, usageEmail } from './usage.util';
 
 @Injectable()
@@ -49,9 +49,7 @@ export class UsageProvisioner {
       const credentials = await this.prisma.usageCredential.findMany({ where: { nodeId, removedAt: null } });
       const users = credentials.filter(c => !c.revokedAt).map(c => ({ email: usageEmail(c.id), id: this.crypto.decrypt(c.uuidEnc) }));
       const paths = resourcePaths(nodeId, 'ENTRY');
-      const stage = `${paths.config}.usage-${randomUUID()}`;
-      const backup = `${stage}.backup`;
-      const additions = `${stage}.add`;
+      const { stage, backup, additions } = usageStagingPaths(paths.config, randomUUID());
       let ssh: Awaited<ReturnType<ResourceLifecycleService['connect']>> | undefined;
       let activated = false; let restart = false; let before = '';
       let ownership: { rollback: () => Promise<void> } | undefined;
