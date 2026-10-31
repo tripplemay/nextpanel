@@ -842,6 +842,7 @@ export class NodesService {
       listenPort: true,
       domain: true,
       egressIpPolicy: true,
+      cfDnsRecordId: true,
       source: true,
       status: true,
       enabled: true,

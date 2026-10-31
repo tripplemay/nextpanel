@@ -10,8 +10,10 @@ assert urlparse(base).hostname in ('localhost', '127.0.0.1')
 output = Path('out/ci')
 output.mkdir(parents=True, exist_ok=True)
 node = {'id': 'cf-node', 'name': 'Telecom fixture', 'protocol': 'VLESS', 'transport': 'WS', 'tls': 'TLS',
-        'listenPort': 443, 'domain': 'cdn.example.com', 'status': 'RUNNING', 'enabled': True,
+        'listenPort': 443, 'domain': 'cdn.example.com', 'cfDnsRecordId': 'record', 'status': 'RUNNING', 'enabled': True,
         'server': {'id': 'entry', 'name': 'entry', 'ip': '192.0.2.90', 'tags': [], 'autoTags': []}}
+ordinary = {**node, 'id': 'ordinary', 'name': 'Ordinary fixture', 'transport': 'TCP', 'tls': 'REALITY', 'cfDnsRecordId': None}
+external = {'id': 'external', 'name': 'External fixture', 'protocol': 'TROJAN', 'address': '192.0.2.92', 'port': 443}
 seed = """
 localStorage.setItem('auth-store', JSON.stringify({state:{user:{id:'owner',username:'owner',role:'ADMIN'},token:'fixture'},version:0}));
 localStorage.setItem('access_token','fixture');
@@ -37,9 +39,9 @@ with sync_playwright() as p:
             elif url.path == '/api/subscriptions' and route.request.method == 'GET':
                 route.fulfill(json=[state['sub']])
             elif url.path == '/api/nodes':
-                route.fulfill(json=[node])
+                route.fulfill(json=[node, ordinary])
             elif url.path == '/api/external-nodes':
-                route.fulfill(json=[])
+                route.fulfill(json=[external])
             elif url.path == '/api/subscriptions/cf-access/check':
                 assert route.request.method == 'POST'
                 probes.append(route.request.post_data_json)
@@ -76,12 +78,12 @@ with sync_playwright() as p:
             expect(page.get_by_role('dialog')).to_be_visible()
 
         edit()
-        switch = page.get_by_role('switch')
+        switch = page.get_by_role('switch', name='严格 CF-only', exact=True)
         expect(switch).not_to_be_checked()
         switch.click()
         expect(page.get_by_text('全程 CDN；源站隐藏需独立验收', exact=True)).to_be_visible()
-        expect(page.get_by_role('radio', name='自动优选（无需填写 IP）')).to_be_checked()
-        page.get_by_role('radio', name='手工优选（高级）').check()
+        expect(page.get_by_role('switch', name='CF 自动优选', exact=True)).to_be_checked()
+        page.get_by_role('switch', name='CF 自动优选', exact=True).click()
         page.locator('#cfPreferredIps').fill('104.16.0.1')
         page.locator('#cfPreferredIps').press('Enter')
         page.locator('#cfPreferredIps').press('Escape')
@@ -107,14 +109,14 @@ with sync_playwright() as p:
         expect(page.get_by_text('1 个节点 · CF-only / 1 条优选', exact=True)).to_be_visible()
         assert mutations[-1]['cfOnly'] is True and mutations[-1]['cfPreferredIps'] == ['104.16.0.1']
         edit()
-        expect(page.get_by_role('switch')).to_be_disabled()
+        expect(page.get_by_role('switch', name='严格 CF-only', exact=True)).to_be_disabled()
         field = page.locator('.ant-form-item').filter(has_text='优选 CF IP（按优先顺序，最多 3 个）')
         field.locator('.ant-select-selection-item-remove').click()
         page.get_by_role('button', name=re.compile(r'^保\s*存$')).click()
         expect(page.get_by_role('dialog')).to_be_hidden()
         assert mutations[-1]['cfOnly'] is True and mutations[-1]['cfPreferredIps'] == []
         edit()
-        page.get_by_role('radio', name='自动优选（无需填写 IP）').check()
+        page.get_by_role('switch', name='CF 自动优选', exact=True).click()
         expect(page.locator('#cfPreferredIps')).to_have_count(0)
         page.get_by_label('检查 CF 节点').click()
         page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter(has_text='Telecom fixture — cdn.example.com').click()
@@ -129,6 +131,30 @@ with sync_playwright() as p:
         assert mutations[-1]['cfAuto'] is True and state['sub']['cfPreferredIps'] == []
         expect(page.get_by_text('1 个节点 · CF-only / 自动三网候选', exact=True)).to_be_visible()
         assert state['sub']['token'] == 'fixture-owner-token'
+        state['sub'].update({'name': 'AI mixed fixture', 'cfOnly': False, 'cfAuto': False,
+                             'nodes': [{'node': node}, {'node': ordinary}], 'externalNodes': [{'externalNode': external}]})
+        page.reload()
+        page.wait_for_load_state('networkidle')
+        edit()
+        expect(page.get_by_role('switch', name='CF 自动优选', exact=True)).not_to_be_checked()
+        page.get_by_role('switch', name='CF 自动优选', exact=True).click()
+        expect(page.get_by_text('混合订阅：仅 CF 节点使用 CDN 优选', exact=True)).to_be_visible()
+        expect(page.get_by_text(re.compile('当前 1 个兼容 CF 节点，其他 1 个托管节点和 1 个外部节点保持原样'))).to_be_visible()
+        before_mutations = len(mutations)
+        page.get_by_role('switch', name='严格 CF-only', exact=True).click()
+        expect(page.get_by_text('当前选择不符合严格 CF-only', exact=True)).to_be_visible()
+        page.get_by_role('button', name=re.compile(r'^保\s*存$')).click()
+        expect(page.get_by_role('dialog')).to_be_visible()
+        expect(page.locator('.ant-form-item-explain-error').filter(has_text='外部节点')).to_be_visible()
+        assert len(mutations) == before_mutations
+        page.get_by_role('switch', name='严格 CF-only', exact=True).click()
+        page.get_by_role('button', name=re.compile(r'^保\s*存$')).click()
+        expect(page.get_by_role('dialog')).to_be_hidden()
+        assert mutations[-1]['cfAuto'] is True and mutations[-1]['cfOnly'] is False
+        assert mutations[-1]['nodeIds'] == ['cf-node', 'ordinary'] and mutations[-1]['externalNodeIds'] == ['external']
+        expect(page.get_by_text('3 个节点 · 混合订阅 / CF 自动优选', exact=True)).to_be_visible()
+        assert state['sub']['token'] == 'fixture-owner-token'
+        page.screenshot(path=str(output / f'cf-mixed-{width}.png'), full_page=True)
         assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), 'viewport overflow'
         assert errors == [], errors
         context.close()

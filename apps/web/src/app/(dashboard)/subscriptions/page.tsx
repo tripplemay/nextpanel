@@ -329,7 +329,8 @@ export default function SubscriptionsPage() {
               </div>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 {totalCount} 个节点
-                {sub.cfOnly ? sub.cfAuto ? ' · CF-only / 自动三网候选' : ` · CF-only / ${sub.cfPreferredIps?.length ?? 0} 条优选` : ''}
+                {sub.cfOnly ? sub.cfAuto ? ' · CF-only / 自动三网候选' : ` · CF-only / ${sub.cfPreferredIps?.length ?? 0} 条优选`
+                  : sub.cfAuto ? ' · 混合订阅 / CF 自动优选' : sub.cfProtectedNodeIds?.length ? ' · 混合订阅 / CF 默认 CDN' : ''}
               </Typography.Text>
             </div>
             <div style={{ flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>

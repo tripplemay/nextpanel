@@ -340,6 +340,8 @@ model Subscription {
   cfOnly    Boolean  @default(false)
   cfAuto    Boolean  @default(false)
   cfPreferredIps String[] @default([])
+  /// Server-maintained CDN protection scope; retained when automatic probing is disabled.
+  cfProtectedNodeIds String[] @default([])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -8,7 +8,7 @@ import { importedTransportHost } from '../external-nodes/uri-parser';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { externalNodePublicSelect, openExternalSecrets } from '../external-nodes/external-credentials';
 import { CfAccessService } from './cf-access.service';
-import { assertCfManagedNode, cfVariants, normalizeCfPreferredIps } from './cf-access.util';
+import { assertCfManagedNode, isCfManagedNode, cfVariants, normalizeCfPreferredIps } from './cf-access.util';
 import { CfOptimizationService } from './cf-optimization.service';
 
 type CfOptions = { cfOnly?: boolean; cfPreferredIps?: string[]; cfAuto?: boolean };
@@ -44,9 +44,10 @@ export class SubscriptionsService {
 
   async create(name: string, nodeIds: string[], ownerId: string, externalNodeIds?: string[], options: CfOptions = {}) {
     const cfPreferredIps = normalizeCfPreferredIps(options.cfPreferredIps ?? []);
-    if (options.cfAuto && !options.cfOnly) throw new BadRequestException('Automatic optimization requires CF-only mode');
     if (options.cfOnly) await this.cfAccess.validateSelection(nodeIds, externalNodeIds ?? [], ownerId);
     else if (cfPreferredIps.length) throw new BadRequestException('Preferred IPs require CF-only mode');
+    const cfProtectedNodeIds = options.cfAuto && !options.cfOnly
+      ? await this.cfAccess.automaticSelection(nodeIds, ownerId) : [];
     // Filter out non-existent IDs to prevent FK constraint violations
     let validNodeIds = nodeIds;
     if (nodeIds.length > 0) {
@@ -73,6 +74,7 @@ export class SubscriptionsService {
         cfOnly: options.cfOnly ?? false,
         cfAuto: options.cfAuto ?? false,
         cfPreferredIps,
+        cfProtectedNodeIds,
         nodes: {
           create: validNodeIds.map((nodeId) => ({ nodeId })),
         },
@@ -136,13 +138,15 @@ export class SubscriptionsService {
       name: s.subscription.name,
       createdAt: s.subscription.createdAt,
       updatedAt: s.subscription.updatedAt,
-      nodes: s.subscription.cfOnly ? s.subscription.nodes.map(({ node }) => ({
-        node: { ...node, server: { ...node.server, ip: undefined } },
-      })) : s.subscription.nodes,
+      nodes: s.subscription.nodes.map(({ node }) => ({
+        node: s.subscription.cfOnly || (s.subscription.cfProtectedNodeIds ?? []).includes(node.id)
+          ? { ...node, server: { ...node.server, ip: undefined } } : node,
+      })),
       externalNodes: s.subscription.externalNodes,
       cfOnly: s.subscription.cfOnly,
       cfAuto: s.subscription.cfAuto,
       cfPreferredIps: s.subscription.cfPreferredIps,
+      cfProtectedNodeIds: s.subscription.cfProtectedNodeIds,
       shareToken: s.shareToken,
     }));
   }
@@ -198,7 +202,6 @@ export class SubscriptionsService {
     }
     const cfOnly = options.cfOnly ?? sub.cfOnly ?? false;
     const cfAuto = options.cfAuto ?? sub.cfAuto ?? false;
-    if (cfAuto && !cfOnly) throw new BadRequestException('Automatic optimization requires CF-only mode');
     const cfPreferredIps = normalizeCfPreferredIps(options.cfPreferredIps ?? sub.cfPreferredIps ?? []);
     if (cfOnly) {
       await this.cfAccess.validateSelection(
@@ -206,6 +209,12 @@ export class SubscriptionsService {
         externalNodeIds ?? sub.externalNodes.map((n) => n.externalNodeId), ownerId,
       );
     } else if (cfPreferredIps.length) throw new BadRequestException('Preferred IPs require CF-only mode');
+    const selectedIds = nodeIds ?? sub.nodes.map(n => n.nodeId);
+    const cfProtectedNodeIds = [...new Set([
+      ...(sub.cfProtectedNodeIds ?? []).filter(id => selectedIds.includes(id)),
+      ...(cfAuto && !cfOnly ? await this.cfAccess.automaticSelection(selectedIds, ownerId) : []),
+    ])];
+    if (cfProtectedNodeIds.length > 20) throw new BadRequestException('At most 20 managed nodes can have CDN protection');
 
     // Filter out non-existent node IDs to prevent FK constraint violations
     let validNodeIds = nodeIds;
@@ -227,8 +236,10 @@ export class SubscriptionsService {
     }
 
     return this.prisma.subscription.update({
-      where: { id, ...(options.cfOnly === false && { cfOnly: false }) },
+      // A stale form write must not erase a concurrently enabled protection scope.
+      where: { id, updatedAt: sub.updatedAt, ...(options.cfOnly === false && { cfOnly: false }) },
       data: {
+        ...(JSON.stringify(cfProtectedNodeIds) !== JSON.stringify(sub.cfProtectedNodeIds ?? []) && { cfProtectedNodeIds }),
         ...(options.cfOnly !== undefined && { cfOnly }),
         ...(options.cfAuto !== undefined && { cfAuto }),
         ...(options.cfPreferredIps !== undefined && { cfPreferredIps }),
@@ -349,7 +360,7 @@ export class SubscriptionsService {
       externalNodes: { include: { externalNode: true } },
     };
 
-    let sub: { ownerId: string; cfOnly?: boolean; cfAuto?: boolean; cfPreferredIps?: string[]; nodes: SubscriptionNode[]; externalNodes: { externalNode: import('@prisma/client').ExternalNode }[] } | null = null;
+    let sub: { ownerId: string; cfOnly?: boolean; cfAuto?: boolean; cfPreferredIps?: string[]; cfProtectedNodeIds?: string[]; nodes: SubscriptionNode[]; externalNodes: { externalNode: import('@prisma/client').ExternalNode }[] } | null = null;
 
     if (by.shareToken) {
       const share = await this.prisma.subscriptionShare.findUnique({
@@ -363,7 +374,9 @@ export class SubscriptionsService {
     }
 
     if (!sub) throw new NotFoundException('Subscription not found');
-    if (providerNodeId !== undefined && (!sub.cfOnly || !sub.cfAuto
+    const protectedIds = new Set(sub.cfProtectedNodeIds ?? []);
+    const protectedNode = (id: string) => sub!.cfOnly || protectedIds.has(id);
+    if (providerNodeId !== undefined && (!sub.cfAuto || !protectedNode(providerNodeId)
       || !sub.nodes.some(({ node }) => node.id === providerNodeId && node.userId === sub.ownerId))) {
       throw new NotFoundException('CF provider not available');
     }
@@ -375,14 +388,13 @@ export class SubscriptionsService {
     }
     const activeNodes = sub.nodes.filter(({ node }) => node.enabled && node.status === 'RUNNING'
       && (providerNodeId === undefined || node.id === providerNodeId));
-    let defaultIps = new Map<string, string | null>();
-    if (sub.cfOnly) {
-      activeNodes.forEach(({ node }) => assertCfManagedNode(node));
-      const domains = [...new Set(activeNodes.map(({ node }) => node.domain!))];
-      defaultIps = new Map(await Promise.all(domains.map(async (domain) => [domain, await this.cfAccess.defaultIp(domain)] as const)));
-    }
+    if (sub.cfOnly) activeNodes.forEach(({ node }) => assertCfManagedNode(node));
+    const domains = [...new Set(activeNodes.filter(({ node }) => protectedNode(node.id) && isCfManagedNode(node)).map(({ node }) => node.domain!))];
+    const defaultIps = new Map(await Promise.all(domains.map(async (domain) => [domain, await this.cfAccess.defaultIp(domain)] as const)));
 
     for (const { node } of activeNodes) {
+      // Configuration drift must never turn a protected CF node into a direct export.
+      if (protectedNode(node.id) && (node.userId !== sub.ownerId || !isCfManagedNode(node))) continue;
       const credentials = await this.nodesService.getCredentials(node.id, sub.ownerId);
       const exported: NodeExportInfo = {
         name: node.name,
@@ -394,17 +406,17 @@ export class SubscriptionsService {
         domain: node.domain,
         credentials,
       };
-      if (sub.cfOnly) {
+      if (protectedNode(node.id)) {
         const defaultIp = defaultIps.get(node.domain!) ?? null;
         if (sub.cfAuto && !this.cfOptimizer) throw new ServiceUnavailableException('CF optimization unavailable');
         const variants = sub.cfAuto ? await this.cfOptimizer!.variants(exported, node, defaultIp)
           : cfVariants(exported, node.id, preferredIps, defaultIp);
-        if (variants.length === 0 && providerNodeId === undefined) throw new ServiceUnavailableException('No Cloudflare endpoint available; direct fallback is forbidden');
+        if (variants.length === 0 && sub.cfOnly && providerNodeId === undefined) throw new ServiceUnavailableException('No Cloudflare endpoint available; direct fallback is forbidden');
         result.push(...variants);
       } else result.push(exported);
     }
 
-    for (const { externalNode: stored } of sub.externalNodes) {
+    for (const { externalNode: stored } of providerNodeId === undefined ? sub.externalNodes : []) {
       if (stored.userId !== sub.ownerId) throw new ForbiddenException();
       const en = { ...stored, ...openExternalSecrets(this.crypto, stored) };
       const credentials: Record<string, string> = {};
@@ -432,7 +444,7 @@ export class SubscriptionsService {
       });
     }
 
-    if (sub.cfOnly && result.length === 0 && providerNodeId === undefined) {
+    if ((sub.cfOnly || protectedIds.size > 0 || sub.cfAuto) && result.length === 0 && providerNodeId === undefined) {
       throw new ServiceUnavailableException('No active CF-only nodes; direct fallback is forbidden');
     }
     return result;

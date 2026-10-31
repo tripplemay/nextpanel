@@ -240,7 +240,7 @@ describe('SubscriptionsService – CRUD', () => {
   });
 
   it('update renames subscription when name is provided', async () => {
-    const fakeSub = { id: 'sub-1', ownerId: 'owner-1' };
+    const fakeSub = { id: 'sub-1', ownerId: 'owner-1', nodes: [], externalNodes: [], cfProtectedNodeIds: [], updatedAt: new Date() };
     (mockPrisma.subscription.findFirst as jest.Mock).mockResolvedValue(fakeSub);
     (mockPrisma.subscription.update as jest.Mock).mockResolvedValue(fakeSub);
 

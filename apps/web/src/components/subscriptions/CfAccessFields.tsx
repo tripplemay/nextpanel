@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Alert, App, Button, Form, Radio, Select, Space, Switch, Typography } from 'antd';
+import { Alert, App, Button, Form, Select, Space, Switch, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import type { FormInstance } from 'antd';
 import { subscriptionsApi } from '@/lib/api';
@@ -18,29 +18,46 @@ const FINDINGS: Record<string, string> = {
 
 export function subscriptionError(error: unknown): string {
   const value = (error as { response?: { data?: { message?: unknown } } })?.response?.data?.message;
+  const known: Record<string, string> = {
+    'CF-only subscriptions require 1-20 managed nodes and no external nodes': '严格 CF-only 仅允许 1–20 个托管 CF 节点，不能包含外部节点。混合订阅请仅开启 CF 自动优选。',
+    'CF-only requires managed VLESS+WS+TLS nodes on port 443 with a Cloudflare domain': '严格 CF-only 仅支持面板管理的 VLESS+WS+TLS/443 Cloudflare 节点；其他协议请保留在混合订阅中。',
+    'Automatic optimization requires 1-20 compatible managed CF nodes; other nodes may remain': '自动优选需要选中 1–20 个支持的托管 CF 节点；其他协议和外部节点可以保留。',
+    'CF node selection is not available': '部分所选节点已删除或不属于当前账号，请刷新后重新选择。',
+    'At most 20 managed nodes can have CDN protection': '每条订阅最多保护 20 个 CF 节点，请减少 CF 节点数量。',
+  };
+  if (typeof value === 'string' && known[value]) return known[value];
   return typeof value === 'string' ? value : Array.isArray(value) ? value.join('; ') : '请求失败，请稍后重试';
 }
 
-export default function CfAccessFields({ form, nodes, locked }: {
-  form: FormInstance<CreateSubscriptionDto>; nodes: Node[]; locked: boolean;
+export default function CfAccessFields({ form, nodes, locked, protectedIds, loading }: {
+  form: FormInstance<CreateSubscriptionDto>; nodes: Node[]; locked: boolean; protectedIds: string[]; loading: boolean;
 }) {
   const enabled = Form.useWatch('cfOnly', form);
   const automatic = Form.useWatch('cfAuto', form) === true;
   const preferredIps: string[] = Form.useWatch('cfPreferredIps', form) ?? [];
   const selectedIds: string[] = Form.useWatch('nodeIds', form) ?? [];
+  const externalIds: string[] = Form.useWatch('externalNodeIds', form) ?? [];
   const [nodeId, setNodeId] = useState<string>();
   const [ip, setIp] = useState('');
   const [busy, setBusy] = useState(false);
   const [check, setCheck] = useState<{ key: string; result: CfAccessCheckResult }>();
   const { message, modal } = App.useApp();
   const eligible = nodes.filter((n) => selectedIds.includes(n.id)
-    && n.protocol === 'VLESS' && n.transport === 'WS' && n.tls === 'TLS' && n.listenPort === 443 && n.domain);
+    && n.protocol === 'VLESS' && n.transport === 'WS' && n.tls === 'TLS' && n.listenPort === 443 && n.domain && n.cfDnsRecordId);
+  const incompatible = nodes.filter(n => selectedIds.includes(n.id) && !eligible.some(e => e.id === n.id));
+  const protectedSelected = protectedIds.filter(id => selectedIds.includes(id));
+  const unavailableProtected = incompatible.filter(n => protectedSelected.includes(n.id));
+  const strictErrors = [
+    ...(selectedIds.length < 1 || selectedIds.length > 20 ? ['严格 CF-only 需要选择 1–20 个托管 CF 节点。'] : []),
+    ...(externalIds.length ? [`严格 CF-only 不能包含 ${externalIds.length} 个外部节点；混合订阅请关闭严格模式。`] : []),
+    ...(incompatible.length ? [`不兼容严格 CF-only：${incompatible.map(n => n.name).join('、')}。`] : []),
+  ];
   const selectedNode = eligible.find((n) => n.id === nodeId);
   const checkKey = JSON.stringify([nodeId, selectedNode?.domain, ip, preferredIps, selectedIds]);
   const currentResult = check?.key === checkKey ? check.result : undefined;
   const optimization = useQuery({ queryKey: ['cf-optimization', nodeId],
     queryFn: () => subscriptionsApi.cfOptimization(nodeId!).then(r => r.data),
-    enabled: !!enabled && automatic && !!selectedNode, refetchInterval: 30_000 });
+    enabled: automatic && !!selectedNode, refetchInterval: 30_000 });
   const carrierNames: Record<string, string> = { TELECOM: '电信', UNICOM: '联通', MOBILE: '移动', GENERIC: '通用云测点' };
 
   function rollback() {
@@ -63,18 +80,38 @@ export default function CfAccessFields({ form, nodes, locked }: {
   }
 
   return <>
-    <Form.Item name="cfOnly" label="CF-only 接入（始终保留 CDN）" valuePropName="checked">
-      <Switch disabled={locked} onChange={(checked) => { if (!checked) form.setFieldValue('cfPreferredIps', []); }} />
+    <Form.Item name="cfAuto" label="CF 自动优选（支持混合订阅）" valuePropName="checked"
+      dependencies={['nodeIds', 'cfOnly']}
+      rules={[{ validator: async (_, value) => {
+        if (value && (loading || eligible.length < 1 || eligible.length > 20)) {
+          throw new Error(loading ? '正在加载节点，请稍后保存。' : `当前有 ${eligible.length} 个兼容 CF 节点；自动优选需要 1–20 个。其他节点可保留。`);
+        }
+      } }]}>
+      <Switch aria-label="CF 自动优选" />
+    </Form.Item>
+    <Form.Item name="cfOnly" label="严格 CF-only（整条订阅仅允许 CDN 节点）" valuePropName="checked"
+      dependencies={['nodeIds', 'externalNodeIds']}
+      rules={[{ validator: async (_, value) => {
+        if (value && (loading || strictErrors.length)) throw new Error(loading ? '正在加载节点，请稍后保存。' : strictErrors.join(' '));
+      } }]}>
+      <Switch aria-label="严格 CF-only" disabled={locked} onChange={(checked) => {
+        if (checked) form.setFieldValue('cfAuto', true);
+        else form.setFieldValue('cfPreferredIps', []);
+      }} />
     </Form.Item>
     {enabled && <>
       <Alert type="warning" showIcon title="全程 CDN；源站隐藏需独立验收"
         description="仅支持 1–20 个托管 VLESS+WS+TLS 节点，不可混入其他协议或外部节点。默认线路也固定为已验证的 CF IP；全部不可用则失败，不回退源站。入口/出口共用 IP 仍可能泄漏源站。切换手工模式并清空候选可回退默认 CDN，不关闭 CF-only。" />
-      <Form.Item name="cfAuto" label="优选方式" style={{ marginTop: 16 }}>
-        <Radio.Group options={[{ label: '自动优选（无需填写 IP）', value: true }, { label: '手工优选（高级）', value: false }]} />
-      </Form.Item>
+      {!!strictErrors.length && <Alert type="error" showIcon title="当前选择不符合严格 CF-only" description={strictErrors.join(' ')} />}
+    </>}
+    {(enabled || automatic || protectedSelected.length > 0) && <>
+      {!enabled && <Alert type="info" showIcon title="混合订阅：仅 CF 节点使用 CDN 优选"
+        description={`当前 ${eligible.length} 个兼容 CF 节点，其他 ${selectedIds.length - eligible.length} 个托管节点和 ${externalIds.length} 个外部节点保持原样。CF 节点无安全地址时省略，不回退源站。关闭自动优选后，已保护节点仍使用默认 CDN；请刷新客户端完整订阅。非 CF 节点不具备 CDN 隐藏保证。`} />}
+      {!!unavailableProtected.length && <Alert type="warning" showIcon title="部分已保护节点配置发生变化"
+        description={`这些节点将停止导出，而不会转为直连：${unavailableProtected.map(n => n.name).join('、')}。`} />}
       {automatic && <Alert type="info" showIcon title="同一订阅包含三网候选，客户端本地择优"
         description="有效测量会自动生成电信、联通、移动候选；缺少测点时仅提供通用/默认 CDN，不冒充运营商实测。Clash/Mihomo 更新一次订阅后每 15 分钟获取候选、每 5 分钟探测；其他客户端需启用订阅更新。" />}
-      {!automatic && <Form.Item name="cfPreferredIps" label="优选 CF IP（按优先顺序，最多 3 个）" style={{ marginTop: 16 }}
+      {enabled && !automatic && <Form.Item name="cfPreferredIps" label="优选 CF IP（按优先顺序，最多 3 个）" style={{ marginTop: 16 }}
         extra="只接受 CF 公网 IPv4/IPv6，不接受域名、端口或 URL。SNI、WS Host 保留原业务域名。留空仅使用默认 CF 线路。"
         rules={[{ type: 'array', max: 3, message: '最多填写 3 个 CF IP' }]}>
         <Select mode="tags" tokenSeparators={[',', ' ', '\n']} options={[]} placeholder="输入 IP 后按回车；不自动推荐未经实测的 IP" />

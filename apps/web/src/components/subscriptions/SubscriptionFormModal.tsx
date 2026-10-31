@@ -53,12 +53,12 @@ export default function SubscriptionFormModal({
           nodeIds: subscription.nodes.map((sn) => sn.node.id),
           externalNodeIds: (subscription.externalNodes ?? []).map((en) => en.externalNode.id),
           cfOnly: subscription.cfOnly ?? false,
-          cfAuto: subscription.cfOnly ? (subscription.cfAuto ?? false) : true,
+          cfAuto: subscription.cfAuto ?? false,
           cfPreferredIps: subscription.cfPreferredIps ?? [],
         });
       } else {
         form.resetFields();
-        form.setFieldsValue({ nodeIds: [], externalNodeIds: [], cfOnly: false, cfAuto: true, cfPreferredIps: [] });
+        form.setFieldsValue({ nodeIds: [], externalNodeIds: [], cfOnly: false, cfAuto: false, cfPreferredIps: [] });
       }
     }
   }, [open, isEdit, subscription, form]);
@@ -77,8 +77,8 @@ export default function SubscriptionFormModal({
   });
 
   async function handleSubmit() {
-    const values = await form.validateFields();
-    if (!values.cfOnly) values.cfAuto = false;
+    const values = await form.validateFields().catch(() => null);
+    if (!values) return;
     if (isEdit) {
       updateMutation.mutate(values);
     } else {
@@ -168,7 +168,8 @@ export default function SubscriptionFormModal({
             }}
           />
         </Form.Item>
-        <CfAccessFields key={subscription?.id ?? 'new'} form={form} nodes={nodes ?? []} locked={subscription?.cfOnly === true} />
+        <CfAccessFields key={subscription?.id ?? 'new'} form={form} nodes={nodes ?? []} locked={subscription?.cfOnly === true}
+          protectedIds={subscription?.cfProtectedNodeIds ?? []} loading={nodesLoading} />
       </Form>
     </Modal>
   );

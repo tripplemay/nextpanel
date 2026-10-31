@@ -1088,10 +1088,10 @@ const RULE_BEHAVIOR: Record<typeof RULE_NAMES[number], string> = {
 };
 
 export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string, cfProviderBase?: string): string {
-  const proxyEntries: { name: string; yaml: string }[] = [];
+  const proxyEntries: { name: string; yaml: string; automatic: boolean; grouped: boolean }[] = [];
   for (const node of nodes) {
     const yaml = buildClashProxy(node);
-    if (yaml !== null) proxyEntries.push({ name: node.name, yaml });
+    if (yaml !== null) proxyEntries.push({ name: node.name, yaml, automatic: !!node.cfAuto, grouped: !!node.cfGroup });
   }
   if (nodes.length > 0 && proxyEntries.length === 0) {
     throw new Error('Mihomo supports XHTTP only with VLESS; no compatible nodes remain');
@@ -1099,7 +1099,9 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
 
   const dynamic = !!cfProviderBase && nodes.some(n => n.cfAuto);
   if (dynamic && new URL(cfProviderBase!).protocol !== 'https:') throw new Error('CF providers require an HTTPS panel URL');
-  const nodeNames = dynamic ? cfGroups(nodes, true).map(g => g.tag) : selectableTags(nodes, proxyEntries.map((e) => e.name));
+  const nodeNames = dynamic ? [...cfGroups(nodes, true).map(g => g.tag),
+    ...proxyEntries.filter(e => !e.grouped).map(e => e.name)]
+    : selectableTags(nodes, proxyEntries.map((e) => e.name));
   // url-test 至少需要 1 个 proxy；无可用节点时回退到 DIRECT，避免 YAML 解析失败
   const fallbackNames = nodeNames.length > 0 ? nodeNames : ['DIRECT'];
 
@@ -1117,7 +1119,7 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
   }
 
   // ── proxies ───────────────────────────────────────────────────────────────
-  const inlineEntries = dynamic ? proxyEntries.filter(e => !nodes.find(n => n.name === e.name)?.cfAuto) : proxyEntries;
+  const inlineEntries = dynamic ? proxyEntries.filter(e => !e.automatic) : proxyEntries;
   const providers = dynamic ? [...new Set(nodes.filter(n => n.cfAuto).map(n => n.cfNodeId!))].map(id => [
     `  cf-${id}:`, '    type: http', `    url: ${yamlScalar(`${cfProviderBase}/${encodeURIComponent(id)}`)}`,
     '    interval: 900', '    proxy: DIRECT', '    size-limit: 262144',
