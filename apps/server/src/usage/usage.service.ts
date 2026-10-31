@@ -85,6 +85,10 @@ export class UsageService {
         } else result.push(variant);
       }
       return result;
+    }, { lockWaitMs: 250 }).catch((error: unknown) => {
+      // SSH reconciliation must not stall subscription downloads; the original CDN UUID remains valid.
+      if (error && typeof error === 'object' && 'code' in error && error.code === '55P03') return variants;
+      throw error;
     });
   }
 

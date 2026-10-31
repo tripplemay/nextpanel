@@ -29,6 +29,15 @@ export async function verifyUsage({ prisma, cipher, require, root, databaseUrl }
     const shareExport = await service.decorate('usage-node', share, [variant]);
     assert.notEqual(ownerExport[0].credentials.uuid, shareExport[0].credentials.uuid);
     assert.equal(ownerExport[0].host, variant.host); assert.equal(ownerExport[0].credentials.transportHost, variant.credentials.transportHost);
+    const blocker = new (require('pg').Client)({ connectionString: databaseUrl });
+    await blocker.connect();
+    try {
+      await blocker.query('SELECT pg_advisory_lock(hashtextextended($1::text, 0))', ['nextpanel:usage:usage-node']);
+      const began = Date.now();
+      assert.deepEqual(await service.decorate('usage-node', grant, [variant]), [variant], 'SSH contention must return unchanged CDN credentials');
+      assert.ok(Date.now() - began < 3000, 'downloads must not wait for a long remote operation');
+    } finally { await blocker.end(); }
+    assert.deepEqual(await service.decorate('usage-node', grant, [variant]), ownerExport, 'installed identities resume after contention');
     const id = credentials.find(c => c.grantId === 'owner').id;
     const start = Date.now() - 20_000;
     const sample = (index, up) => ({ nodeId: 'usage-node', sampleId: `fixture-${index}`, sampledAt: new Date(start + index * 1000).toISOString(), uptime: 100 + index,
