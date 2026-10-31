@@ -144,6 +144,12 @@ test('isolated PostgreSQL migration, concurrency and restore drill', { timeout: 
       assert.equal(failed.status, 1);
       assert.match(failed.stderr, /transaction rolled back/);
       assert.ok(!failed.stderr.includes('proxy-pass') && !failed.stderr.includes('existing-secret'));
+      const bootstrap = spawnSync(process.execPath, [join(root, 'scripts/tests/server-bootstrap.fixture.cjs'), join(runnerRoot, 'apps/server')], {
+        cwd: runnerRoot, timeout: 20000, encoding: 'utf8', env: { ...cliEnv, NODE_ENV: 'production', JWT_SECRET: 'isolated-bootstrap-fixture-secret',
+          RESOURCE_CLEANUP_ENABLED: 'false', CF_OPTIMIZATION_ENABLED: 'false', USAGE_OBSERVATION_ENABLED: 'false' },
+      });
+      assert.equal(bootstrap.status, 0, `${bootstrap.error ?? ''}\n${bootstrap.stdout}\n${bootstrap.stderr}`);
+      assert.match(bootstrap.stdout, /Compiled application bootstrap.*PASS/);
     }
     await prisma.oAuthState.create({ data: { id: 'state', browserHash: 'browser', purpose: 'login', expiresAt: new Date(Date.now() + 60000) } });
     const consume = () => prisma.oAuthState.deleteMany({ where: { id: 'state', browserHash: 'browser', purpose: 'login', userId: null, expiresAt: { gt: new Date() } } });
