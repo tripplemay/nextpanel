@@ -7,6 +7,11 @@ export class UpdateSubscriptionDto {
   @IsBoolean()
   cfOnly?: boolean;
 
+  @ApiPropertyOptional()
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsBoolean()
+  cfAuto?: boolean;
+
   @ApiPropertyOptional({ type: [String], maxItems: 3 })
   @ValidateIf((_object, value) => value !== undefined)
   @IsArray()

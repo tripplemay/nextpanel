@@ -143,6 +143,9 @@ export const nodesApi = {
 
 // ── Subscriptions ─────────────────────────────────────
 export const subscriptionsApi = {
+  cfOptimization: (nodeId: string) => api.get<import('@/types/api').CfOptimizationStatus>(`/subscriptions/cf-access/optimization/${encodeURIComponent(nodeId)}`),
+  rollbackCfOptimization: (nodeId: string) => api.post(`/subscriptions/cf-access/optimization/${encodeURIComponent(nodeId)}/rollback`),
+  resumeCfOptimization: (nodeId: string) => api.post(`/subscriptions/cf-access/optimization/${encodeURIComponent(nodeId)}/resume`),
   checkCfAccess: (data: { nodeId: string; ip?: string }) =>
     api.post<import('@/types/api').CfAccessCheckResult>('/subscriptions/cf-access/check', data),
   list: () => api.get<Subscription[] | ViewerSubscriptionList>('/subscriptions'),

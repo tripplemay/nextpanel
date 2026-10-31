@@ -233,6 +233,7 @@ model Node {
 
   snapshots         ConfigSnapshot[]
   subscriptionNodes SubscriptionNode[]
+  cfOptimizations   CfOptimization[]
 
   @@unique([serverId, listenPort])
   @@unique([exitServerId, exitPort])
@@ -337,6 +338,7 @@ model Subscription {
   ownerId   String
   /// Opt-in CDN-only export. Clearing preferred IPs retains CDN-only protection.
   cfOnly    Boolean  @default(false)
+  cfAuto    Boolean  @default(false)
   cfPreferredIps String[] @default([])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -344,6 +346,32 @@ model Subscription {
   nodes         SubscriptionNode[]
   externalNodes ExternalSubscriptionNode[]
   shares        SubscriptionShare[]
+}
+
+model CfOptimization {
+  id              String   @id @default(cuid())
+  nodeId          String
+  node            Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  probeId         String
+  fingerprint     String
+  carrier         String
+  region          String
+  observations    Json
+  published       Json
+  previous        Json
+  checkedAt       DateTime
+  attemptedAt     DateTime @default(now())
+  discoveredAt    DateTime
+  error           String?
+  revision        Int      @default(0)
+  @@unique([nodeId, probeId])
+  @@index([checkedAt])
+}
+
+model CfOptimizationState {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
 }
 
 model SubscriptionShare {

@@ -77,6 +77,7 @@ export interface CreateSubscriptionDto {
   nodeIds: string[];
   externalNodeIds?: string[];
   cfOnly?: boolean;
+  cfAuto?: boolean;
   cfPreferredIps?: string[];
 }
 
@@ -85,6 +86,7 @@ export interface UpdateSubscriptionDto {
   nodeIds?: string[];
   externalNodeIds?: string[];
   cfOnly?: boolean;
+  cfAuto?: boolean;
   cfPreferredIps?: string[];
 }
 
@@ -275,6 +277,7 @@ export interface Subscription {
   /** Owner-only credential; never present in shared responses. */
   token?: string;
   cfOnly?: boolean;
+  cfAuto?: boolean;
   cfPreferredIps?: string[];
   nodes: Array<{ node: Pick<Node, 'id' | 'name' | 'protocol' | 'status' | 'enabled' | 'listenPort' | 'serverId' | 'server'> }>;
   externalNodes: Array<{ externalNode: Pick<ExternalNode, 'id' | 'name' | 'protocol' | 'address' | 'port'> }>;
@@ -290,6 +293,16 @@ export interface CfAccessCheckResult extends ConnectivityResult {
   domain: string;
   vantage: 'PANEL';
   audit: { status: 'UNVERIFIED'; findings: string[] };
+}
+
+export interface CfOptimizationStatus {
+  paused: boolean;
+  budget?: { lowBudget: boolean; monthlyLimit: number | null; error: boolean };
+  enabled: boolean; registryError: boolean; rangeError: boolean; rangeUpdatedAt: string | null;
+  missingCarriers: string[];
+  profiles: Array<{ probeId: string; carrier: string; region: string; checkedAt: string | null;
+    stale: boolean; error: string | null; revision: number;
+    candidates: Array<{ ip: string; latency: number; checkedAt: number; failed: number }> }>;
 }
 
 export interface ViewerSubscriptionList {

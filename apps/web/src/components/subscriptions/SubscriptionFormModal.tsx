@@ -53,11 +53,12 @@ export default function SubscriptionFormModal({
           nodeIds: subscription.nodes.map((sn) => sn.node.id),
           externalNodeIds: (subscription.externalNodes ?? []).map((en) => en.externalNode.id),
           cfOnly: subscription.cfOnly ?? false,
+          cfAuto: subscription.cfOnly ? (subscription.cfAuto ?? false) : true,
           cfPreferredIps: subscription.cfPreferredIps ?? [],
         });
       } else {
         form.resetFields();
-        form.setFieldsValue({ nodeIds: [], externalNodeIds: [], cfOnly: false, cfPreferredIps: [] });
+        form.setFieldsValue({ nodeIds: [], externalNodeIds: [], cfOnly: false, cfAuto: true, cfPreferredIps: [] });
       }
     }
   }, [open, isEdit, subscription, form]);
@@ -77,6 +78,7 @@ export default function SubscriptionFormModal({
 
   async function handleSubmit() {
     const values = await form.validateFields();
+    if (!values.cfOnly) values.cfAuto = false;
     if (isEdit) {
       updateMutation.mutate(values);
     } else {

@@ -4,10 +4,11 @@ import { SubscriptionsController } from './subscriptions.controller';
 import { NodesModule } from '../nodes/nodes.module';
 import { AuthModule } from '../auth/auth.module';
 import { CfAccessService } from './cf-access.service';
+import { CfOptimizationService } from './cf-optimization.service';
 
 @Module({
   imports: [NodesModule, AuthModule],
-  providers: [SubscriptionsService, CfAccessService],
+  providers: [SubscriptionsService, CfAccessService, CfOptimizationService],
   controllers: [SubscriptionsController],
 })
 export class SubscriptionsModule {}

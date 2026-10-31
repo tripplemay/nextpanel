@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+cd /var/user
+export XRAY_BINARY=/var/user/xray
+exec node /var/user/server.mjs

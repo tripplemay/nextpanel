@@ -1,5 +1,9 @@
 # CF-only subscription access (China Telecom pilot)
 
+Automatic discovery and shared three-carrier subscriptions are documented in
+[`RUNBOOK-cf-auto.md`](RUNBOOK-cf-auto.md). The manual-mode behavior below remains
+supported; new automatic mode does not require entering preferred IPs.
+
 ## Boundaries
 
 This is an opt-in subscription feature, not an origin migration or a promise of

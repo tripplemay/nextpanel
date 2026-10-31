@@ -8,6 +8,7 @@ import { JwtStrategy } from '../auth/jwt.strategy';
 import { SubscriptionsController } from './subscriptions.controller';
 import { SubscriptionsService } from './subscriptions.service';
 import { CfAccessService } from './cf-access.service';
+import { CfOptimizationService } from './cf-optimization.service';
 
 describe('CF access authenticated HTTP boundary', () => {
   let app: INestApplication;
@@ -19,7 +20,10 @@ describe('CF access authenticated HTTP boundary', () => {
     domain: 'cdn.example.com', server: { ip: '192.0.2.1' }, exitType: null,
   } : null) } };
   const cf = new CfAccessService(db as any, { getCredentials: async () => ({ uuid: 'fixture' }) } as any, xray as any);
-  const subscriptions = { create: jest.fn().mockResolvedValue({ id: 'created' }), generateHomeProxyContentByShareToken: jest.fn().mockResolvedValue('{"fixture":true}') };
+  const subscriptions = { create: jest.fn().mockResolvedValue({ id: 'created' }),
+    generateCfProvider: jest.fn().mockResolvedValue('proxies: []'),
+    generateHomeProxyContentByShareToken: jest.fn().mockResolvedValue('{"fixture":true}') };
+  const optimizer = { status: jest.fn().mockResolvedValue({ enabled: false }), rollback: jest.fn().mockResolvedValue({ paused: true }), resume: jest.fn().mockResolvedValue({ paused: false }) };
   beforeAll(async () => {
     cf.defaultIp = async () => '104.16.0.1';
     const module = await Test.createTestingModule({
@@ -30,6 +34,7 @@ describe('CF access authenticated HTTP boundary', () => {
         { provide: AuthService, useValue: { validateById: async (id: string) =>
           ['owner', 'foreign', 'viewer'].includes(id) ? { id, role: id === 'viewer' ? 'VIEWER' : 'OPERATOR', tokenVersion: 0 } : null } },
         { provide: CfAccessService, useValue: cf },
+        { provide: CfOptimizationService, useValue: optimizer },
         { provide: SubscriptionsService, useValue: subscriptions },
       ],
     }).compile();
@@ -78,5 +83,20 @@ describe('CF access authenticated HTTP boundary', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('application/json');
     expect(subscriptions.generateHomeProxyContentByShareToken).toHaveBeenCalledWith('share-fixture');
+  });
+  it.each([['', 'GET', 'status'], ['/rollback', 'POST', 'rollback'], ['/resume', 'POST', 'resume']] as const)(
+    'protects optimization route %s and passes the authenticated owner', async (suffix, method, action) => {
+      const url = `${base}/subscriptions/cf-access/optimization/node${suffix}`;
+      expect((await fetch(url, { method })).status).toBe(401);
+      expect((await fetch(url, { method, headers: { Authorization: `Bearer ${jwt.sign({ sub: 'viewer' })}` } })).status).toBe(403);
+      expect((await fetch(url, { method, headers: { Authorization: `Bearer ${jwt.sign({ sub: 'owner' })}` } })).status).toBe(method === 'GET' ? 200 : 201);
+      expect(optimizer[action]).toHaveBeenCalledWith('node', 'owner');
+    });
+  it('routes dynamic provider links with their own token scope and no-store', async () => {
+    for (const [kind, tokenKey] of [['link', 'token'], ['share', 'shareToken']]) {
+      const response = await fetch(`${base}/subscriptions/${kind}/fixture/cf-provider/node`);
+      expect(response.status).toBe(200); expect(response.headers.get('cache-control')).toContain('no-store');
+      expect(subscriptions.generateCfProvider).toHaveBeenCalledWith({ [tokenKey]: 'fixture' }, 'node');
+    }
   });
 });
