@@ -1,6 +1,6 @@
 import { CfOptimizationService, boundedText, nodeFingerprint } from './cf-optimization.service';
 import { automaticVariants, allowedByRanges, discoverCandidates, fingerprint, FRESH_MS, probeRegistry,
-  rankCandidates, rangeList, updateObservations } from './cf-optimization.util';
+  rankCandidates, rangeList, regionalCandidates, updateObservations } from './cf-optimization.util';
 import { CF_IP_RANGES } from './cf-access.util';
 import { buildClashSubscription, buildFullSingboxConfig, buildHomeProxyConfig } from './uri-builder';
 import { validate } from 'class-validator';
@@ -16,19 +16,28 @@ const node = { id: 'node', userId: 'owner', name: 'Hong Kong', protocol: 'VLESS'
   enabled: true, status: 'RUNNING', server: { ip: '192.0.2.1' } };
 const exported = { ...node, host: node.domain, port: 443, credentials: { uuid: '00000000-0000-4000-8000-000000000001', path: '/ws' } };
 const observation = (ip: string, latency = 100) => ({ ip, latency, passed: 2, failed: 0, checkedAt: now });
+const guangzhou = { key: 'ap-guangzhou', label: '广州' };
+const chengdu = { key: 'ap-chengdu', label: '成都' };
+const beijing = { key: 'ap-beijing', label: '北京' };
 
-describe('bounded discovery and verified carrier attribution', () => {
-  it('accepts generic cloud probes without pretending to represent three carriers', () => {
-    expect(probeRegistry(JSON.stringify([probe]), now)[0].carrier).toBe('GENERIC');
-    expect(() => probeRegistry(JSON.stringify([{ ...probe, carrier: 'TELECOM' }]), now)).toThrow('verified egress');
-    expect(probeRegistry(JSON.stringify([{ ...probe, carrier: 'TELECOM', expectedEgressIp: '192.0.2.1', verifiedAt: new Date(now).toISOString() }]), now)).toHaveLength(1);
+describe('bounded discovery and regional attribution', () => {
+  it('preserves legacy registry fingerprints without inventing a region from names', () => {
+    expect(probeRegistry(JSON.stringify([probe]))).toEqual([probe]);
+    expect(probeRegistry(JSON.stringify([{ ...probe, carrier: 'TELECOM' }]))[0].regionKey).toBeUndefined();
+    expect(probeRegistry(JSON.stringify([{ ...probe, regionKey: guangzhou.key, region: guangzhou.label }]))[0].regionKey).toBe(guangzhou.key);
   });
   it.each([
     { url: 'http://probe.example.com' }, { url: 'https://user:password@probe.example.com' }, { url: 'https://probe.example.com?token=secret' },
     { tokenEnv: '../secret' }, { carrier: 'FAKE' }, { region: '' },
-    { carrier: 'TELECOM', expectedEgressIp: '192.0.2.1', verifiedAt: '2020-01-01' },
-  ])('rejects unsafe or unverified registry entry %j', override => {
-    expect(() => probeRegistry(JSON.stringify([{ ...probe, ...override }]), now)).toThrow();
+    { regionKey: 'ap-guangzhou|DNS' }, { regionKey: 'guangzhou' }, { region: '广州[CF:DNS]' },
+    { expectedEgressIp: 'hostname' }, { nodeIds: ['node', 'node'] }, { nodeIds: 'node' },
+  ])('rejects unsafe registry entry %j', override => {
+    expect(() => probeRegistry(JSON.stringify([{ ...probe, ...override }]))).toThrow();
+  });
+  it('requires consistent labels for a region and accepts an explicitly empty pilot scope', () => {
+    expect(() => probeRegistry(JSON.stringify([{ ...probe, regionKey: guangzhou.key }, { ...probe, id: 'second', regionKey: guangzhou.key, region: 'other' }]))).toThrow('labels');
+    expect(() => probeRegistry(JSON.stringify([{ ...probe, regionKey: guangzhou.key }, { ...probe, id: 'second', regionKey: chengdu.key }]))).toThrow('Duplicate');
+    expect(probeRegistry(JSON.stringify([{ ...probe, nodeIds: [] }]))[0].nodeIds).toEqual([]);
   });
   it('bounds discovery and rotates it without exceeding approved CF ranges', () => {
     const a = discoverCandidates(CF_IP_RANGES, 'epoch-1', ['104.16.0.2', '192.0.2.1'], ['104.16.0.1']);
@@ -81,9 +90,9 @@ describe('candidate promotion, expiry and failover', () => {
   });
 });
 
-describe('one subscription, three carrier groups and dynamic providers', () => {
+describe('one subscription, regional groups and dynamic providers', () => {
   const variants = automaticVariants(exported, node.id, [
-    { carrier: 'TELECOM', ips: ['104.16.0.1'] }, { carrier: 'UNICOM', ips: ['104.17.0.1'] }, { carrier: 'MOBILE', ips: ['104.18.0.1'] },
+    { region: guangzhou, ips: ['104.16.0.1'] }, { region: chengdu, ips: ['104.17.0.1'] }, { region: beijing, ips: ['104.18.0.1'] },
   ], '104.16.0.2');
   it('keeps origin identity separate from the dialed CF IP', () => {
     expect(variants).toHaveLength(4);
@@ -93,9 +102,10 @@ describe('one subscription, three carrier groups and dynamic providers', () => {
     }
     expect(JSON.stringify(variants.map(({ server: _server, ...v }: any) => v))).not.toContain('192.0.2.1');
   });
-  it('exports carrier aliases and automatic selection instead of ordered fallback', () => {
+  it('exports regional aliases and automatic selection instead of ordered fallback', () => {
     const config = buildClashSubscription(variants, 'https://panel.example.com');
-    expect(config).toContain('电信优选'); expect(config).toContain('联通优选'); expect(config).toContain('移动优选');
+    expect(config).toContain('广州云测优选'); expect(config).toContain('成都云测优选'); expect(config).toContain('北京云测优选');
+    expect(config).not.toMatch(/电信优选|联通优选|移动优选/);
     expect(config).not.toContain('type: fallback'); expect(config).toContain('tolerance: 50');
     expect(config.slice(config.indexOf('proxy-groups:'), config.indexOf('  - name: 🚀'))).not.toContain('DIRECT');
   });
@@ -106,25 +116,40 @@ describe('one subscription, three carrier groups and dynamic providers', () => {
     expect(config).toContain('proxies: []'); expect(config).toContain('use: [cf-node]');
     expect(() => buildClashSubscription(variants, 'http://panel.example.com', 'http://panel.example.com/provider')).toThrow('HTTPS');
   });
-  it.each([buildFullSingboxConfig, buildHomeProxyConfig])('exports all carriers without direct selector fallback', builder => {
+  it.each([buildFullSingboxConfig, buildHomeProxyConfig])('exports all regions without direct selector fallback', builder => {
     const config = JSON.parse(builder(variants));
     const groups = config.outbounds.filter((o: any) => o.type === 'urltest' || o.type === 'selector');
     expect(groups.every((g: any) => !g.outbounds.includes('direct'))).toBe(true);
-    expect(groups.some((g: any) => g.tag.includes('电信优选'))).toBe(true);
+    expect(groups.some((g: any) => g.tag.includes('广州云测优选'))).toBe(true);
   });
   it('never invents measured carrier aliases from a generic cloud probe', () => {
-    const generic = automaticVariants(exported, 'node', [{ carrier: 'GENERIC', ips: ['104.16.0.1'] }], '104.16.0.2');
-    expect(generic.map(n => n.cfCarrier)).toEqual(['GENERIC', 'DNS']);
+    const generic = automaticVariants(exported, 'node', [{ ips: ['104.16.0.1'] }], '104.16.0.2');
+    expect(generic.map(n => n.cfProfile)).toEqual(['GENERIC', 'DNS']);
     expect(generic.some(n => /电信|移动|联通/.test(n.name))).toBe(false);
   });
-  it('retains generic fallback alongside partial carrier coverage without DNS', () => {
+  it('retains generic fallback alongside partial regional coverage without DNS', () => {
     const mixed = automaticVariants(exported, 'node', [
-      { carrier: 'TELECOM', ips: ['104.16.0.1'] }, { carrier: 'GENERIC', ips: ['104.17.0.1'] },
-    ], null);
-    expect(mixed.map(n => n.cfCarrier)).toEqual(['TELECOM', 'GENERIC']);
+      { region: guangzhou, ips: ['104.16.0.1'] }, { ips: ['104.17.0.1'] },
+    ], null, [guangzhou, chengdu]);
+    expect(mixed.map(n => n.cfProfile)).toEqual(['REGION:ap-guangzhou', 'GENERIC']);
     const config = buildClashSubscription(mixed, 'https://panel.example.com');
     expect(config).toContain(mixed[1].name);
-    expect(mixed.some(n => /联通|移动/.test(n.name))).toBe(false);
+    const singbox = JSON.parse(buildFullSingboxConfig(mixed));
+    expect(singbox.outbounds.find((g: any) => g.tag.endsWith('成都云测优选')).outbounds).toEqual([mixed[1].name]);
+  });
+  it('keeps old cached carrier-era filters working until full subscription refresh', () => {
+    for (const carrier of ['TELECOM', 'UNICOM', 'MOBILE']) {
+      expect(variants.every(n => new RegExp(`\\[CF:(${carrier}|GENERIC|DNS)\\]$`).test(n.name))).toBe(true);
+    }
+  });
+  it('ranks within each region by probe coverage and local ranks, not lowest remote latency', () => {
+    const results = regionalCandidates([
+      { region: guangzhou, observations: [observation('104.16.0.1', 200), observation('104.16.0.2', 300)] },
+      { region: guangzhou, observations: [observation('104.16.0.3', 1), observation('104.16.0.1', 2)] },
+      { region: chengdu, observations: [observation('104.16.0.4', 500)] },
+    ], [guangzhou, chengdu]);
+    expect(results[0].ips[0]).toBe('104.16.0.1');
+    expect(results[1].ips).toEqual(['104.16.0.4']);
   });
 });
 
@@ -185,8 +210,45 @@ describe('optimization service boundaries', () => {
     await expect(service.rollback('foreign', 'owner')).rejects.toThrow('Node not found');
     expect(db.cfOptimization.findMany).not.toHaveBeenCalled();
   });
+  it('schedules a regional pilot only for its registered nodes at the configured interval', async () => {
+    process.env.CF_OPTIMIZATION_ENABLED = 'true'; delete process.env.CF_OPTIMIZATION_LOW_BUDGET;
+    process.env.CF_OPTIMIZATION_INTERVAL_MINUTES = '15';
+    const pilot = { ...probe, id: 'chengdu', regionKey: chengdu.key, region: chengdu.label, nodeIds: ['node'] };
+    process.env.CF_OPTIMIZATION_PROBES = JSON.stringify([pilot]);
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now);
+    jest.spyOn(service, 'syncRanges').mockResolvedValue();
+    const measure = jest.spyOn(service, 'measure').mockResolvedValue();
+    db.node.findMany.mockResolvedValue([node, { ...node, id: 'not-in-pilot' }].map(n => ({ ...n,
+      subscriptionNodes: [{ subscription: { ownerId: 'owner', cfOnly: true, cfProtectedNodeIds: [] } }] })));
+    db.cfOptimizationState.deleteMany = jest.fn();
+    await service.tick(); expect(measure).toHaveBeenCalledTimes(1);
+    expect(measure).toHaveBeenCalledWith(expect.objectContaining({ id: 'node' }), pilot);
+    for (const minutes of [5, 10]) { clock.mockReturnValue(now + minutes * 60_000); await service.tick(); }
+    expect(measure).toHaveBeenCalledTimes(1);
+    clock.mockReturnValue(now + 15 * 60_000); await service.tick(); expect(measure).toHaveBeenCalledTimes(2);
+    process.env.CF_OPTIMIZATION_INTERVAL_MINUTES = '0'; await service.tick(); expect(measure).toHaveBeenCalledTimes(2);
+  });
+  it('reports regional freshness and shared quota without making a cloud request', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    process.env.CF_OPTIMIZATION_LOW_BUDGET = 'true'; process.env.CF_OPTIMIZATION_MAX_MONTHLY_BATCHES = '200';
+    const regional = { ...probe, regionKey: guangzhou.key, region: guangzhou.label };
+    process.env.CF_OPTIMIZATION_PROBES = JSON.stringify([regional, { ...regional, id: 'chengdu', regionKey: chengdu.key, region: chengdu.label }]);
+    const identity = fingerprint([nodeFingerprint(node), fingerprint([regional, fingerprint('f'.repeat(32))])]);
+    db.node.findFirst.mockResolvedValue(node);
+    db.cfOptimization.findMany.mockResolvedValue([{ probeId: probe.id, fingerprint: identity, checkedAt: new Date(now), published: [observation('104.16.0.1')] }]);
+    db.cfOptimizationState.findUnique.mockImplementation(async ({ where }: any) => where.key === 'monthly:2026-10' ? { value: { batches: 24 } } : null);
+    const remote = jest.spyOn(global, 'fetch');
+    const result = await service.status(node.id, 'owner');
+    expect(result.missingRegions).toEqual([chengdu.key]);
+    expect(result.budget).toMatchObject({ used: 24, remaining: 176, estimatedMonthlyBatchesPerNode: 360, constrained: true });
+    expect(result.profiles.map(p => p.regionKey)).toEqual([guangzhou.key, chengdu.key]);
+    expect(remote).not.toHaveBeenCalled();
+    db.cfOptimization.findMany.mockResolvedValue([{ probeId: probe.id, fingerprint: identity, checkedAt: new Date(now), published: [observation('192.0.2.1')] }]);
+    expect((await service.status(node.id, 'owner')).missingRegions).toEqual([guangzhou.key, chengdu.key]);
+  });
   it('schedules mixed protected CF nodes only, excluding ordinary and foreign nodes', async () => {
     process.env.CF_OPTIMIZATION_ENABLED = 'true'; delete process.env.CF_OPTIMIZATION_LOW_BUDGET;
+    jest.spyOn(Date, 'now').mockReturnValue(now);
     jest.spyOn(service, 'syncRanges').mockResolvedValue();
     const measure = jest.spyOn(service, 'measure').mockResolvedValue();
     db.cfOptimizationState.deleteMany = jest.fn();
@@ -197,24 +259,36 @@ describe('optimization service boundaries', () => {
     expect(db.node.findMany.mock.calls[0][0].where.subscriptionNodes.some.subscription).toEqual({ cfAuto: true });
   });
   it('uses default CF only without any valid measured snapshots', async () => {
-    expect((await service.variants(exported, node, '104.16.0.2')).map(n => n.cfCarrier)).toEqual(['DNS']);
+    expect((await service.variants(exported, node, '104.16.0.2')).map(n => n.cfProfile)).toEqual(['DNS']);
     expect(await service.variants(exported, node, '192.0.2.1')).toEqual([]);
   });
   it('drops snapshots from old credentials, probe configurations or removed ranges', async () => {
-    db.cfOptimization.findMany.mockResolvedValue([{ probeId: probe.id, fingerprint: 'old', checkedAt: new Date(), carrier: 'TELECOM', published: [observation('104.16.0.1')] }]);
+    db.cfOptimization.findMany.mockResolvedValue([{ probeId: probe.id, fingerprint: 'old', checkedAt: new Date(), profile: 'REGION:ap-guangzhou', published: [observation('104.16.0.1')] }]);
     expect(await service.variants(exported, node, null)).toEqual([]);
     expect(nodeFingerprint(node)).not.toBe(nodeFingerprint({ ...node, credentialsEnc: 'rotated' }));
   });
   it('publishes only real configured probe identities and marks expired data generic', async () => {
     const time = Date.now();
-    const carrierProbe = { ...probe, carrier: 'TELECOM', expectedEgressIp: '192.0.2.1', verifiedAt: new Date(time).toISOString() };
-    process.env.CF_OPTIMIZATION_PROBES = JSON.stringify([carrierProbe]);
-    const identity = fingerprint([nodeFingerprint(node), fingerprint([carrierProbe, fingerprint('f'.repeat(32))])]);
-    db.cfOptimization.findMany.mockResolvedValue([{ probeId: probe.id, fingerprint: identity, checkedAt: new Date(time - FRESH_MS - 1), carrier: 'TELECOM',
+    const regionalProbe = { ...probe, regionKey: guangzhou.key, region: guangzhou.label };
+    process.env.CF_OPTIMIZATION_PROBES = JSON.stringify([regionalProbe]);
+    const identity = fingerprint([nodeFingerprint(node), fingerprint([regionalProbe, fingerprint('f'.repeat(32))])]);
+    db.cfOptimization.findMany.mockResolvedValue([{ probeId: probe.id, fingerprint: identity, checkedAt: new Date(time - FRESH_MS - 1), profile: 'REGION:ap-guangzhou',
       published: [{ ...observation('104.16.0.1'), checkedAt: time }] }]);
-    expect((await service.variants(exported, node, null))[0].cfCarrier).toBe('GENERIC');
-    db.cfOptimization.findMany.mockResolvedValue([{ probeId: probe.id, fingerprint: identity, checkedAt: new Date(time - 25 * 3600_000), carrier: 'TELECOM',
+    expect((await service.variants(exported, node, null))[0].cfProfile).toBe('GENERIC');
+    db.cfOptimization.findMany.mockResolvedValue([{ probeId: probe.id, fingerprint: identity, checkedAt: new Date(time - 25 * 3600_000), profile: 'REGION:ap-guangzhou',
       published: [{ ...observation('104.16.0.1'), checkedAt: time }] }]);
+    expect(await service.variants(exported, node, null)).toEqual([]);
+  });
+  it('excludes out-of-scope probes and identity failures even with recently published records', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    const identity = fingerprint([nodeFingerprint(node), fingerprint([probe, fingerprint('f'.repeat(32))])]);
+    const row = { probeId: probe.id, fingerprint: identity, checkedAt: new Date(now), published: [observation('104.16.0.1')] };
+    db.cfOptimization.findMany.mockResolvedValue([row]);
+    expect((await service.variants(exported, node, null))[0].cfProfile).toBe('GENERIC');
+    db.cfOptimization.findMany.mockResolvedValue([{ ...row, error: 'PROBE_IDENTITY_OR_CAPABILITY_MISMATCH' }]);
+    expect(await service.variants(exported, node, null)).toEqual([]);
+    process.env.CF_OPTIMIZATION_PROBES = JSON.stringify([{ ...probe, nodeIds: [] }]);
+    db.cfOptimization.findMany.mockResolvedValue([row]);
     expect(await service.variants(exported, node, null)).toEqual([]);
   });
 });
@@ -354,5 +428,23 @@ describe('probe to publication pipeline', () => {
     expect(requests).toHaveLength(0);
     delete process.env.FIXTURE_CF_TOKEN; remote.mockClear();
     await service.measure(node as any, probe); expect(remote).not.toHaveBeenCalled();
+  });
+  it('requires the same cloud deployment region in capabilities and batch results', async () => {
+    const regional = { ...probe, regionKey: chengdu.key, region: chengdu.label };
+    let capabilityRegion = guangzhou.key; let batchRegion = chengdu.key;
+    remote.mockImplementation(async (_url, options) => {
+      if (!options?.body) return new Response(JSON.stringify({ protocol: 2, probeId: probe.id, features: ['vless-ws-tls'], regionKey: capabilityRegion, networkType: 'CLOUD' }));
+      const body = JSON.parse(options.body); requests.push(body);
+      return new Response(JSON.stringify({ protocol: 2, probeId: probe.id, regionKey: batchRegion, networkType: 'CLOUD',
+        results: body.ips.map((ip: string) => ({ ip, ok: true, latency: 50 })) }));
+    });
+    await service.measure(node as any, regional);
+    expect(row.error).toBe('PROBE_IDENTITY_OR_CAPABILITY_MISMATCH'); expect(requests).toHaveLength(0);
+    capabilityRegion = chengdu.key; batchRegion = guangzhou.key;
+    await service.measure(node as any, regional); expect(row.error).toBe('INVALID_PROBE_RESULT');
+    batchRegion = chengdu.key;
+    await service.measure(node as any, regional);
+    clock.mockReturnValue(now + 15 * 60_000); await service.measure(node as any, regional);
+    expect(row.profile).toBe('REGION:ap-chengdu'); expect(row.error).toBeNull(); expect(row.published.length).toBeGreaterThan(0);
   });
 });

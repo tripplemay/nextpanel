@@ -175,8 +175,12 @@ async function egressIp() {
   } catch { return null; }
 }
 
-export function createProbeServer({ token, id, test = probeOne, lookupEgress = egressIp, checkRuntime = runtimeAvailable }) {
+export function createProbeServer({ token, id, regionKey = process.env.TENCENTCLOUD_REGION ?? process.env.CF_PROBE_REGION,
+  test = probeOne, lookupEgress = egressIp, checkRuntime = runtimeAvailable }) {
   if (typeof token !== 'string' || token.length < 32 || !/^[a-z0-9-]{1,40}$/.test(id)) throw new Error('A strong CF_PROBE_TOKEN and CF_PROBE_ID are required');
+  if (regionKey !== undefined && (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(regionKey) || regionKey.length > 40)) throw new Error('Invalid probe region');
+  if (process.env.TENCENTCLOUD_REGION && regionKey !== process.env.TENCENTCLOUD_REGION) throw new Error('Probe region conflicts with SCF deployment');
+  if (process.env.TENCENTCLOUD_REGION && process.env.CF_PROBE_REGION && process.env.TENCENTCLOUD_REGION !== process.env.CF_PROBE_REGION) throw new Error('Probe region conflicts with SCF deployment');
   let busy = false; let minute = 0; let calls = 0;
   return http.createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store');
@@ -188,7 +192,7 @@ export function createProbeServer({ token, id, test = probeOne, lookupEgress = e
     if (!await checkRuntime()) return send(503, { error: 'PROBE_RUNTIME_UNAVAILABLE' });
     if (req.method === 'GET' && req.url === '/capabilities') return send(200, {
       protocol: 2, probeId: id, egressIp: await lookupEgress(), features: ['vless-ws-tls', 'bounded-download'],
-      carrier: 'UNVERIFIED', maxCandidates: 8, runtime: { ...runtimeVersions },
+      regionKey: regionKey ?? null, networkType: 'CLOUD', maxCandidates: 8, runtime: { ...runtimeVersions },
     });
     if (req.method !== 'POST' || req.url !== '/probe') return send(404, { error: 'NOT_FOUND' });
     if (busy) return send(429, { error: 'BUSY' });
@@ -205,7 +209,7 @@ export function createProbeServer({ token, id, test = probeOne, lookupEgress = e
           results.push(await test(body, ip, abort.signal)); }
       }));
       if (results.some(r => r.error)) return send(503, { error: 'PROBE_RUNTIME_UNAVAILABLE' });
-      send(200, { protocol: 2, probeId: id, egressIp: await lookupEgress(), results });
+      send(200, { protocol: 2, probeId: id, regionKey: regionKey ?? null, networkType: 'CLOUD', egressIp: await lookupEgress(), results });
     } catch { send(400, { error: 'INVALID_OR_ABORTED_BATCH' }); }
     finally { clearTimeout(timer); busy = false; }
   });

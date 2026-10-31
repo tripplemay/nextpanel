@@ -14,7 +14,7 @@ export async function verifyUsage({ prisma, cipher, require, root, databaseUrl }
     await prisma.subscriptionShare.create({ data: { id: 'usage-share', subscriptionId: 'usage-sub', userId: 'usage-viewer', shareToken: 'usage-share-token' } });
     await assert.rejects(service.setEnabled('usage-sub', 'usage-viewer', true));
     await service.setEnabled('usage-sub', 'owner', true);
-    const variant = { name: 'CF generic 1', protocol: 'VLESS', tls: 'TLS', transport: 'WS', host: '104.16.0.1', domain: 'cdn.example.com', port: 443, cfCarrier: 'GENERIC', credentials: { uuid: 'legacy', transportHost: 'cdn.example.com' } };
+    const variant = { name: 'CF generic 1', protocol: 'VLESS', tls: 'TLS', transport: 'WS', host: '104.16.0.1', domain: 'cdn.example.com', port: 443, cfProfile: 'GENERIC', credentials: { uuid: 'legacy', transportHost: 'cdn.example.com' } };
     const grant = { subscriptionId: 'usage-sub', ownerId: 'owner', subjectUserId: 'owner', grantId: 'owner', token: 'usage-owner-token' };
     const share = { ...grant, subjectUserId: 'usage-viewer', grantId: 'usage-share', token: 'usage-share-token' };
     assert.deepEqual(await service.decorate('usage-node', grant, [variant]), [variant]);
@@ -95,6 +95,18 @@ export async function verifyUsage({ prisma, cipher, require, root, databaseUrl }
       assert.equal((await service.decorate('usage-node', grant, [variant]))[0].credentials.uuid, cipher.decrypt(fresh[0].uuidEnc));
     }
     assert.equal((await service.history(id, 'owner')).reduce((sum, b) => sum + Number(b.upBytes), 0), 1000, 'renewal preserves old identity history');
+    const generic = await prisma.usageCredential.findFirstOrThrow({ where: { nodeId: 'usage-node', grantId: 'owner', revokedAt: null, profile: 'GENERIC' } });
+    const regional = { ...variant, name: 'Chengdu candidate', cfProfile: 'REGION:ap-chengdu', cfRegion: { key: 'ap-chengdu', label: '成都' } };
+    assert.deepEqual(await service.decorate('usage-node', grant, [regional]), [regional], 'new regional identities wait for server installation');
+    const added = await prisma.usageCredential.findFirstOrThrow({ where: { nodeId: 'usage-node', profile: 'REGION:ap-chengdu' } });
+    assert.notEqual(added.uuidEnc, generic.uuidEnc);
+    await prisma.usageCredential.update({ where: { id: added.id }, data: { installedAt: new Date() } });
+    assert.equal((await service.decorate('usage-node', grant, [regional]))[0].credentials.uuid, cipher.decrypt(added.uuidEnc));
+    assert.equal((await service.overview('owner', 'usage-sub')).rows.find(r => r.id === added.id).profile, 'REGION:ap-chengdu');
+    await service.revokeInvalidGrants('usage-node');
+    const retained = await prisma.usageCredential.findUniqueOrThrow({ where: { id: generic.id } });
+    assert.equal(retained.revokedAt, null); assert.equal(retained.uuidEnc, generic.uuidEnc, 'regional migration must not revoke cached client credentials');
+    assert.equal((await service.history(id, 'owner')).reduce((sum, b) => sum + Number(b.upBytes), 0), 1000);
     process.env.USAGE_OBSERVATION_ENABLED = 'false';
     assert.deepEqual(await service.decorate('usage-node', grant, [variant]), [variant]);
   } finally {

@@ -2,7 +2,7 @@ export type UsageStatus = 'ACTIVE' | 'IDLE' | 'STALE' | 'PENDING' | 'PAUSED' | '
 export interface UsageRow {
   id: string; subscriptionId: string; subscriptionName: string;
   subjectId: string; subjectName: string; grantKind: 'OWNER' | 'SHARE';
-  nodeId: string; nodeName: string; candidateIp: string; carrier: string; label: string;
+  nodeId: string; nodeName: string; candidateIp: string; profile: string; label: string;
   status: UsageStatus; sampledAt: string | null; lastActiveAt: string | null; installedAt: string | null;
   upRate: number | null; downRate: number | null; evidence: 'SERVER_CREDENTIAL'; actualEdgeIp: null;
 }

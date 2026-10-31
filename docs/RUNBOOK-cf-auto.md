@@ -1,4 +1,4 @@
-# Automatic CF candidates and shared carrier subscriptions
+# Automatic CF candidates and shared regional subscriptions
 
 ## Scope and compatibility
 
@@ -39,7 +39,9 @@ measure CF/VLESS availability or represent three mainland carriers.
 
 - `CF_OPTIMIZATION_ENABLED=true` enables the scheduler; absent/false is off.
 - One PostgreSQL session lock serializes cycles and rollbacks across app replicas.
-  Every five minutes, active auto-enabled nodes are visited oldest-attempt-first.
+  The cron wakes every five minutes; `CF_OPTIMIZATION_INTERVAL_MINUTES` selects
+  a 5/10/15/20/30-minute UTC-aligned interval (default 5, invalid values stop work).
+  Active auto-enabled nodes are visited oldest-attempt-first.
   A cycle stops starting new batches after three minutes; the current batch is
   bounded by its own timeout. Failures back off 5/10/20/40/60 minutes. Request-quota
   exhaustion waits until the next UTC day. Failed workers retain last good data.
@@ -50,7 +52,7 @@ measure CF/VLESS availability or represent three mainland carriers.
   hours, plus current candidates and validated default DNS. This is bounded
   sampling, **not** an exhaustive scan or proof of globally fastest IP. No IPv6
   brute force; only existing/default IPv6 candidates can be checked.
-- At most eight candidates/batch and three published endpoints/carrier/node.
+- At most eight candidates/batch and three published endpoints/probe/node.
   Two recent consecutive successes promote; two failures remove an incumbent
   and cool it down six hours. Small changes do not churn a full pool: a challenger
   must improve by over 20%. Latency is used unless comparable recent throughput
@@ -61,12 +63,12 @@ measure CF/VLESS availability or represent three mainland carriers.
   exhaustion still permits health checks. Failed reservations are not refunded.
   TLS/control traffic and connectivity responses are extra, so this is not a
   total egress/billing ceiling. Provision and monitor cloud limits separately.
-- Results older than 30 minutes lose carrier attribution and may be used only
+- Results older than 30 minutes lose regional attribution and may be used only
   as generic candidates. After 24 hours they are omitted. Bad worker identity,
   changed node credentials/config, removed probes or non-CF addresses cannot be
   republished from old snapshots. Candidate tests do not update node health.
 
-## Probe registry and honest carrier attribution
+## Probe registry and honest regional attribution
 
 ### CNY 10/month pilot controls
 
@@ -81,8 +83,8 @@ Low-budget mode visits nodes only at UTC 00:00/00:05, 08:00/08:05 and
 16:00/16:05. This pairs promotion checks while reducing scheduled cloud work to
 six batches/day for one node/probe. It is **not** continuous five-minute server
 refresh. Client provider/health-check intervals remain unchanged, as do the
-30-minute attribution and 24-hour hard expiry rules. Use a GENERIC cloud probe;
-this cadence is not an accepted three-carrier measurement service.
+30-minute attribution and 24-hour hard expiry rules. This old pilot cadence is
+not suitable for continuously fresh regional rankings.
 
 The UTC-month ceiling is global across all nodes/probes. Each reservation is
 durable and serialized by a separate PostgreSQL lock **before /capabilities**;
@@ -96,10 +98,10 @@ to retry or remove the cap without reviewing the budget.
 SCF settings: 512 MB, 120-second execution timeout, 65-second initialization
 timeout, one maximum concurrency, no provisioned instances, no CLS delivery,
 0.5 GB temporary storage. At the current published Web runtime price of
-CNY 0.00011108/GB-second, conservatively reserving two full 185-second calls per
-batch gives `200 * 2 * 185 * 0.5 * 0.00011108 = CNY 4.10996` of runtime allowance.
-Invocation, network/response traffic, manual checks and contingency must fit the
-remaining budget. Do not assume a free tier. See the
+CNY 0.00011108/GB-second, the former allowance used two full 185-second calls per
+batch: `200 * 2 * 185 * 0.5 * 0.00011108 = CNY 4.10996`. This is a conservative
+timeout allowance, NOT an expected bill. Observed billing is substantially lower;
+see [the settled-sample cost assessment](CF-PROBE-BUDGET.md). Do not assume a free tier. See the
 [official SCF prices](https://cloud.tencent.com/document/product/583/12281).
 
 **This is not a provider-enforced CNY 10 billing cap.** Application authentication
@@ -111,12 +113,36 @@ ceiling is required, keep scheduling off until a provider-side spend cutoff is
 available and verified. No guarantee of a fastest IP or three real ISP exits is
 made under this low-budget cloud pilot.
 
+### Approved Guangzhou + Chengdu release target
+
+The 2026-11-01 decision approves two regions, four existing compatible nodes,
+15-minute probing and CNY 30/month. These are **release target settings**, not
+evidence they have already been applied to production:
+
+```dotenv
+CF_OPTIMIZATION_LOW_BUDGET=false
+CF_OPTIMIZATION_INTERVAL_MINUTES=15
+CF_OPTIMIZATION_MAX_MONTHLY_BATCHES=25000
+```
+
+Normal demand is 23,040 batches/30 days or 23,808/31 days. The 25,000 global cap
+includes failures and manual reservations, not 25,000 per probe or subscription.
+The UI reports used/remaining quota and per-node scheduled demand. Regional
+freshness stays 30 minutes; selecting a 30-minute interval risks jitter breaking
+consecutive-success promotion. Fifteen minutes leaves confirmation headroom.
+The monetary budget is not a provider-enforced cutoff: review the first 24/48-hour
+bills, alert before CNY 20/25, and pause this probe workload before CNY 30. Do not
+freeze the unrelated `gfw-check` function. No billing alarm is created by code.
+
 ### Registry
 
 `CF_OPTIMIZATION_PROBES` is administrator-managed JSON (maximum nine probes):
 
 ```json
-[{"id":"guangzhou-cloud","url":"https://PROBE_HOST","tokenEnv":"CF_GUANGZHOU_PROBE_TOKEN","carrier":"GENERIC","region":"Guangzhou cloud"}]
+[
+  {"id":"guangzhou-cloud","url":"https://GUANGZHOU_PROBE_HOST","tokenEnv":"CF_GUANGZHOU_PROBE_TOKEN","regionKey":"ap-guangzhou","region":"广州"},
+  {"id":"chengdu-cloud","url":"https://CHENGDU_PROBE_HOST","tokenEnv":"CF_CHENGDU_PROBE_TOKEN","regionKey":"ap-chengdu","region":"成都"}
+]
 ```
 
 Inject a separate random 32+ character token into the referenced panel environment
@@ -124,41 +150,54 @@ variable and the worker's `CF_PROBE_TOKEN`. URLs must be HTTPS without embedded
 credentials/query/fragment. Never put a token/UUID/subscription URL in Git or
 screenshots. See `scripts/cf-probe/README.md` for the separate image package.
 
-Initially reuse the existing Tencent account/Guangzhou region as a **generic**
-measurement environment with a separate v2 function. Do not overwrite `gfw-check`
+Reuse the existing Tencent account/Guangzhou function and add a separate Chengdu
+v2 Web function. Do not overwrite `gfw-check`
 or change `GFW_CHECK_FUNCTION_URL`. The existing 128 MB / 15 s event function is
 not the proposed v2 runtime.
 
-Only after verifying the actual egress circuit, operator and region may a probe
-use `TELECOM`, `UNICOM` or `MOBILE`. Add `expectedEgressIp` and `verifiedAt` (ISO,
-no older than 30 days); retain operator/circuit evidence privately. The panel
-requires matching live egress from both capability and result responses. It does
-not infer three operators from a city or a cloud account. A cloud/IDC ASN alone
-does not establish residential-carrier representativeness. Revalidate after
-egress changes and monthly; expired evidence fails closed until corrected.
+`regionKey` is the deployment-region identity, not a carrier, user location, or
+Cloudflare POP. The worker reports SCF's built-in `TENCENTCLOUD_REGION`; an
+explicit `CF_PROBE_REGION` must agree. Both capability and result responses must
+match the registered key and `networkType=CLOUD` before publication. An optional
+`expectedEgressIp` adds an exact egress check but does not establish residential
+network representativeness. Never infer region from a URL, probe ID or ASN.
 
-To genuinely provide three-carrier optimized endpoints, add verified exits on
-those three carriers (preferably actual user access environments). Reusing a
-single default cloud egress cannot fabricate these exits. The UI lists missing
-carriers; missing groups fall back only to generic/default CF endpoints, not to
-an allegedly measured carrier IP.
+Optional `nodeIds` limits a probe to explicit managed nodes for a bounded pilot;
+an empty list disables its scope. Omitted means all eligible nodes. A node's
+exports/status show only probes in its scope. Keys must be safe stable slugs;
+labels for the same key must agree. Probe/token/config changes invalidate old
+snapshots; upgrade the worker before registering a regional identity.
+
+Legacy registry objects remain accepted without rewriting their fingerprints.
+Without `regionKey`, results are GENERIC regardless of old `carrier` fields.
+Multiple probes in one region are aggregated by low failures, probe coverage
+and normalized local rank; raw latency is not compared across regions. Missing
+regions use only safe generic/default CDN fallback, never another region falsely
+relabeled as local. The all-region group lets each client test all candidates.
 
 ## Subscription updates
 
-- Up to three aliases per measured carrier and three generic fallback aliases,
-  plus one validated default CF address; maximum thirteen endpoints per original
-  node. UUID, SNI, WS Host/path stay unchanged. Partial carrier coverage never
-  removes safe generic candidates from the other carrier groups.
-- One subscription includes all measured carriers. Clash/Mihomo provides a
-  per-node all-carrier URLTest group and telecom/unicom/mobile subgroups. Clients
-  may use the all-carrier group to choose locally without maintaining separate
-  subscriptions. These groups do not infer the user's ISP.
+- Up to three aliases per measured region and three generic fallback aliases,
+  plus one validated default CF address; at most 31 endpoints for nine regions
+  per original node. SNI, WS Host/path and CDN protection stay unchanged.
+  Partial coverage never removes safe generic candidates from missing regions.
+- One subscription includes all measured regions. Clash/Mihomo provides a
+  per-node all-region URLTest group and configured-region subgroups, including
+  pending regions. These groups do not infer the user's region or ISP.
+  Names include `[CF-REGION:ap-chengdu]`. The old terminal `[CF:GENERIC]`/`[CF:DNS]`
+  marker is retained so cached carrier-era filters keep receiving safe candidates.
+  New regional filters also accept the exact pre-regional generic/default-CDN
+  name suffixes, so a rollback to the previous auto-CF build can still supply
+  safe fallback without immediately refreshing every client. They do not match
+  another new region merely because its terminal marker says GENERIC.
+  A **full subscription refresh** is required to replace the old group topology;
+  refreshing only the HTTP provider cannot rename downloaded groups.
 - Clash/Mihomo refreshes one scoped HTTP proxy-provider per node every 15 minutes
   and probes every five minutes. Provider URLs retain owner/share token scope;
   deleting a share or rotating its applicable token blocks future fetches.
   Empty provider groups explicitly contain REJECT, never an origin/DIRECT fallback.
   Still-authorized providers with no eligible endpoints return a `type: reject`
-  sentinel with HTTP 200 to clear old entries. Its name matches no carrier filter,
+  sentinel with HTTP 200 to clear old entries. Its name matches no regional filter,
   leaving every group on REJECT. Mihomo rejects a literal zero-proxy HTTP update,
   so `proxies: []` alone would incorrectly retain the previous cached endpoints.
 - Provider fetches use DIRECT to the **HTTPS panel control endpoint**, not to the
@@ -174,6 +213,16 @@ an allegedly measured carrier IP.
 
 ## Release / rollback checklist
 
+The regional refactor uses Prisma `profile @map("carrier")` for optimization
+snapshots and usage credentials: **no physical column rename, data rewrite or
+token rotation**. Legacy GENERIC/DNS credential keys remain stable. New regional
+profiles create separate usage UUIDs only when observation is enabled; they are
+published after server synchronization. Old UUIDs/history are not revoked by
+this rename. Historical carrier profiles are shown as unclassified historical
+candidates, never retroactively labeled as regional evidence. Deprecated API
+`carrier=GENERIC` and `missingCarriers=[]` remain temporarily for loaded old admin
+pages; new UI/code uses `profile`, `regions` and `missingRegions`.
+
 1. Backup and record release; apply additive migration and matching generated
    Prisma/server/web code through the existing release pipeline. Leave scheduling
    disabled and existing subscriptions unchanged initially.
@@ -181,13 +230,15 @@ an allegedly measured carrier IP.
    Authorize new SCF resources, HTTPS access policy, secrets and resource budgets
    before deployment. Test unauthenticated 401, malformed/private input rejection,
    identity, timeout, cleanup and one actual E2E path. Do not log request secrets.
-3. Register only the verified generic probe first. Enable one pilot subscription
+3. Upgrade Guangzhou and verify both regions' identities before registration.
+   Initially scope Chengdu to one node with `nodeIds`, then expand only after two
+   successes and budget validation. Enable one pilot subscription
    and scheduler. Observe at least two successful measurements and bounded quotas.
    Confirm old GFW POST detection and ordinary subscriptions still work.
 4. Validate desktop/mobile exports, provider refresh, complete CF outage rejection,
-   unknown carrier display and the existing origin-secrecy audit in
+   pending/missing regional coverage and the existing origin-secrecy audit in
    `RUNBOOK-cf-access.md`. Use actual mainland peak/off-peak testing for 24-48 hours
-   before calling an ISP ranking accepted. Local fixtures are not that acceptance.
+   before calling regional rankings accepted. Local fixtures are not that acceptance.
 5. Per-node **rollback and pause** restores the previous safe unexpired snapshot
    atomically with a pause flag. Failed/non-CF/expired previous endpoints are not
    resurrected. A paused snapshot still expires; the UI shows the pause status.

@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { createHash } from 'crypto';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { HeartbeatDto } from '../agent/heartbeat.dto';
@@ -9,7 +10,7 @@ import { UsageService } from './usage.service';
 import type { NodeExportInfo } from '../subscriptions/uri-builder';
 
 const node = { id: 'fixture', protocol: 'VLESS', implementation: 'XRAY', transport: 'WS', tls: 'TLS', listenPort: 443, domain: 'cdn.example.com', statsPort: 20443, cfDnsRecordId: 'record' };
-const candidate: NodeExportInfo = { name: 'candidate 1', protocol: 'VLESS', transport: 'WS', tls: 'TLS', host: '104.16.0.1', port: 443, domain: 'cdn.example.com', cfCarrier: 'GENERIC', credentials: { uuid: 'fixture' } };
+const candidate: NodeExportInfo = { name: 'candidate 1', protocol: 'VLESS', transport: 'WS', tls: 'TLS', host: '104.16.0.1', port: 443, domain: 'cdn.example.com', cfProfile: 'GENERIC', credentials: { uuid: 'fixture' } };
 describe('server usage evidence boundaries', () => {
   it('keeps ingestion bounded and off the ordinary heartbeat response path', async () => {
     const service = new UsageService({} as never, {} as never);
@@ -31,6 +32,14 @@ describe('server usage evidence boundaries', () => {
     expect(candidateKey(candidate)).not.toBe(candidateKey({ ...candidate, credentials: { uuid: 'rotated' } }));
     expect(() => candidateKey({ ...candidate, host: 'origin.example.com' })).toThrow();
     expect(grantVersion('one')).not.toBe(grantVersion('two'));
+  });
+  it('keeps pre-regional generic keys stable while separating regional identities', () => {
+    const previous = createHash('sha256').update(JSON.stringify(['104.16.0.1', 443, 'cdn.example.com', 'WS', 'TLS', 'GENERIC', [['uuid', 'fixture']]])).digest('hex');
+    expect(candidateKey(candidate)).toBe(previous);
+    const guangzhou = { ...candidate, cfProfile: 'REGION:ap-guangzhou' };
+    const chengdu = { ...candidate, cfProfile: 'REGION:ap-chengdu' };
+    expect(candidateKey(guangzhou)).not.toBe(previous);
+    expect(candidateKey(guangzhou)).not.toBe(candidateKey(chengdu));
   });
   it('restricts observation to compatible managed CDN nodes', () => {
     expect(usageEligible(node)).toBe(true);

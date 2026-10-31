@@ -53,7 +53,7 @@ with sync_playwright() as p:
                                         'audit': {'status': 'UNVERIFIED', 'findings': ['ENTRY_IS_EXIT', 'DNS_HISTORY_AND_FIREWALL_UNVERIFIED']}})
             elif url.path == '/api/subscriptions/cf-access/optimization/cf-node':
                 route.fulfill(json={'enabled': False, 'registryError': False, 'rangeError': False,
-                                    'rangeUpdatedAt': None, 'profiles': [], 'missingCarriers': ['TELECOM', 'UNICOM', 'MOBILE']})
+                                    'rangeUpdatedAt': None, 'profiles': [], 'regions': [], 'missingRegions': []})
             elif url.path == '/api/subscriptions/s1':
                 assert route.request.method == 'PATCH'
                 body = route.request.post_data_json
@@ -121,7 +121,7 @@ with sync_playwright() as p:
         page.get_by_label('检查 CF 节点').click()
         page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter(has_text='Telecom fixture — cdn.example.com').click()
         expect(page.get_by_text('后台自动维护未开启，当前仅使用已有安全候选/默认 CDN', exact=True)).to_be_visible()
-        expect(page.get_by_text(re.compile('缺少有效实测：电信、联通、移动'))).to_be_visible()
+        expect(page.get_by_text(re.compile('缺少新鲜候选的地区：无'))).to_be_visible()
         expect(page.locator('.ant-select-dropdown:visible')).to_have_count(0)
         expect(page.get_by_text('Only literal Cloudflare IPv4/IPv6 addresses are allowed', exact=True)).to_have_count(0)
         page.get_by_text('后台自动维护未开启，当前仅使用已有安全候选/默认 CDN', exact=True).scroll_into_view_if_needed()
@@ -129,7 +129,7 @@ with sync_playwright() as p:
         page.get_by_role('button', name=re.compile(r'^保\s*存$')).click()
         expect(page.get_by_role('dialog')).to_be_hidden()
         assert mutations[-1]['cfAuto'] is True and state['sub']['cfPreferredIps'] == []
-        expect(page.get_by_text('1 个节点 · CF-only / 自动三网候选', exact=True)).to_be_visible()
+        expect(page.get_by_text('1 个节点 · CF-only / 自动地区候选', exact=True)).to_be_visible()
         assert state['sub']['token'] == 'fixture-owner-token'
         state['sub'].update({'name': 'AI mixed fixture', 'cfOnly': False, 'cfAuto': False,
                              'nodes': [{'node': node}, {'node': ordinary}], 'externalNodes': [{'externalNode': external}]})

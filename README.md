@@ -49,7 +49,7 @@ TUIC 和 AnyTLS 创建时要求用户已配置状态为 `active` 的 Cloudflare 
 - 节点列表中以"托管"/"外部"标签区分来源
 - 支持刷新订阅链接（重新生成 token）
 - 导出弹窗含链接复制 + QR 码
-- 可选 CF-only 订阅：VLESS + WS + TLS 支持自动候选探查、三网实测分组和 Clash/Mihomo 动态候选更新，无需手填 IP；也保留手工优选模式。始终保留原 SNI/WS Host、TLS 校验和 CDN，空线路不回退源站。缺少真实运营商测点时仅提供通用/默认 CF 候选，不冒充三网实测。后台任务默认关闭；配置与验收见 [自动优选手册](docs/RUNBOOK-cf-auto.md) 和 [源站隐藏验收](docs/RUNBOOK-cf-access.md)。
+- 可选 CF-only 订阅：VLESS + WS + TLS 支持自动候选探查、分地区云测优选和 Clash/Mihomo 动态候选更新，无需手填 IP；也保留手工优选模式。同一订阅包含各地区候选，客户端本地择优。地区指测点部署地，不代表用户运营商或 CF 接入机房。始终保留原 SNI/WS Host、TLS 校验和 CDN，缺测使用安全通用/默认候选，空线路不回退源站。后台任务默认关闭；见 [自动优选手册](docs/RUNBOOK-cf-auto.md)、[拨测预算评估](docs/CF-PROBE-BUDGET.md) 和 [源站隐藏验收](docs/RUNBOOK-cf-access.md)。
 - 可选服务端使用观测：无需电脑采集器，按分享身份、托管节点和 CF 候选配置观察聚合流量，提供明暗主题总览、移动端卡片、证据详情和接入状态。实际拨入 CF IP 与真实在线人数不作推断；默认关闭，启用与兼容回退见 [使用观测手册](docs/RUNBOOK-server-usage.md)。
 
 新增协议的导出兼容性：

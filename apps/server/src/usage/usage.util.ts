@@ -15,7 +15,7 @@ export function usageEligible(n: { protocol: string; implementation: string | nu
 export function candidateKey(node: NodeExportInfo): string {
   if (!isIP(node.host)) throw new Error('Usage candidates require a literal CDN address');
   return createHash('sha256').update(JSON.stringify([node.host, node.port, node.domain,
-    node.transport, node.tls, node.cfCarrier ?? 'MANUAL', Object.keys(node.credentials).sort().map(key => [key, node.credentials[key]])])).digest('hex');
+    node.transport, node.tls, node.cfProfile ?? 'MANUAL', Object.keys(node.credentials).sort().map(key => [key, node.credentials[key]])])).digest('hex');
 }
 export function usageStatus(sampledAt: Date | null, activeAt: Date | null, installed: boolean, now = Date.now()) {
   if (!installed) return 'PENDING';

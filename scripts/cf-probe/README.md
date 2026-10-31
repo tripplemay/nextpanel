@@ -9,6 +9,9 @@ The original TCP-only function remains unchanged. See
 - Node.js 22+, curl, and a reviewed Xray-core binary supporting VLESS/WS/TLS.
 - The worker starts on `0.0.0.0:9000`; a trusted HTTPS gateway must front it.
 - `CF_PROBE_ID`: stable lowercase ID, e.g. `guangzhou-cloud`.
+- Region identity comes from SCF's built-in `TENCENTCLOUD_REGION` (e.g.
+  `ap-chengdu`). Outside SCF set `CF_PROBE_REGION`. Conflicting values stop startup.
+  This is the cloud deployment region, not a residential ISP or Cloudflare POP.
 - `CF_PROBE_TOKEN`: independently generated random bearer secret, at least 32
   characters. Inject through the deployment secret store, never the image/Git.
 - `XRAY_BINARY`: optional absolute binary path; defaults to `xray` on PATH.
@@ -62,12 +65,13 @@ numeric curl/HTTP diagnostics, never stderr or proxy credentials.
 
 Both endpoints require `Authorization: Bearer <secret>` and return `no-store`.
 
-- `GET /capabilities`: protocol 2, probe ID, current outbound IP and supported
-  features. Missing Xray/curl returns 503. Carrier is always `UNVERIFIED` here.
+- `GET /capabilities`: protocol 2, probe ID, current outbound IP, `regionKey`,
+  `networkType=CLOUD` and supported features. Missing Xray/curl returns 503.
+  Missing region returns null for legacy generic compatibility, never a guessed city.
 - `POST /probe`: `{ips, domain, uuid, path, downloadIps}`. At most eight literal
   CF addresses, fixed port 443, at most three downloads. No arbitrary test URL,
   command, upstream proxy, port or Xray configuration is accepted.
-- Results contain IP, success and E2E latency; successful download samples add
+- Results repeat the regional identity and contain IP, success and E2E latency; successful download samples add
   byte count/duration. Errors and logs never include UUID/path/authorization.
 
 For each candidate, Xray dials its literal CF IP while retaining domain SNI and
@@ -84,6 +88,12 @@ each test. A worker startup failure returns an infrastructure error for the
 batch, not a verdict that every candidate IP is down. Durable daily download
 and candidate-request quotas are enforced by the panel; these are not total
 network-byte or cloud-billing caps. Instance limits must also be set in SCF.
+
+The approved next rollout is Guangzhou + Chengdu, 15-minute panel cadence,
+25,000 global batches/month and CNY 30/month. See
+[`CF-PROBE-BUDGET.md`](../../docs/CF-PROBE-BUDGET.md) for a settled-bill projection
+and required cloud-side checks. `node scripts/cf-probe/estimate-cost.mjs` only
+calculates scenarios locally; it never invokes, purchases or deploys a function.
 
 Local tests use only loopback/stubs and optional native config parsers:
 

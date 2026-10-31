@@ -58,7 +58,6 @@ export default function CfAccessFields({ form, nodes, locked, protectedIds, load
   const optimization = useQuery({ queryKey: ['cf-optimization', nodeId],
     queryFn: () => subscriptionsApi.cfOptimization(nodeId!).then(r => r.data),
     enabled: automatic && !!selectedNode, refetchInterval: 30_000 });
-  const carrierNames: Record<string, string> = { TELECOM: '电信', UNICOM: '联通', MOBILE: '移动', GENERIC: '通用云测点' };
 
   function rollback() {
     modal.confirm({ title: '回退上一批候选并暂停该节点自动维护？',
@@ -109,15 +108,15 @@ export default function CfAccessFields({ form, nodes, locked, protectedIds, load
         description={`当前 ${eligible.length} 个兼容 CF 节点，其他 ${selectedIds.length - eligible.length} 个托管节点和 ${externalIds.length} 个外部节点保持原样。CF 节点无安全地址时省略，不回退源站。关闭自动优选后，已保护节点仍使用默认 CDN；请刷新客户端完整订阅。非 CF 节点不具备 CDN 隐藏保证。`} />}
       {!!unavailableProtected.length && <Alert type="warning" showIcon title="部分已保护节点配置发生变化"
         description={`这些节点将停止导出，而不会转为直连：${unavailableProtected.map(n => n.name).join('、')}。`} />}
-      {automatic && <Alert type="info" showIcon title="同一订阅包含三网候选，客户端本地择优"
-        description="有效测量会自动生成电信、联通、移动候选；缺少测点时仅提供通用/默认 CDN，不冒充运营商实测。Clash/Mihomo 更新一次订阅后每 15 分钟获取候选、每 5 分钟探测；其他客户端需启用订阅更新。" />}
+      {automatic && <Alert type="info" showIcon title="同一订阅包含各地区云测候选，客户端本地择优"
+        description="按已登记且校验通过的云函数地区自动分组；缺测地区使用通用/默认 CDN。地区指测点部署地，不是用户所在地或运营商。Clash/Mihomo 刷新完整订阅后每 15 分钟获取候选、每 5 分钟探测；其他客户端需启用订阅更新。" />}
       {enabled && !automatic && <Form.Item name="cfPreferredIps" label="优选 CF IP（按优先顺序，最多 3 个）" style={{ marginTop: 16 }}
         extra="只接受 CF 公网 IPv4/IPv6，不接受域名、端口或 URL。SNI、WS Host 保留原业务域名。留空仅使用默认 CF 线路。"
         rules={[{ type: 'array', max: 3, message: '最多填写 3 个 CF IP' }]}>
         <Select mode="tags" tokenSeparators={[',', ' ', '\n']} options={[]} placeholder="输入 IP 后按回车；不自动推荐未经实测的 IP" />
       </Form.Item>}
       <Space orientation="vertical" style={{ width: '100%' }}>
-        <Typography.Text strong>面板侧连通性检查（不代表电信网络速度）</Typography.Text>
+        <Typography.Text strong>面板侧连通性检查（不代表用户网络速度）</Typography.Text>
         <Select aria-label="检查 CF 节点" style={{ width: '100%' }} placeholder="选择本次要检查的节点"
           value={selectedNode?.id} onChange={setNodeId}
           options={eligible.map((n) => ({ value: n.id, label: `${n.name} — ${n.domain}` }))} />
@@ -125,13 +124,14 @@ export default function CfAccessFields({ form, nodes, locked, protectedIds, load
           {optimization.isError && <Alert type="error" title={subscriptionError(optimization.error)} />}
           {optimization.data && <Alert type="warning" showIcon title={optimization.data.paused ? '该节点自动维护已暂停，候选仍受过期限制' : optimization.data.enabled ? '后台自动维护已开启' : '后台自动维护未开启，当前仅使用已有安全候选/默认 CDN'}
             description={<>
-              <div>缺少有效实测：{optimization.data.missingCarriers.map(c => carrierNames[c] ?? c).join('、') || '无'}；机房测点不代表全国用户。</div>
+              <div>缺少新鲜候选的地区：{(optimization.data.missingRegions ?? []).map(key => optimization.data!.regions?.find(r => r.key === key)?.label ?? key).join('、') || '无'}；机房测点不代表当地所有用户。</div>
               {optimization.data.budget?.lowBudget && <div>低预算试点：后台每 8 小时复测两轮，并非每 5 分钟持续更新；客户端仍按原周期检查候选。</div>}
-              {optimization.data.budget?.monthlyLimit != null && <div>全局每月最多 {optimization.data.budget.monthlyLimit} 批，达到上限后暂停探测；不是云账单硬限额。</div>}
+              {optimization.data.budget?.monthlyLimit != null && <div>全局每月已用 {optimization.data.budget.used ?? '未知'} / {optimization.data.budget.monthlyLimit} 批，达到上限后暂停探测；不是云账单硬限额。</div>}
+              {optimization.data.budget?.constrained && <div>当前额度不足以维持此节点全部地区的持续探查；请评估频率和预算。</div>}
               {optimization.data.budget?.error && <div>月度预算配置无效，已停止新探测，请联系管理员。</div>}
               {(optimization.data.registryError || optimization.data.rangeError) && <div>测点配置或官方网段同步异常，请联系管理员。</div>}
               {optimization.data.profiles.map(p => <div key={p.probeId} style={{ overflowWrap: 'anywhere' }}>
-                {carrierNames[p.carrier] ?? p.carrier} / {p.region}：{p.stale ? '未测或结果陈旧' : '近期实测'}，{p.checkedAt ?? '无检测时间'}
+                {p.region} / {p.classification === 'REGIONAL' ? '地区云测点' : '兼容通用测点'}：{p.stale ? '未测或结果陈旧' : '近期实测'}，{p.checkedAt ?? '无检测时间'}
                 {p.error && `；${p.error}`}
                 {p.candidates.map(c => <div key={c.ip}>{c.ip}：{c.latency} ms{c.failed ? '（复查失败）' : ''}</div>)}
               </div>)}
@@ -148,7 +148,7 @@ export default function CfAccessFields({ form, nodes, locked, protectedIds, load
         {currentResult && <>
           <Alert type={currentResult.reachable ? 'success' : 'error'} showIcon
             title={`${currentResult.address ?? '无可用 CF 地址'}：${currentResult.message}`}
-            description={`测点：面板服务器；时间：${currentResult.testedAt}。请在实际电信网络更新订阅后，用 Clash 做高峰/非高峰验证。`} />
+            description={`测点：面板服务器；时间：${currentResult.testedAt}。请在实际使用网络更新订阅后，用 Clash 做高峰/非高峰验证。`} />
           <Alert type="warning" showIcon title="源站隐藏：未验收"
             description={<ul style={{ paddingLeft: 18, margin: 0 }}>{currentResult.audit.findings.map((finding) =>
               <li key={finding}>{FINDINGS[finding] ?? finding}</li>)}</ul>} />

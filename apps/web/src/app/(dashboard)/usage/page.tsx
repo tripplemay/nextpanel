@@ -1,5 +1,7 @@
 'use client';
 
+import { cfProfileLabel } from '@/lib/cf-profile';
+
 import { useEffect, useState, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
 import { Alert, App, Button, Descriptions, Drawer, Empty, Input, Result, Select, Skeleton, Space, Steps, Switch, Table, Tabs, Tag, Tooltip, Typography, theme } from 'antd';
@@ -22,7 +24,7 @@ const statuses: Record<UsageStatus, { label: string; color?: string; hint: strin
   PAUSED: { label: '观测已暂停', hint: '不再发布新观测凭据；已导入的代理配置继续可用。' },
   REVOKING: { label: '撤销待确认', color: 'orange', hint: '授权已失效，等待服务器确认移除认证身份。' },
 };
-const carrierNames: Record<string, string> = { TELECOM: '电信', UNICOM: '联通', MOBILE: '移动', GENERIC: '通用', DNS: '默认 CDN', MANUAL: '手动候选' };
+
 const errors: Record<string, string> = {
   PREPARATION_REQUIRED: '需要先准备节点统计能力', SYNC_FAILED: '同步未完成，请检查 SSH 和节点状态',
   CREDENTIAL_LIMIT: '候选身份达到保护上限，新候选继续使用原凭据', UNSUPPORTED_API: '当前 Xray 不支持所需用户管理接口',
@@ -120,13 +122,13 @@ export default function UsagePage() {
             {search || status || subscription ? <Button onClick={() => { setSearch(''); setStatus(undefined); setSubscription(undefined); }}>清除筛选</Button> : <Button type="primary" onClick={() => setTab('coverage')}>查看接入步骤</Button>}
           </Empty> : isMobile ? <div className={styles.cards}>{filtered.slice(0, 100).map(r => <article className={styles.mobileCard} key={r.id}>
             <div className={styles.cardTop}><div className={styles.cell}><Typography.Text strong>{r.subjectName}</Typography.Text><span className={styles.secondary}>{r.subscriptionName} · {r.grantKind === 'OWNER' ? '所有者' : '分享接收者'}</span></div><State value={r.status} /></div>
-            <div className={styles.cardGrid}><div><div className={styles.secondary}>服务端节点</div>{r.nodeName}</div><div><div className={styles.secondary}>候选配置</div>{carrierNames[r.carrier] ?? r.carrier}<div className={styles.mono}>{r.candidateIp}</div></div>
+            <div className={styles.cardGrid}><div><div className={styles.secondary}>服务端节点</div>{r.nodeName}</div><div><div className={styles.secondary}>候选配置</div>{cfProfileLabel(r.profile)}<div className={styles.mono}>{r.candidateIp}</div></div>
               <div><div className={styles.secondary}>下载 / 上传</div>{rate(r.downRate)} / {rate(r.upRate)}</div><Button onClick={() => setSelectedId(r.id)} aria-label={`查看 ${r.subjectName} 在 ${r.nodeName} 的证据`}>查看证据</Button></div>
           </article>)}{filtered.length > 100 && <Typography.Text type="secondary">移动端展示前 100 条，请使用筛选缩小范围。</Typography.Text>}</div>
           : <Table rowKey="id" dataSource={filtered} pagination={{ pageSize: 20, showSizeChanger: false, showTotal: n => `共 ${n} 条授权路径` }} scroll={{ x: 1020 }} columns={[
             { title: '授权身份 / 订阅', key: 'subject', width: 190, render: (_, r) => <div className={styles.cell}><Typography.Text strong>{r.subjectName}</Typography.Text><span className={styles.secondary}>{r.subscriptionName} · {r.grantKind === 'OWNER' ? '所有者' : '分享接收者'}</span></div> },
             { title: '服务端节点', dataIndex: 'nodeName', width: 170, ellipsis: true },
-            { title: '候选配置指定 IP', key: 'candidate', width: 190, render: (_, r) => <div className={styles.cell}><span className={styles.mono}>{r.candidateIp}</span><span className={styles.secondary}>{carrierNames[r.carrier] ?? r.carrier} · 实际拨入 IP 未验证</span></div> },
+            { title: '候选配置指定 IP', key: 'candidate', width: 190, render: (_, r) => <div className={styles.cell}><span className={styles.mono}>{r.candidateIp}</span><span className={styles.secondary}>{cfProfileLabel(r.profile)} · 实际拨入 IP 未验证</span></div> },
             { title: '观测状态', key: 'status', width: 155, render: (_, r) => <State value={r.status} /> },
             { title: '采样速率', key: 'rate', width: 150, render: (_, r) => <div className={styles.cell}><span className={styles.mono}><ArrowDownOutlined /> {rate(r.downRate)}</span><span className={styles.secondary}><ArrowUpOutlined /> {rate(r.upRate)}</span></div> },
             { title: '最近活动', key: 'last', width: 155, render: (_, r) => <span className={styles.secondary}>{time(r.lastActiveAt)}</span> },

@@ -359,7 +359,7 @@ model CfOptimization {
   node            Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
   probeId         String
   fingerprint     String
-  carrier         String
+  profile         String   @map("carrier")
   region          String
   observations    Json
   published       Json
@@ -408,7 +408,7 @@ model UsageCredential {
   grantVersion   String
   candidateKey   String
   candidateIp    String
-  carrier        String
+  profile        String @map("carrier")
   label          String
   uuidEnc        String
   installedAt    DateTime?
