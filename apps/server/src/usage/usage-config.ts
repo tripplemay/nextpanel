@@ -1,6 +1,10 @@
 import { LEGACY_EMAIL, USAGE_LIMIT } from './usage.util';
 
 export interface UsageUser { id: string; email: string; level?: number }
+export function usageStagingPaths(configPath: string, nonce: string) {
+  const stem = `${configPath}.usage-${nonce}`;
+  return { stage: `${stem}.json`, backup: `${stem}.backup`, additions: `${stem}.add.json` };
+}
 type JsonObject = Record<string, unknown>;
 const object = (value: unknown): JsonObject => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('INVALID_CONFIG');
