@@ -1,7 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { createProbeServer, validateBatch, xrayConfig, isCfIp, probeOne } from '../cf-probe/server.mjs';
+import { createProbeServer, validateBatch, xrayConfig, isCfIp, probeOne, parseCurlMeasurement } from '../cf-probe/server.mjs';
+
+test('parses portable curl trailers without counting metadata as payload', () => {
+  const trailer = '\nNP_CF_META:204 1.250000\n';
+  assert.deepEqual(parseCurlMeasurement({ code: 0, tail: trailer, bytes: trailer.length, download: false }), { bytes: 0, durationMs: 1250 });
+  const download = '\nNP_CF_META:200 2.500000\n';
+  const result = { code: 0, tail: 'payload-tail' + download, bytes: 1024 * 1024 + download.length, download: true };
+  assert.deepEqual(parseCurlMeasurement(result), { bytes: 1024 * 1024, durationMs: 2500 });
+  for (const change of [{ bytes: result.bytes - 1 }, { bytes: result.bytes + 1 }, { code: 28 }, { exceeded: true }, { tail: '\nNP_CF_META:500 1.0\n' }]) {
+    assert.throws(() => parseCurlMeasurement({ ...result, ...change }), /END_TO_END_FAILED/);
+  }
+  for (const change of [{ tail: 'unsupported write-out' }, { tail: '\nNP_CF_META:200 ...\n' }, { code: 2 }]) {
+    assert.throws(() => parseCurlMeasurement({ ...result, ...change }), /PROBE_RUNTIME_UNAVAILABLE/);
+  }
+});
 
 const batch = { ips: ['104.16.0.1'], downloadIps: [], domain: 'cdn.example.com',
   uuid: '00000000-0000-4000-8000-000000000001', path: '/ws' };

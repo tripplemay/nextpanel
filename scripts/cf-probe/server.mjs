@@ -65,36 +65,61 @@ async function ready(port, signal) {
   throw new Error('XRAY_UNAVAILABLE');
 }
 
+export function parseCurlMeasurement({ code, tail, bytes, download, exceeded = false }) {
+  const match = tail.match(/\nNP_CF_META:(\d{3}) ([\d.]+)\n$/);
+  const duration = match ? Number(match[2]) : NaN;
+  const payloadBytes = bytes - Buffer.byteLength(match?.[0] ?? '');
+  const metadataValid = !!match && Number.isFinite(duration) && duration >= 0;
+  if ((code === 0 && !metadataValid) || [2, 4, 48].includes(code)) throw new Error('PROBE_RUNTIME_UNAVAILABLE');
+  if (code !== 0 || exceeded || !metadataValid || +match[1] !== (download ? 200 : 204)
+    || payloadBytes < 0 || payloadBytes > (download ? 1024 * 1024 : 4096)
+    || (download && payloadBytes !== 1024 * 1024)) {
+    const error = new Error('END_TO_END_FAILED');
+    error.failure = { curlExit: code, httpStatus: match ? +match[1] : null, metadataValid, exceeded };
+    throw error;
+  }
+  return { bytes: payloadBytes, durationMs: Math.max(1, Math.round(duration * 1000)) };
+}
+
 async function requestViaProxy(port, download, signal) {
   const maximum = download ? 1024 * 1024 : 4096;
   const target = download ? 'https://speed.cloudflare.com/__down?bytes=1048576' : 'https://www.gstatic.com/generate_204';
   return new Promise((resolve, reject) => {
     const child = spawn('curl', ['--silent', '--proxy', `http://127.0.0.1:${port}`, '--noproxy', '',
       '--proto', '=https', '--max-time', download ? '10' : '5', '--max-filesize', String(maximum),
-      '--write-out', '%{stderr}%{http_code} %{time_total}', target], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let bytes = 0; let metadata = ''; let exceeded = false;
+      '--write-out', '\nNP_CF_META:%{http_code} %{time_total}\n', target], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let bytes = 0; let tail = Buffer.alloc(0); let errorBytes = 0; let exceeded = false;
     const abort = () => child.kill('SIGKILL');
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) abort();
-    child.stdout.on('data', chunk => { bytes += chunk.length; if (bytes > maximum) { exceeded = true; abort(); } });
-    child.stderr.on('data', chunk => { metadata += chunk; if (metadata.length > 4096) abort(); });
+    // SCF's curl 7.61.1 lacks %{stderr}; retain only the bounded stdout trailer.
+    child.stdout.on('data', chunk => {
+      bytes += chunk.length; tail = Buffer.concat([tail, chunk.subarray(-128)]).subarray(-128);
+      if (bytes > maximum + 128) { exceeded = true; abort(); }
+    });
+    child.stderr.on('data', chunk => { errorBytes += chunk.length; if (errorBytes > 4096) abort(); });
     child.once('error', reject);
     child.once('close', code => {
       signal.removeEventListener('abort', abort);
-      const match = metadata.match(/^(\d{3}) ([\d.]+)$/);
-      if (code !== 0 || exceeded || !match || +match[1] !== (download ? 200 : 204)
-        || (download && bytes !== maximum)) return reject(new Error('END_TO_END_FAILED'));
-      resolve({ bytes, durationMs: Math.max(1, Math.round(+match[2] * 1000)) });
+      try { resolve(parseCurlMeasurement({ code, tail: tail.toString('ascii'), bytes, download, exceeded })); }
+      catch (error) { reject(error); }
     });
   });
 }
 
 let runtimeCheckedAt = 0;
+const runtimeVersions = {};
 async function runtimeAvailable() {
   if (Date.now() - runtimeCheckedAt < 60_000) return true;
   for (const [binary, args] of [[process.env.XRAY_BINARY || 'xray', ['version']], ['curl', ['--version']]]) {
     const ok = await new Promise(resolve => {
-      const child = spawn(binary, args, { stdio: 'ignore', timeout: 2000, killSignal: 'SIGKILL' });
+      const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000, killSignal: 'SIGKILL' });
+      let output = '';
+      child.stdout.on('data', chunk => { output += chunk; if (output.length > 8192) child.kill('SIGKILL'); });
+      child.once('close', () => {
+        const match = output.match(binary === 'curl' ? /^curl ([\d.]+)/ : /^Xray ([\d.]+)/);
+        if (match) runtimeVersions[binary === 'curl' ? 'curl' : 'xray'] = match[1];
+      });
       child.once('error', () => resolve(false)); child.once('close', code => resolve(code === 0));
     });
     if (!ok) return false;
@@ -125,7 +150,8 @@ export async function probeOne(body, ip, outerSignal) {
     return result;
   } catch (error) {
     return { ip, ok: false, latency: -1,
-      ...((error.message === 'XRAY_UNAVAILABLE' || error.code === 'ENOENT') && { error: 'PROBE_RUNTIME_UNAVAILABLE' }) };
+      ...(error.failure && { failure: error.failure }),
+      ...((['XRAY_UNAVAILABLE', 'PROBE_RUNTIME_UNAVAILABLE'].includes(error.message) || error.code === 'ENOENT') && { error: 'PROBE_RUNTIME_UNAVAILABLE' }) };
   }
   finally {
     if (child?.pid && !closed) {
@@ -162,7 +188,7 @@ export function createProbeServer({ token, id, test = probeOne, lookupEgress = e
     if (!await checkRuntime()) return send(503, { error: 'PROBE_RUNTIME_UNAVAILABLE' });
     if (req.method === 'GET' && req.url === '/capabilities') return send(200, {
       protocol: 2, probeId: id, egressIp: await lookupEgress(), features: ['vless-ws-tls', 'bounded-download'],
-      carrier: 'UNVERIFIED', maxCandidates: 8,
+      carrier: 'UNVERIFIED', maxCandidates: 8, runtime: { ...runtimeVersions },
     });
     if (req.method !== 'POST' || req.url !== '/probe') return send(404, { error: 'NOT_FOUND' });
     if (busy) return send(429, { error: 'BUSY' });

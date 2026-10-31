@@ -51,6 +51,12 @@ command `bash /var/user/scf_bootstrap`, port 9000 and the same bounded resources
 The runtime must supply curl; verify authenticated capabilities and actual E2E
 before enabling the scheduler. A missing native runtime fails closed with 503.
 The new credential must be entered securely in the console, not added to the ZIP.
+The verified native runtime supplies curl 7.61.1, which lacks `%{stderr}`
+write-out support. The worker uses a bounded stdout trailer instead; trailer
+bytes are excluded from download accounting. Invalid runtime metadata fails the
+batch as infrastructure failure, not as a bad CF IP. Authenticated capabilities
+include sanitized runtime version numbers, and failed measurements expose only
+numeric curl/HTTP diagnostics, never stderr or proxy credentials.
 
 ## Protocol
 
