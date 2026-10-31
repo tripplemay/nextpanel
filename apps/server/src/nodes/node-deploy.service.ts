@@ -22,6 +22,7 @@ import {
 } from './socks-exit-resolver.service';
 import { CleanupBlockedError, cleanupPayload, resourceProtocols, ResourceLifecycleService } from '../resources/resource-lifecycle.service';
 import { assertRemotePorts, ListenerNotReadyError, resourcePaths } from '../resources/remote-inventory';
+import { usageEmail, usageEligible } from '../usage/usage.util';
 
 export interface DeployResult {
   success: boolean;
@@ -123,7 +124,7 @@ export class NodeDeployService {
     const startMs = Date.now();
     const node = await this.prisma.node.findUnique({
       where: { id: nodeId },
-      include: { server: true },
+      include: { server: true, usageState: true },
     });
     if (!node) throw new NotFoundException(`Node ${nodeId} not found`);
     if (node.server.status === 'DELETING') {
@@ -158,6 +159,10 @@ export class NodeDeployService {
       egressIpPolicy: node.egressIpPolicy,
       statsPort,
     };
+    if (node.usageState?.preparedAt && usageEligible(node)) {
+      const users = await this.prisma.usageCredential.findMany({ where: { nodeId, revokedAt: null } });
+      nodeInfo.usageUsers = users.map(u => ({ id: this.crypto.decrypt(u.uuidEnc), email: usageEmail(u.id) }));
+    }
 
     // If chain node, add chain info to NodeInfo
     if (node.exitServerId && node.exitPort && node.chainCredEnc) {

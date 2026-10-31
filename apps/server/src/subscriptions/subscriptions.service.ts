@@ -10,6 +10,7 @@ import { externalNodePublicSelect, openExternalSecrets } from '../external-nodes
 import { CfAccessService } from './cf-access.service';
 import { assertCfManagedNode, isCfManagedNode, cfVariants, normalizeCfPreferredIps } from './cf-access.util';
 import { CfOptimizationService } from './cf-optimization.service';
+import { UsageService, UsageGrant } from '../usage/usage.service';
 
 type CfOptions = { cfOnly?: boolean; cfPreferredIps?: string[]; cfAuto?: boolean };
 
@@ -40,7 +41,19 @@ export class SubscriptionsService {
     private crypto: CryptoService,
     private cfAccess: CfAccessService,
     @Optional() private cfOptimizer?: CfOptimizationService,
+    @Optional() private usage?: UsageService,
   ) {}
+
+  async setUsage(id: string, ownerId: string, enabled: boolean) {
+    if (!this.usage) throw new ServiceUnavailableException();
+    const result = await this.usage.setEnabled(id, ownerId, enabled);
+    if (enabled) {
+      const sub = await this.prisma.subscription.findUniqueOrThrow({ where: { id }, include: { shares: true } });
+      await this.fetchActiveNodes({ token: sub.token });
+      for (const share of sub.shares) await this.fetchActiveNodes({ shareToken: share.shareToken });
+    }
+    return result;
+  }
 
   async create(name: string, nodeIds: string[], ownerId: string, externalNodeIds?: string[], options: CfOptions = {}) {
     const cfPreferredIps = normalizeCfPreferredIps(options.cfPreferredIps ?? []);
@@ -360,7 +373,8 @@ export class SubscriptionsService {
       externalNodes: { include: { externalNode: true } },
     };
 
-    let sub: { ownerId: string; cfOnly?: boolean; cfAuto?: boolean; cfPreferredIps?: string[]; cfProtectedNodeIds?: string[]; nodes: SubscriptionNode[]; externalNodes: { externalNode: import('@prisma/client').ExternalNode }[] } | null = null;
+    let sub: { id?: string; usageEnabled?: boolean; ownerId: string; cfOnly?: boolean; cfAuto?: boolean; cfPreferredIps?: string[]; cfProtectedNodeIds?: string[]; nodes: SubscriptionNode[]; externalNodes: { externalNode: import('@prisma/client').ExternalNode }[] } | null = null;
+    let usageGrant: UsageGrant | undefined;
 
     if (by.shareToken) {
       const share = await this.prisma.subscriptionShare.findUnique({
@@ -369,8 +383,10 @@ export class SubscriptionsService {
       });
       if (!share) throw new NotFoundException('Share not found');
       sub = share.subscription;
+      usageGrant = { subscriptionId: share.subscription.id, ownerId: share.subscription.ownerId, subjectUserId: share.userId, grantId: share.id, token: share.shareToken };
     } else if (by.token) {
       sub = await this.prisma.subscription.findUnique({ where: { token: by.token }, include });
+      if (sub?.id) usageGrant = { subscriptionId: sub.id, ownerId: sub.ownerId, subjectUserId: sub.ownerId, grantId: 'owner', token: by.token };
     }
 
     if (!sub) throw new NotFoundException('Subscription not found');
@@ -412,7 +428,8 @@ export class SubscriptionsService {
         const variants = sub.cfAuto ? await this.cfOptimizer!.variants(exported, node, defaultIp)
           : cfVariants(exported, node.id, preferredIps, defaultIp);
         if (variants.length === 0 && sub.cfOnly && providerNodeId === undefined) throw new ServiceUnavailableException('No Cloudflare endpoint available; direct fallback is forbidden');
-        result.push(...variants);
+        result.push(...(sub.usageEnabled && usageGrant && this.usage
+          ? await this.usage.decorate(node.id, usageGrant, variants) : variants));
       } else result.push(exported);
     }
 

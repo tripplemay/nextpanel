@@ -32,7 +32,9 @@ Reproduce the gate in a clean checkout with dependencies and Chromium installed:
 ```sh
 python3 -m pip install -r scripts/tests/browser-requirements.txt
 python3 -m playwright install chromium
-PG_BIN=/path/to/postgresql/16/bin bash scripts/ci/verify.sh
+PG_BIN=/path/to/postgresql/16/bin \
+XRAY_BINARY=/path/to/verified/xray \
+GO_BINARY=/path/to/go bash scripts/ci/verify.sh
 ```
 
 The database tests require a non-root user, create their own Unix-socket-only
@@ -49,6 +51,12 @@ branches, include administrators, prohibit force pushes/deletion, and resolve re
 conversations before merging. Keep required approvals at zero for the current
 single-maintainer workflow; CI remains mandatory. Repository protection does not
 restrict a host administrator's direct SSH access.
+
+Server-side usage validation additionally pins Xray 26.2.6 in CI and requires Go
+for Agent race tests, Linux amd64/arm64 builds, and loopback telemetry decoding.
+These fixtures do not contact production proxy nodes. See
+[server-side usage rollout](RUNBOOK-server-usage.md) before enabling its default-off
+switch or preparing any production node; first preparation can restart that node.
 
 `Deploy` stages a full commit in an isolated directory, installs the frozen lockfile,
 generates Prisma and builds before stopping either production process. SSH host keys

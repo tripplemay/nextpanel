@@ -30,6 +30,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/agent/go.mod
+          cache-dependency-path: apps/agent/go.sum
       - name: Install locked application dependencies and isolated test tools
         run: |
           pnpm install --frozen-lockfile
@@ -47,6 +51,18 @@ jobs:
           printf '%s  %s\n' 86db0f9df3f822ca2adccde2f7c1c9e21d64e646a77bf258274fde3be399025b "$ARCHIVE" | sha256sum --check -
           tar -xzf "$ARCHIVE" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/sing-box-1.13.0-linux-amd64" >> "$GITHUB_PATH"
+      - name: Install checksum-pinned Xray for loopback identity validation
+        run: |
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/Xray-linux-64.zip"
+          curl --fail --location --retry 3 --max-time 120 \
+            https://github.com/XTLS/Xray-core/releases/download/v26.2.6/Xray-linux-64.zip \
+            --output "$ARCHIVE"
+          printf '%s  %s\n' 29ce535b56e207a406ffa1c2d4842dcc410be003eff8ec508bb732abc9f8e385 "$ARCHIVE" | sha256sum --check -
+          unzip -q "$ARCHIVE" xray -d "$RUNNER_TEMP/xray-fixture"
+          chmod +x "$RUNNER_TEMP/xray-fixture/xray"
+          echo "XRAY_BINARY=$RUNNER_TEMP/xray-fixture/xray" >> "$GITHUB_ENV"
+          echo "GO_BINARY=$(command -v go)" >> "$GITHUB_ENV"
       - name: Test, build, restore and browser gates
         run: |
           set -euo pipefail

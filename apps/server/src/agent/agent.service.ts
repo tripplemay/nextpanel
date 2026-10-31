@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service';
 import { MetricsService } from '../metrics/metrics.service';
@@ -6,6 +6,7 @@ import { IpCheckService } from '../ip-check/ip-check.service';
 import { performance } from 'node:perf_hooks';
 import { NetworkRateTracker } from './network-rate';
 import { ResourceLifecycleService } from '../resources/resource-lifecycle.service';
+import { UsageService, UsageSample } from '../usage/usage.service';
 
 export interface HeartbeatPayload {
   agentToken: string;
@@ -18,6 +19,7 @@ export interface HeartbeatPayload {
   networkOut: number;
   nodeStatuses?: { nodeId: string; status: 'RUNNING' | 'STOPPED' | 'ERROR' }[];
   nodeTraffic?: { nodeId: string; upBytes: number; downBytes: number }[];
+  usageSamples?: UsageSample[];
 }
 
 interface LatestVersionCache {
@@ -44,6 +46,7 @@ export class AgentService {
     private ipCheck: IpCheckService,
     private config: ConfigService,
     private resources: ResourceLifecycleService,
+    @Optional() private usage?: UsageService,
   ) {}
 
   async getLatestVersion(): Promise<{ version: string; releaseNotes: string }> {
@@ -220,10 +223,15 @@ export class AgentService {
       }
     }
 
+    if (payload.usageSamples && this.usage) {
+      this.usage.enqueue(server.id, payload.usageSamples);
+    }
+
     // Return xray nodes with their stats ports so the agent can query traffic
     const xrayNodes = await this.prisma.node.findMany({
       where: { serverId: server.id, statsPort: { not: null }, status: 'RUNNING' },
-      select: { id: true, statsPort: true },
+      select: { id: true, statsPort: true, usageState: { select: { preparedAt: true } },
+        subscriptionNodes: { where: { subscription: { usageEnabled: true } }, take: 1, select: { subscriptionId: true } } },
     });
 
     // Return pending IP check task if any
@@ -231,7 +239,8 @@ export class AgentService {
 
     return {
       ok: true,
-      xrayNodes: xrayNodes.map((n) => ({ nodeId: n.id, statsPort: n.statsPort })),
+      xrayNodes: xrayNodes.map((n) => ({ nodeId: n.id, statsPort: n.statsPort,
+        ...(this.usage?.enabled() && n.usageState?.preparedAt && n.subscriptionNodes?.length ? { usage: true } : {}) })),
       ...(ipCheckTask ? { ipCheckTask: { serverId: ipCheckTask.serverId } } : {}),
       ...(updateCommand ? { updateCommand } : {}),
     };

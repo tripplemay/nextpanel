@@ -143,6 +143,7 @@ export const nodesApi = {
 
 // ── Subscriptions ─────────────────────────────────────
 export const subscriptionsApi = {
+  setUsage: (id: string, enabled: boolean) => api.post(`/subscriptions/${encodeURIComponent(id)}/usage`, { enabled }),
   cfOptimization: (nodeId: string) => api.get<import('@/types/api').CfOptimizationStatus>(`/subscriptions/cf-access/optimization/${encodeURIComponent(nodeId)}`),
   rollbackCfOptimization: (nodeId: string) => api.post(`/subscriptions/cf-access/optimization/${encodeURIComponent(nodeId)}/rollback`),
   resumeCfOptimization: (nodeId: string) => api.post(`/subscriptions/cf-access/optimization/${encodeURIComponent(nodeId)}/resume`),
@@ -156,6 +157,12 @@ export const subscriptionsApi = {
   listShares: (id: string) => api.get<SubscriptionShare[]>(`/subscriptions/${id}/shares`),
   addShare: (id: string, userId: string) => api.post<SubscriptionShare>(`/subscriptions/${id}/shares`, { userId }),
   removeShare: (id: string, userId: string) => api.delete<void>(`/subscriptions/${id}/shares/${userId}`),
+};
+
+export const usageApi = {
+  overview: (subscriptionId?: string) => api.get<import('@/types/usage').UsageOverview>(`/usage${subscriptionId ? `?subscriptionId=${encodeURIComponent(subscriptionId)}` : ''}`),
+  history: (id: string) => api.get<import('@/types/usage').UsageHistoryPoint[]>(`/usage/${encodeURIComponent(id)}/history`),
+  prepare: (id: string, allowRestart: boolean) => api.post(`/usage/nodes/${encodeURIComponent(id)}/prepare`, { allowRestart }),
 };
 
 // ── IP Check ──────────────────────────────────────────

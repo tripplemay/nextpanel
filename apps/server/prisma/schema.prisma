@@ -234,6 +234,8 @@ model Node {
   snapshots         ConfigSnapshot[]
   subscriptionNodes SubscriptionNode[]
   cfOptimizations   CfOptimization[]
+  usageState        UsageNode?
+  usageCredentials  UsageCredential[]
 
   @@unique([serverId, listenPort])
   @@unique([exitServerId, exitPort])
@@ -339,6 +341,7 @@ model Subscription {
   /// Opt-in CDN-only export. Clearing preferred IPs retains CDN-only protection.
   cfOnly    Boolean  @default(false)
   cfAuto    Boolean  @default(false)
+  usageEnabled Boolean @default(false)
   cfPreferredIps String[] @default([])
   /// Server-maintained CDN protection scope; retained when automatic probing is disabled.
   cfProtectedNodeIds String[] @default([])
@@ -374,6 +377,66 @@ model CfOptimizationState {
   key       String   @id
   value     Json
   updatedAt DateTime @updatedAt
+}
+
+model UsageNode {
+  nodeId       String @id
+  node         Node @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  preparedAt   DateTime?
+  syncedAt     DateTime?
+  error        String?
+  sampledAt    DateTime?
+  sampleId     String?
+  coreUptime   BigInt?
+  legacyUp     BigInt @default(0)
+  legacyDown   BigInt @default(0)
+  legacyActiveAt DateTime?
+  legacyUpRate Float @default(0)
+  legacyDownRate Float @default(0)
+  updatedAt    DateTime @updatedAt
+}
+
+// Grant identifiers survive share/subscription deletion until remote revocation is verified.
+model UsageCredential {
+  id             String @id @default(cuid())
+  nodeId         String
+  node           Node @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  ownerId        String
+  subscriptionId String
+  subjectUserId  String
+  grantId        String
+  grantVersion   String
+  candidateKey   String
+  candidateIp    String
+  carrier        String
+  label          String
+  uuidEnc        String
+  installedAt    DateTime?
+  revokedAt      DateTime?
+  removedAt      DateTime?
+  lastExportedAt DateTime @default(now())
+  createdAt      DateTime @default(now())
+  sampledAt      DateTime?
+  lastActiveAt   DateTime?
+  upBytes        BigInt @default(0)
+  downBytes      BigInt @default(0)
+  upRate         Float?
+  downRate       Float?
+  buckets        UsageBucket[]
+
+  @@unique([nodeId, grantVersion, candidateKey])
+  @@index([ownerId, subscriptionId])
+  @@index([nodeId, removedAt])
+}
+
+model UsageBucket {
+  credentialId String
+  credential UsageCredential @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+  timestamp DateTime
+  upBytes BigInt @default(0)
+  downBytes BigInt @default(0)
+  @@id([credentialId, timestamp])
+  @@index([timestamp])
 }
 
 model SubscriptionShare {
