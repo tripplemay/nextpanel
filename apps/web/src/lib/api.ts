@@ -143,6 +143,8 @@ export const nodesApi = {
 
 // ── Subscriptions ─────────────────────────────────────
 export const subscriptionsApi = {
+  checkCfAccess: (data: { nodeId: string; ip?: string }) =>
+    api.post<import('@/types/api').CfAccessCheckResult>('/subscriptions/cf-access/check', data),
   list: () => api.get<Subscription[] | ViewerSubscriptionList>('/subscriptions'),
   create: (data: CreateSubscriptionDto) => api.post<Subscription>('/subscriptions', data),
   update: (id: string, data: UpdateSubscriptionDto) => api.patch<Subscription>(`/subscriptions/${id}`, data),

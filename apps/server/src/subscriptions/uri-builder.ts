@@ -12,6 +12,8 @@ export interface NodeExportInfo {
   tls: string;
   domain: string | null;
   credentials: Record<string, string>;
+  /** Export-only endpoint variants; never a separate deployment. */
+  cfGroup?: string;
 }
 
 import { REALITY_DEFAULT_SNI, REALITY_FLOW } from '../nodes/protocols/reality';
@@ -698,6 +700,26 @@ function yamlQuotedString(value: string): string {
 
 // ─── Full Sing-box subscription JSON ─────────────────────────────────────────
 
+function cfGroups(nodes: NodeExportInfo[]) {
+  const groups = new Map<string, string[]>();
+  for (const node of nodes) {
+    if (node.cfGroup) groups.set(node.cfGroup, [...(groups.get(node.cfGroup) ?? []), node.name]);
+  }
+  return [...groups].map(([tag, outbounds]) => ({ tag, outbounds }));
+}
+
+function cfSingboxGroups(nodes: NodeExportInfo[]) {
+  return cfGroups(nodes).map((group) => ({
+    type: 'urltest', ...group, url: 'https://www.gstatic.com/generate_204',
+    interval: '5m', tolerance: 50, interrupt_exist_connections: false,
+  }));
+}
+
+function selectableTags(nodes: NodeExportInfo[], exportedTags: string[]): string[] {
+  if (!nodes.some((node) => node.cfGroup)) return exportedTags;
+  return [...new Set(nodes.filter((node) => exportedTags.includes(node.name)).map((node) => node.cfGroup ?? node.name))];
+}
+
 export function buildFullSingboxConfig(nodes: NodeExportInfo[]): string {
   const outbounds = nodes
     .map((n) => buildSingboxOutbound(n))
@@ -705,7 +727,7 @@ export function buildFullSingboxConfig(nodes: NodeExportInfo[]): string {
 
   assertNoUnsupportedOnlySubscription(nodes, outbounds);
 
-  const proxyTags = outbounds.map((o) => o.tag as string);
+  const proxyTags = selectableTags(nodes, outbounds.map((o) => o.tag as string));
 
   const config = {
     log: { level: 'info' },
@@ -735,11 +757,12 @@ export function buildFullSingboxConfig(nodes: NodeExportInfo[]): string {
     },
     outbounds: [
       ...outbounds,
+      ...cfSingboxGroups(nodes),
       {
         type: 'urltest',
         tag: '⚡ 自动选择',
         outbounds: proxyTags.length > 0 ? proxyTags : ['direct'],
-        url: 'http://www.gstatic.com/generate_204',
+        url: nodes.some((n) => n.cfGroup) ? 'https://www.gstatic.com/generate_204' : 'http://www.gstatic.com/generate_204',
         interval: '5m',
       },
       {
@@ -880,7 +903,7 @@ export function buildHomeProxyConfig(nodes: NodeExportInfo[]): string {
 
   assertNoUnsupportedOnlySubscription(nodes, outbounds);
 
-  const proxyTags = outbounds.map((o) => o.tag as string);
+  const proxyTags = selectableTags(nodes, outbounds.map((o) => o.tag as string));
   const hasNodes = proxyTags.length > 0;
   const fallback = hasNodes ? proxyTags : ['direct'];
 
@@ -937,6 +960,7 @@ export function buildHomeProxyConfig(nodes: NodeExportInfo[]): string {
 
     outbounds: [
       ...outbounds,
+      ...cfSingboxGroups(nodes),
       {
         type: 'urltest',
         tag: '⚡ 自动选择',
@@ -1053,7 +1077,7 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
     throw new Error('Mihomo supports XHTTP only with VLESS; no compatible nodes remain');
   }
 
-  const nodeNames = proxyEntries.map((e) => e.name);
+  const nodeNames = selectableTags(nodes, proxyEntries.map((e) => e.name));
   // url-test 至少需要 1 个 proxy；无可用节点时回退到 DIRECT，避免 YAML 解析失败
   const fallbackNames = nodeNames.length > 0 ? nodeNames : ['DIRECT'];
 
@@ -1082,6 +1106,15 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
   }
 
   const groups: string[] = [
+    ...cfGroups(nodes).map((group) => [
+      `  - name: ${yamlScalar(group.tag)}`,
+      '    type: fallback',
+      '    url: https://www.gstatic.com/generate_204',
+      '    interval: 300',
+      '    lazy: false',
+      '    proxies:',
+      ...group.outbounds.map((name) => `      - ${yamlScalar(name)}`),
+    ].join('\n')),
     [
       '  - name: 🚀 节点选择',
       '    type: select',
@@ -1091,7 +1124,7 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
     [
       '  - name: ⚡ 自动选择',
       '    type: url-test',
-      '    url: http://www.gstatic.com/generate_204',
+      nodes.some((n) => n.cfGroup) ? '    url: https://www.gstatic.com/generate_204' : '    url: http://www.gstatic.com/generate_204',
       '    interval: 300',
       '    proxies:',
       nodeList(),

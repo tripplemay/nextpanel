@@ -76,12 +76,16 @@ export interface CreateSubscriptionDto {
   name: string;
   nodeIds: string[];
   externalNodeIds?: string[];
+  cfOnly?: boolean;
+  cfPreferredIps?: string[];
 }
 
 export interface UpdateSubscriptionDto {
   name?: string;
   nodeIds?: string[];
   externalNodeIds?: string[];
+  cfOnly?: boolean;
+  cfPreferredIps?: string[];
 }
 
 export interface RegisterDto {
@@ -270,6 +274,8 @@ export interface Subscription {
   name: string;
   /** Owner-only credential; never present in shared responses. */
   token?: string;
+  cfOnly?: boolean;
+  cfPreferredIps?: string[];
   nodes: Array<{ node: Pick<Node, 'id' | 'name' | 'protocol' | 'status' | 'enabled' | 'listenPort' | 'serverId' | 'server'> }>;
   externalNodes: Array<{ externalNode: Pick<ExternalNode, 'id' | 'name' | 'protocol' | 'address' | 'port'> }>;
   /** Present for owner view — list of user IDs this subscription is shared with */
@@ -277,6 +283,13 @@ export interface Subscription {
   /** Present for VIEWER view — the VIEWER's personal shareToken */
   shareToken?: string;
   createdAt: string;
+}
+
+export interface CfAccessCheckResult extends ConnectivityResult {
+  address: string | null;
+  domain: string;
+  vantage: 'PANEL';
+  audit: { status: 'UNVERIFIED'; findings: string[] };
 }
 
 export interface ViewerSubscriptionList {

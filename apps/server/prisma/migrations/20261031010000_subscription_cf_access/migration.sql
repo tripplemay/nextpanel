@@ -1,0 +1,3 @@
+ALTER TABLE "Subscription"
+  ADD COLUMN "cfOnly" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN "cfPreferredIps" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
