@@ -48,6 +48,7 @@ const baseMenuItems: ItemType[] = [
   { key: '/nodes-v2', icon: <NodeIndexOutlined />, label: '节点拓扑' },
   { key: '/external-nodes', icon: <ImportOutlined />, label: '外部节点' },
   { key: '/subscriptions', icon: <LinkOutlined />, label: '订阅管理' },
+  { key: '/usage', icon: <DashboardOutlined />, label: '使用观测' },
   { key: '/recommends', icon: <StarOutlined />, label: '服务器推荐' },
   { key: '/audit-logs', icon: <AuditOutlined />, label: '审计日志' },
   {
@@ -83,6 +84,7 @@ const pathLabels: Record<string, string> = {
   '/nodes-v2': '节点拓扑',
   '/external-nodes': '外部节点',
   '/subscriptions': '订阅管理',
+  '/usage': '使用观测',
   '/recommends': '服务器推荐',
   '/audit-logs': '审计日志',
   '/users': '用户管理',
@@ -188,9 +190,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     },
   ];
 
-  const visibleBaseMenuItems = isMobile
-    ? baseMenuItems.filter((item) => item?.key !== '/nodes-v2')
-    : baseMenuItems;
+  const visibleBaseMenuItems = baseMenuItems.filter(item => (!isMobile || item?.key !== '/nodes-v2')
+    && (user?.role !== 'VIEWER' || item?.key !== '/usage'));
   const menuItems = user?.role === 'ADMIN' ? [...visibleBaseMenuItems, ...adminMenuItems] : visibleBaseMenuItems;
 
   const sidebarContent = (isCollapsed: boolean) => (

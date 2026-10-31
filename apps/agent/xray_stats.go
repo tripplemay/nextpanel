@@ -15,13 +15,14 @@ import (
 type xrayNode struct {
 	NodeID    string `json:"nodeId"`
 	StatsPort int    `json:"statsPort"`
+	Usage     bool   `json:"usage,omitempty"`
 }
 
 // nodeTrafficStat holds cumulative traffic bytes for a single node.
 type nodeTrafficStat struct {
-	NodeID   string `json:"nodeId"`
-	UpBytes  int64  `json:"upBytes"`
-	DownBytes int64 `json:"downBytes"`
+	NodeID    string `json:"nodeId"`
+	UpBytes   int64  `json:"upBytes"`
+	DownBytes int64  `json:"downBytes"`
 }
 
 // rawCodec passes protobuf bytes through without re-encoding, letting us

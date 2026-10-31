@@ -2,9 +2,12 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { json } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
+  // Bounded usage batches share the authenticated Agent channel; other API limits are unchanged.
+  app.use('/api/agent/heartbeat', json({ limit: '2mb' }));
 
   app.setGlobalPrefix('api');
 

@@ -21,11 +21,21 @@ import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { CfAccessService } from './cf-access.service';
 import { CheckCfAccessDto } from './dto/check-cf-access.dto';
 import { CfOptimizationService } from './cf-optimization.service';
+import { UsageEnabledDto } from '../usage/usage.dto';
+import { Audit } from '../common/decorators/audit.decorator';
 
 @ApiTags('subscriptions')
 @Controller('subscriptions')
 export class SubscriptionsController {
   constructor(private subscriptionsService: SubscriptionsService, private cfAccess: CfAccessService, private cfOptimizer: CfOptimizationService) {}
+
+  @Post(':id/usage')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  @Audit('UPDATE', 'subscription-usage')
+  usage(@Param('id') id: string, @Body() dto: UsageEnabledDto, @CurrentUser() user: { id: string }) {
+    return this.subscriptionsService.setUsage(id, user.id, dto.enabled);
+  }
 
   @Get('cf-access/optimization/:nodeId')
   @UseGuards(JwtAuthGuard, RolesGuard)

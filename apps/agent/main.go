@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	version           = "1.7.0"
+	version           = "1.8.0"
 	heartbeatInterval = 10 * time.Second
 	httpTimeout       = 8 * time.Second
 )
@@ -44,6 +44,7 @@ type heartbeatPayload struct {
 	NetworkOut   uint64            `json:"networkOut"`
 	NodeTraffic  []nodeTrafficStat `json:"nodeTraffic,omitempty"`
 	NodeStatuses []nodeStatus      `json:"nodeStatuses,omitempty"`
+	UsageSamples []usageSample     `json:"usageSamples,omitempty"`
 }
 
 type ipCheckTask struct {
@@ -112,6 +113,7 @@ func sendHeartbeat(cfg *Config, m *Metrics, traffic []nodeTrafficStat, chainStat
 		NetworkOut:   m.NetworkOut,
 		NodeTraffic:  traffic,
 		NodeStatuses: chainStatuses,
+		UsageSamples: latestUsageSamples(),
 	}
 
 	body, err := json.Marshal(payload)
@@ -137,6 +139,23 @@ func sendHeartbeat(cfg *Config, m *Metrics, traffic []nodeTrafficStat, chainStat
 	}
 	if err != nil {
 		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	// A rolled-back panel may reject the optional extension. Retry the original
+	// heartbeat once, on the same endpoint; never downgrade authentication.
+	if len(payload.UsageSamples) > 0 && (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusRequestEntityTooLarge) {
+		resp.Body.Close()
+		payload.UsageSamples = nil
+		usageCache.Lock()
+		usageCache.samples = nil
+		usageCache.Unlock()
+		body, err = json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		resp, err = httpClient.Post(url, "application/json", bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("请求失败: %w", err)
+		}
 	}
 	defer resp.Body.Close()
 
@@ -209,6 +228,7 @@ func main() {
 					}
 				}
 				xrayNodes = hbResp.XrayNodes
+				refreshUsageSamples(xrayNodes)
 				log.Printf("心跳已发送 CPU=%.1f%% MEM=%.1f%% DISK=%.1f%% xrayNodes=%d",
 					m.CPU, m.Mem, m.Disk, len(xrayNodes))
 

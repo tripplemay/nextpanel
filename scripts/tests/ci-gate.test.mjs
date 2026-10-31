@@ -19,7 +19,7 @@ test('production deployment depends on the reusable validation gate without bypa
   assert.doesNotMatch(validation, /secrets\.|continue-on-error:/);
 });
 
-for (const failure of ['root:eslint', 'root:sing-box', 'apps/server:jest', 'root:ops', 'apps/server:nest', 'root:database', 'apps/web:tsc', 'apps/web:next', 'root:browser', '']) {
+for (const failure of ['root:eslint', 'root:sing-box', 'apps/server:jest', 'root:ops', 'apps/agent:go-test', 'apps/agent:go-amd64', 'apps/agent:go-arm64', 'apps/server:nest', 'root:database', 'apps/web:tsc', 'apps/web:next', 'root:browser', '']) {
   test(`verification fails closed at ${failure || 'all stages succeed'}`, () => {
     const temp = realpathSync(mkdtempSync(join(tmpdir(), 'np-ci-gate-')));
     try {
@@ -37,11 +37,14 @@ if [[ "$name" == node ]]; then
     *) name=ops ;;
   esac
 fi
+if [[ "$name" == go ]]; then
+  if [[ "$1" == test ]]; then name=go-test; else name="go-\${GOARCH}"; fi
+fi
 step="$dir:$name"
 printf '%s\\n' "$step" >> "$TEST_ROOT/events"
 [[ "$step" != "$FAIL_STEP" ]] || exit 42
 `;
-      for (const file of ['bin/node', 'bin/sing-box', 'node_modules/.bin/eslint', 'apps/server/node_modules/.bin/prisma', 'apps/server/node_modules/.bin/tsc',
+      for (const file of ['bin/node', 'bin/go', 'bin/sing-box', 'node_modules/.bin/eslint', 'apps/server/node_modules/.bin/prisma', 'apps/server/node_modules/.bin/tsc',
         'apps/server/node_modules/.bin/jest', 'apps/server/node_modules/.bin/nest',
         'apps/web/node_modules/.bin/tsc', 'apps/web/node_modules/.bin/next', 'packages/shared/node_modules/.bin/tsc']) {
         mkdirSync(dirname(join(temp, file)), { recursive: true });
@@ -53,7 +56,7 @@ printf '%s\\n' "$step" >> "$TEST_ROOT/events"
       }
       const result = spawnSync('bash', ['scripts/ci/verify.sh'], {
         cwd: temp, encoding: 'utf8',
-        env: { ...process.env, TEST_ROOT: temp, PG_BIN: '/fixture', FAIL_STEP: failure, PATH: `${temp}/bin:${process.env.PATH}` },
+        env: { ...process.env, TEST_ROOT: temp, PG_BIN: '/fixture', XRAY_BINARY: '/fixture/xray', GO_BINARY: join(temp, 'bin/go'), FAIL_STEP: failure, PATH: `${temp}/bin:${process.env.PATH}` },
       });
       assert.equal(result.status, failure ? 42 : 0, result.stderr);
       const events = readFileSync(join(temp, 'events'), 'utf8').trim().split('\n');

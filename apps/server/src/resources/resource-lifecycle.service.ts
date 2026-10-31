@@ -173,6 +173,17 @@ export class ResourceLifecycleService {
     }
   }
 
+  async assertUnchangedDeployment(ssh: NodeSSH, server: Server, nodeId: string): Promise<string> {
+    const hostId = await this.remoteHost(ssh, server.remoteHostId);
+    const paths = resourcePaths(nodeId, 'ENTRY');
+    const configHash = await this.configHash(ssh, paths.config);
+    const raw = await this.readManifest(ssh, paths.manifest);
+    if (!hostId || !configHash || !raw || !this.matchesManifest(raw, {
+      panelInstanceId: await this.instanceId(), hostId, serverId: server.id, nodeId, role: 'ENTRY', configHash,
+    })) throw new CleanupBlockedError('Remote configuration or ownership changed; refusing automatic changes');
+    return configHash;
+  }
+
   async observeServices(server: Pick<Server, 'id' | 'userId'>, names: string[], complete = false) {
     if (!complete && (this.heartbeatInventoryAt.get(server.id) ?? 0) > Date.now() - 60000) return;
     const services = [...new Set(names)].filter(n => /^nextpanel-(?:chain-)?[a-zA-Z0-9_-]{1,100}$/.test(n) && n !== 'nextpanel-agent');

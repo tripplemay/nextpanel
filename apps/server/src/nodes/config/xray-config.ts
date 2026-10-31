@@ -1,5 +1,6 @@
 import type { NodeInfo, NodeCredentials } from './config-generator';
 import { REALITY_DEFAULT_SNI, REALITY_FLOW } from '../protocols/reality';
+import { usageConfig } from '../../usage/usage-config';
 
 // ─── Xray / V2Ray ────────────────────────────────────────────────────────────
 
@@ -83,7 +84,7 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
       routingRules.push({ type: 'field', inboundTag: [`in-${node.id}`], outboundTag: 'chain-exit' });
     }
 
-    return JSON.stringify(
+    const config = JSON.stringify(
       {
         log: { loglevel: 'warning' },
         stats: {},
@@ -107,6 +108,7 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
       null,
       2,
     );
+    return node.usageUsers ? usageConfig(config, node.id, node.statsPort, node.usageUsers).config : config;
   }
 
   const config: Record<string, unknown> = {

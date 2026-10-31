@@ -50,6 +50,7 @@ TUIC 和 AnyTLS 创建时要求用户已配置状态为 `active` 的 Cloudflare 
 - 支持刷新订阅链接（重新生成 token）
 - 导出弹窗含链接复制 + QR 码
 - 可选 CF-only 订阅：VLESS + WS + TLS 支持自动候选探查、三网实测分组和 Clash/Mihomo 动态候选更新，无需手填 IP；也保留手工优选模式。始终保留原 SNI/WS Host、TLS 校验和 CDN，空线路不回退源站。缺少真实运营商测点时仅提供通用/默认 CF 候选，不冒充三网实测。后台任务默认关闭；配置与验收见 [自动优选手册](docs/RUNBOOK-cf-auto.md) 和 [源站隐藏验收](docs/RUNBOOK-cf-access.md)。
+- 可选服务端使用观测：无需电脑采集器，按分享身份、托管节点和 CF 候选配置观察聚合流量，提供明暗主题总览、移动端卡片、证据详情和接入状态。实际拨入 CF IP 与真实在线人数不作推断；默认关闭，启用与兼容回退见 [使用观测手册](docs/RUNBOOK-server-usage.md)。
 
 新增协议的导出兼容性：
 
@@ -247,6 +248,7 @@ Auth, Servers, Nodes, ExternalNodes, Subscriptions, IpCheck, Metrics, Agent, Aud
 | `GFW_CHECK_FUNCTION_TOKEN` | 可达性检测函数认证 Token（可选） |
 | `CF_OPTIMIZATION_ENABLED` | 自动 CF 探查调度开关（默认关闭） |
 | `CF_OPTIMIZATION_PROBES` | 独立 v2 测点登记 JSON；密钥通过引用的环境变量注入，见自动优选手册 |
+| `USAGE_OBSERVATION_ENABLED` | 默认 `false`；服务端使用观测总开关，需 Agent 1.8.0+、增量迁移和节点显式准备 |
 
 **前端** (`apps/web/.env.local`)：
 

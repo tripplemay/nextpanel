@@ -20,6 +20,7 @@ export interface NodeInfo {
   egressIpPolicy?: string;
   /** xray stats API port — only passed for xray/v2ray nodes during deploy */
   statsPort?: number;
+  usageUsers?: { id: string; email: string }[];
   /** Chain proxy: exit server IP (when set, outbound goes to exit server instead of freedom) */
   chainExitIp?: string;
   /** Chain proxy: exit server port (dokodemo-door / internal VLESS on exit server) */

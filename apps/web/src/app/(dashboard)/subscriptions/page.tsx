@@ -504,6 +504,7 @@ export default function SubscriptionsPage() {
       <PageHeader
         title="订阅管理"
         addLabel="新增订阅"
+        extra={<Button href="/usage" icon={<TeamOutlined />}>使用观测</Button>}
         onAdd={() => setCreateOpen(true)}
       />
 
