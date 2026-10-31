@@ -2,7 +2,7 @@ import { Injectable, Optional, NotFoundException, ForbiddenException, ConflictEx
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service';
 import { NodesService } from '../nodes/nodes.service';
-import { buildShareUri, buildClashSubscription, buildClashProxy, buildSingboxOutbound, buildFullSingboxConfig, buildHomeProxyConfig } from './uri-builder';
+import { buildShareUri, buildClashSubscription, buildClashProxy, buildSingboxOutbound, buildFullSingboxConfig, buildHomeProxyConfig, buildCfUnavailableProvider } from './uri-builder';
 import type { NodeExportInfo } from './uri-builder';
 import { importedTransportHost } from '../external-nodes/uri-parser';
 import { CryptoService } from '../common/crypto/crypto.service';
@@ -16,6 +16,7 @@ type CfOptions = { cfOnly?: boolean; cfPreferredIps?: string[]; cfAuto?: boolean
 type SubscriptionNode = {
   node: {
     id: string;
+    userId: string;
     name: string;
     protocol: string;
     implementation: string | null;
@@ -327,14 +328,14 @@ export class SubscriptionsService {
   }
 
   async generateCfProvider(by: { token?: string; shareToken?: string }, nodeId: string): Promise<string> {
-    const nodes = (await this.fetchActiveNodes(by)).filter(n => n.cfAuto && n.cfNodeId === nodeId);
-    if (!nodes.length) throw new NotFoundException('CF provider not available');
+    const nodes = await this.fetchActiveNodes(by, nodeId);
+    if (!nodes.length) return buildCfUnavailableProvider(nodeId);
     return ['proxies:', ...nodes.map(n => buildClashProxy(n))].join('\n');
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────
 
-  private async fetchActiveNodes(by: { token?: string; shareToken?: string }): Promise<NodeExportInfo[]> {
+  private async fetchActiveNodes(by: { token?: string; shareToken?: string }, providerNodeId?: string): Promise<NodeExportInfo[]> {
     const include = {
       nodes: {
         include: {
@@ -362,13 +363,18 @@ export class SubscriptionsService {
     }
 
     if (!sub) throw new NotFoundException('Subscription not found');
+    if (providerNodeId !== undefined && (!sub.cfOnly || !sub.cfAuto
+      || !sub.nodes.some(({ node }) => node.id === providerNodeId && node.userId === sub.ownerId))) {
+      throw new NotFoundException('CF provider not available');
+    }
 
     const result: NodeExportInfo[] = [];
     const preferredIps = sub.cfOnly ? normalizeCfPreferredIps(sub.cfPreferredIps ?? []) : [];
     if (sub.cfOnly && (sub.externalNodes.length > 0 || sub.nodes.length > 20)) {
       throw new ServiceUnavailableException('CF-only subscription selection is invalid');
     }
-    const activeNodes = sub.nodes.filter(({ node }) => node.enabled && node.status === 'RUNNING');
+    const activeNodes = sub.nodes.filter(({ node }) => node.enabled && node.status === 'RUNNING'
+      && (providerNodeId === undefined || node.id === providerNodeId));
     let defaultIps = new Map<string, string | null>();
     if (sub.cfOnly) {
       activeNodes.forEach(({ node }) => assertCfManagedNode(node));
@@ -393,7 +399,7 @@ export class SubscriptionsService {
         if (sub.cfAuto && !this.cfOptimizer) throw new ServiceUnavailableException('CF optimization unavailable');
         const variants = sub.cfAuto ? await this.cfOptimizer!.variants(exported, node, defaultIp)
           : cfVariants(exported, node.id, preferredIps, defaultIp);
-        if (variants.length === 0) throw new ServiceUnavailableException('No Cloudflare endpoint available; direct fallback is forbidden');
+        if (variants.length === 0 && providerNodeId === undefined) throw new ServiceUnavailableException('No Cloudflare endpoint available; direct fallback is forbidden');
         result.push(...variants);
       } else result.push(exported);
     }
@@ -426,7 +432,7 @@ export class SubscriptionsService {
       });
     }
 
-    if (sub.cfOnly && result.length === 0) {
+    if (sub.cfOnly && result.length === 0 && providerNodeId === undefined) {
       throw new ServiceUnavailableException('No active CF-only nodes; direct fallback is forbidden');
     }
     return result;

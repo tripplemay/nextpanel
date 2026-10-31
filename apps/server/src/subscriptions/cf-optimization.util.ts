@@ -134,9 +134,7 @@ export function rankCandidates(observations: CfObservation[], incumbent: CfObser
 
 export function automaticVariants(node: NodeExportInfo, nodeId: string, profiles: { carrier: CfCarrier; ips: string[] }[], defaultIp: string | null): NodeExportInfo[] {
   const base = `${node.name} [CF ${nodeId}]`;
-  const carriers = profiles.filter(p => p.carrier !== 'GENERIC');
-  const selected = carriers.length ? carriers : profiles;
-  const endpoints = selected.flatMap(p => [...new Set(p.ips)].slice(0, 3).map((ip, i) => ({ ip, carrier: p.carrier as CfCarrier | 'DNS', label: `${CF_LABELS[p.carrier]} ${i + 1}` })));
+  const endpoints = profiles.flatMap(p => [...new Set(p.ips)].slice(0, 3).map((ip, i) => ({ ip, carrier: p.carrier as CfCarrier | 'DNS', label: `${CF_LABELS[p.carrier]} ${i + 1}` })));
   if (defaultIp) endpoints.push({ ip: defaultIp, carrier: 'DNS', label: CF_LABELS.DNS });
   return endpoints.map(e => ({ ...node, host: e.ip, name: `${base} ${e.label} [CF:${e.carrier}]`,
     cfGroup: base, cfAuto: true, cfNodeId: nodeId, cfCarrier: e.carrier,

@@ -117,6 +117,15 @@ describe('one subscription, three carrier groups and dynamic providers', () => {
     expect(generic.map(n => n.cfCarrier)).toEqual(['GENERIC', 'DNS']);
     expect(generic.some(n => /电信|移动|联通/.test(n.name))).toBe(false);
   });
+  it('retains generic fallback alongside partial carrier coverage without DNS', () => {
+    const mixed = automaticVariants(exported, 'node', [
+      { carrier: 'TELECOM', ips: ['104.16.0.1'] }, { carrier: 'GENERIC', ips: ['104.17.0.1'] },
+    ], null);
+    expect(mixed.map(n => n.cfCarrier)).toEqual(['TELECOM', 'GENERIC']);
+    const config = buildClashSubscription(mixed, 'https://panel.example.com');
+    expect(config).toContain(mixed[1].name);
+    expect(mixed.some(n => /联通|移动/.test(n.name))).toBe(false);
+  });
 });
 
 describe('optimization service boundaries', () => {

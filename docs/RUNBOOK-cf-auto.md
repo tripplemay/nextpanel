@@ -124,8 +124,10 @@ an allegedly measured carrier IP.
 
 ## Subscription updates
 
-- Up to three aliases per measured carrier plus one validated default CF address;
-  maximum ten endpoints per original node. UUID, SNI, WS Host/path stay unchanged.
+- Up to three aliases per measured carrier and three generic fallback aliases,
+  plus one validated default CF address; maximum thirteen endpoints per original
+  node. UUID, SNI, WS Host/path stay unchanged. Partial carrier coverage never
+  removes safe generic candidates from the other carrier groups.
 - One subscription includes all measured carriers. Clash/Mihomo provides a
   per-node all-carrier URLTest group and telecom/unicom/mobile subgroups. Clients
   may use the all-carrier group to choose locally without maintaining separate
@@ -134,6 +136,10 @@ an allegedly measured carrier IP.
   and probes every five minutes. Provider URLs retain owner/share token scope;
   deleting a share or rotating its applicable token blocks future fetches.
   Empty provider groups explicitly contain REJECT, never an origin/DIRECT fallback.
+  Still-authorized providers with no eligible endpoints return a `type: reject`
+  sentinel with HTTP 200 to clear old entries. Its name matches no carrier filter,
+  leaving every group on REJECT. Mihomo rejects a literal zero-proxy HTTP update,
+  so `proxies: []` alone would incorrectly retain the previous cached endpoints.
 - Provider fetches use DIRECT to the **HTTPS panel control endpoint**, not to the
   proxy origin. Existing normal domestic/LAN DIRECT rules are unchanged.
 - Sing-box/HomeProxy get static alias snapshots and URLTest groups; URI/Base64

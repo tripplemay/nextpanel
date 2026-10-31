@@ -19,6 +19,12 @@ export interface NodeExportInfo {
   cfCarrier?: 'GENERIC' | 'TELECOM' | 'UNICOM' | 'MOBILE' | 'DNS';
 }
 
+export function buildCfUnavailableProvider(nodeId: string): string {
+  // Mihomo rejects a zero-proxy HTTP update and retains old entries. This inert
+  // sentinel replaces them but matches no CF carrier filter, leaving REJECT only.
+  return `proxies:\n  - name: ${JSON.stringify(`CF unavailable [${nodeId}]`)}\n    type: reject\n`;
+}
+
 import { CF_LABELS } from './cf-optimization.util';
 
 import { REALITY_DEFAULT_SNI, REALITY_FLOW } from '../nodes/protocols/reality';

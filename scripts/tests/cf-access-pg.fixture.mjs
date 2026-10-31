@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 export async function verifyCfAccess({ prisma, cipher, require, root, databaseUrl }) {
   const { CfAccessService } = require(`${root}/apps/server/src/subscriptions/cf-access.service.ts`);
   const { SubscriptionsService } = require(`${root}/apps/server/src/subscriptions/subscriptions.service.ts`);
+  const { buildCfUnavailableProvider } = require(`${root}/apps/server/src/subscriptions/uri-builder.ts`);
   const original = await prisma.subscription.findUniqueOrThrow({ where: { id: 'sub' } });
   assert.equal(original.cfOnly, false);
   assert.equal(original.cfAuto, false);
@@ -66,6 +67,18 @@ export async function verifyCfAccess({ prisma, cipher, require, root, databaseUr
     const ownerProvider = await subscriptions.generateCfProvider({ token: updated.token }, current.id);
     assert.equal(ownerProvider, await subscriptions.generateCfProvider({ shareToken: share.shareToken }, current.id));
     assert.ok(ownerProvider.includes('TELECOM')); assert.ok(!ownerProvider.includes('192.0.2.90'));
+    const withDns = cf.defaultIp;
+    try {
+      cf.defaultIp = async () => null;
+      await prisma.cfOptimization.updateMany({ where: { nodeId: current.id }, data: { published: [] } });
+      assert.equal(await subscriptions.generateCfProvider({ token: updated.token }, current.id), buildCfUnavailableProvider(current.id));
+      assert.equal(await subscriptions.generateCfProvider({ shareToken: share.shareToken }, current.id), buildCfUnavailableProvider(current.id));
+      await assert.rejects(subscriptions.generateClashContent(updated.token), /direct fallback is forbidden/);
+      await assert.rejects(subscriptions.generateCfProvider({ token: updated.token }, 'unknown'), /not available/);
+    } finally {
+      cf.defaultIp = withDns;
+      await prisma.cfOptimization.updateMany({ where: { nodeId: current.id }, data: { published: observations } });
+    }
     await assert.rejects(subscriptions.generateCfProvider({ token: original.token }, current.id), /not available/);
     const sharedClash = (await subscriptions.generateClashContentByShareToken(share.shareToken)).content;
     assert.ok(sharedClash.includes(`/share/${share.shareToken}/cf-provider/cf-node`));
@@ -101,6 +114,7 @@ export async function verifyCfAccess({ prisma, cipher, require, root, databaseUr
     if (oldDatabase === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = oldDatabase;
   }
   await prisma.node.update({ where: { id: 'cf-node' }, data: { enabled: false } });
+  assert.equal(await subscriptions.generateCfProvider({ token: updated.token }, 'cf-node'), buildCfUnavailableProvider('cf-node'));
   await assert.rejects(subscriptions.generateHomeProxyContent(updated.token), /direct fallback is forbidden/);
   await prisma.node.delete({ where: { id: 'cf-node' } });
   assert.equal(await prisma.cfOptimization.count(), 0);
