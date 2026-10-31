@@ -41,6 +41,7 @@ import AgentInstallDrawer from '@/components/servers/AgentInstallDrawer';
 import AutoSetupDrawer from '@/components/servers/AutoSetupDrawer';
 import ServerCard from '@/components/servers/ServerCard';
 import ServerTagList from '@/components/servers/ServerTagList';
+import ResourceLifecyclePanel from '@/components/servers/ResourceLifecyclePanel';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
 import AppCard from '@/components/common/AppCard';
@@ -177,7 +178,8 @@ export default function ServersPage() {
     mutationFn: (id: string) => serversApi.delete(id, true),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['servers'] });
-      message.success('服务器已强制删除');
+      qc.invalidateQueries({ queryKey: ['resource-lifecycle'] });
+      message.success('服务器已移出列表，远程清理任务将继续重试');
     },
     onError: () => message.error('强制删除失败'),
   });
@@ -210,14 +212,19 @@ export default function ServersPage() {
     });
 
   const handleForceDelete = (record: Server) => {
-    const failures: { nodeName: string; error: string }[] = record.deleteError
-      ? JSON.parse(record.deleteError) as { nodeName: string; error: string }[]
-      : [];
+    let failures: { nodeName: string; error: string }[] = record.deleteError
+      ? [{ nodeName: '资源核对', error: record.deleteError }] : [];
+    if (record.deleteError) {
+      try {
+        const parsed: unknown = JSON.parse(record.deleteError);
+        if (Array.isArray(parsed) && parsed.every(f => f && typeof f.nodeName === 'string' && typeof f.error === 'string')) failures = parsed;
+      } catch { /* New cleanup errors are plain text; older versions stored arrays. */ }
+    }
     modal.confirm({
-      title: '强制删除服务器？',
+      title: '移出列表并保留清理任务？',
       content: (
         <div>
-          <p>以下节点的服务未能从服务器上清理，仍可能在后台运行：</p>
+          <p>仍有资源尚未确认清理完成，远程服务可能仍在运行：</p>
           <ul style={{ paddingLeft: 16, margin: '8px 0' }}>
             {failures.map((f) => (
               <li key={f.nodeName} style={{ fontSize: 12, color: statusColors.error }}>
@@ -225,10 +232,11 @@ export default function ServersPage() {
               </li>
             ))}
           </ul>
-          <p>强制删除将仅删除面板记录，不会清理服务器上的残留服务。</p>
+          <p>服务器将立即移出正常列表。清理任务及必要的加密连接信息会保留；入口、出口和 DNS 分别重试，完成后再最终删除。</p>
+          <p>归属不明或配置已改变的服务不会自动停止，可在“部署资源核对”中查看原因。</p>
         </div>
       ),
-      okText: '确认强制删除',
+      okText: '移出并继续清理',
       okType: 'danger',
       onOk: () => forceDeleteMutation.mutate(record.id),
     });
@@ -466,7 +474,7 @@ export default function ServersPage() {
       title: '操作',
       render: (_: unknown, record) => {
         if (record.status === 'DELETING') {
-          return <Text type="secondary" style={{ fontSize: 12 }}>删除中，请稍候...</Text>;
+          return <Space><Text type="secondary" style={{ fontSize: 12 }}>清理任务处理中</Text><Button size="small" onClick={() => handleForceDelete(record)}>移出列表</Button></Space>;
         }
         if (record.status === 'ERROR' && record.deleteError) {
           return (
@@ -524,6 +532,7 @@ export default function ServersPage() {
         addLabel="新增服务器"
         onAdd={handleAddServer}
       />
+      <ResourceLifecyclePanel servers={data ?? []} />
 
       {/* 首次加载骨架屏；30s 轮询为后台静默刷新，不再闪烁骨架 */}
       {isLoading ? (

@@ -11,7 +11,7 @@ import { connectSsh } from '../nodes/ssh/ssh.util';
 import { CreateServerDto } from './dto/create-server.dto';
 import { UpdateServerDto } from './dto/update-server.dto';
 import { RestoreCredentialsDto } from './dto/restore-credentials.dto';
-import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
+import { ResourceLifecycleService } from '../resources/resource-lifecycle.service';
 
 @Injectable()
 export class ServersService {
@@ -24,6 +24,7 @@ export class ServersService {
     private cfService: CloudflareService,
     private cfSettings: CloudflareSettingsService,
     private ipCheck: IpCheckService,
+    private resources: ResourceLifecycleService,
   ) {}
 
   async create(dto: CreateServerDto, userId: string) {
@@ -54,7 +55,7 @@ export class ServersService {
 
   async findAll(userId: string) {
     const servers = await this.prisma.server.findMany({
-      where: { userId },
+      where: { userId, retiredAt: null },
       select: { ...this.safeSelect(), sshAuthEnc: true, ipCheck: { select: { gfwBlocked: true } } },
       orderBy: { createdAt: 'desc' },
     });
@@ -125,129 +126,17 @@ export class ServersService {
    * run in the background so the browser can safely close without affecting the outcome.
    */
   async remove(id: string, userId: string) {
-    await this.withDatabaseLocks([serverPortLock(id)], async () => {
-      await this.findOne(id, userId);
-
-      // Creation paths take the same lock and re-check this state before insert.
-      await this.prisma.server.update({
-        where: { id },
-        data: { status: 'DELETING', deleteError: null },
-      });
-    });
-
-    // Fire-and-forget: SSH cleanup then DB delete
-    void this.runDelete(id, userId);
-
-    return { status: 'DELETING' };
+    return this.resources.queueServerDeletion(id, userId, false);
   }
 
   /**
-   * Force-delete: skip SSH cleanup, delete DB records directly.
-   * Use when the server is permanently unreachable and cleanup is impossible.
-   *
-   * The FK cascade removes both the server's own nodes (serverId) and any chain
-   * nodes that exit through it (exitServerId) — the latter would otherwise be
-   * orphaned with a dangling exit reference.
+   * Retire immediately, retaining credentials and durable cleanup intent.
+   * The worker independently retries each entry, exit and DNS resource.
    */
   async forceRemove(id: string, userId: string) {
-    await this.findOne(id, userId);
-    return this.prisma.server.delete({ where: { id } });
+    return this.resources.queueServerDeletion(id, userId, true);
   }
 
-  private async runDelete(id: string, userId: string): Promise<void> {
-    const nodes = await this.prisma.node.findMany({
-      where: { serverId: id },
-      select: { id: true, name: true, userId: true, cfDnsRecordId: true },
-    });
-
-    // Chain nodes whose EXIT is this server. They physically live on a different
-    // (still-alive) entry server, so the FK cascade alone would leave their
-    // entry-side deployment running but broken. We tear them down explicitly.
-    const chainExitNodes = await this.prisma.node.findMany({
-      where: { exitServerId: id },
-      select: { id: true, name: true, userId: true, cfDnsRecordId: true },
-    });
-
-    // SSH cleanup per node — collect failures
-    const failures: { nodeName: string; error: string }[] = [];
-
-    // Every node on this server shares the same server-core lock. Process them
-    // sequentially so deletion cannot consume one lock connection per waiter.
-    for (const node of nodes) {
-      try {
-        await this.nodeDeploy.undeploy(node.id);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`Server ${id}: undeploy of node ${node.id} failed: ${msg}`);
-        failures.push({ nodeName: node.name, error: msg });
-      }
-    }
-
-    if (failures.length > 0) {
-      await this.prisma.server.update({
-        where: { id },
-        data: {
-          status: 'ERROR',
-          deleteError: JSON.stringify(failures),
-        },
-      });
-      this.logger.warn(`Server ${id}: deletion failed for ${failures.length} node(s)`);
-      return;
-    }
-
-    // Tear down chain nodes that exit through this server from their entry
-    // servers. Deleting their DB records while entry-side processes remain live
-    // would orphan deployments, so failures must block the server deletion.
-    for (const node of chainExitNodes) {
-      try {
-        await this.nodeDeploy.undeploy(node.id);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`Server ${id}: chain-exit node ${node.id} undeploy failed: ${msg}`);
-        failures.push({ nodeName: node.name, error: msg });
-      }
-    }
-
-    if (failures.length > 0) {
-      await this.prisma.server.update({
-        where: { id },
-        data: {
-          status: 'ERROR',
-          deleteError: JSON.stringify(failures),
-        },
-      });
-      this.logger.warn(`Server ${id}: deletion failed for ${failures.length} chain node(s)`);
-      return;
-    }
-
-    // All SSH cleanups succeeded — clean up Cloudflare DNS (best-effort).
-    // Includes chain-exit nodes: the FK cascade will delete their records, so we
-    // must release their CF DNS records here before they vanish.
-    await Promise.allSettled(
-      [...nodes, ...chainExitNodes]
-        .filter((n) => n.cfDnsRecordId && n.userId)
-        .map(async (node) => {
-          const settings = await this.cfSettings.getDecryptedToken(node.userId!).catch(() => null);
-          if (!settings) return;
-          try {
-            await this.cfService.deleteRecord(settings.apiToken, settings.zoneId, node.cfDnsRecordId!);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.logger.warn(`Server ${id}: CF DNS cleanup for node ${node.id} failed: ${msg}`);
-          }
-        }),
-    );
-
-    // DB cascade delete — removes this server's own nodes (serverId cascade) and any
-    // chain nodes that exit through it (exitServerId cascade).
-    await this.prisma.server.delete({ where: { id } }).catch((err) => {
-      this.logger.error(`Server ${id}: DB delete failed: ${err instanceof Error ? err.message : String(err)}`);
-    });
-  }
-
-  private async withDatabaseLocks<T>(keys: string[], work: () => Promise<T>): Promise<T> {
-    return withPostgresAdvisoryLocks(keys, work);
-  }
 
   async checkIp(ip: string, userId: string): Promise<{ exists: boolean }> {
     const server = await this.prisma.server.findFirst({ where: { ip, userId } });
@@ -623,8 +512,4 @@ export class ServersService {
       updatedAt: true,
     } as const;
   }
-}
-
-function serverPortLock(serverId: string): string {
-  return `nextpanel:server-ports:${serverId}`;
 }

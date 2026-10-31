@@ -181,6 +181,11 @@ export default function ServerCard({
       )}
 
       {/* 删除失败操作区 */}
+      {isDeleting && (
+        <div style={{ marginTop: 10 }}>
+          <Button size="small" onClick={event => { event.stopPropagation(); onForceDelete(server); }}>移出列表</Button>
+        </div>
+      )}
       {hasDeleteError && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${token.colorBorderSecondary}` }}>
           <Text type="danger" style={{ fontSize: 11, display: 'block', marginBottom: 6 }}>

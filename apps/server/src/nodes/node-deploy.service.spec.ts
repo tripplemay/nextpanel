@@ -5,6 +5,7 @@ import { CryptoService } from '../common/crypto/crypto.service';
 import { NotFoundException } from '@nestjs/common';
 import { NodeSSH } from 'node-ssh';
 import { generateConfig, generateChainExitConfig } from './config/config-generator';
+import { CleanupBlockedError } from '../resources/resource-lifecycle.service';
 
 jest.mock('../common/database/advisory-lock', () => ({
   withPostgresAdvisoryLocks: (_keys: string[], work: () => Promise<unknown>) => work(),
@@ -28,7 +29,19 @@ jest.mock('./ssh/ssh.util', () => ({
 // ── Mock NodeSSH instance ─────────────────────────────────────────────────────
 const mockExecCommand = jest.fn();
 const mockDispose = jest.fn();
-const mockSsh = { execCommand: mockExecCommand, dispose: mockDispose };
+const mockSsh = {
+  execCommand: (command: string) => {
+    // Older sequence fixtures cover deployment, not snapshot internals. Snapshot
+    // tests use semantic command handlers and exercise the real rollback code.
+    if (!mockExecCommand.getMockImplementation()) {
+      if (command.startsWith('test -f ')) return Promise.resolve({ code: 1, stdout: '', stderr: '' });
+      if (/^systemctl is-(active|enabled) --quiet/.test(command)) return Promise.resolve({ code: 3, stdout: '', stderr: '' });
+      if (command.startsWith('failed=0;') || command.startsWith('rm -f --') && command.includes('.rollback-')) return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+    }
+    return mockExecCommand(command);
+  },
+  dispose: mockDispose,
+};
 
 // ── Mock config generator ─────────────────────────────────────────────────────
 jest.mock('./config/config-generator', () => ({
@@ -53,6 +66,7 @@ const mockPrisma = {
   },
   server: {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
   },
   configSnapshot: {
     findFirst: jest.fn(),
@@ -95,6 +109,7 @@ const mockCfSettings = {
 
 const mockCfService = {
   deleteRecord: jest.fn().mockResolvedValue(undefined),
+  verifyZoneAccess: jest.fn().mockResolvedValue({ valid: true }),
 } as unknown as import('../cloudflare/cloudflare.service').CloudflareService;
 
 const mockXrayTest = {
@@ -113,6 +128,20 @@ const mockSocksExitResolver = {
   }),
 } as unknown as import('./socks-exit-resolver.service').SocksExitResolverService;
 
+const mockOwnershipRollback = jest.fn().mockResolvedValue(undefined);
+const mockResources = {
+  connect: jest.fn(),
+  prepareCleanup: jest.fn(),
+  assertDeploymentOwner: jest.fn().mockResolvedValue(undefined),
+  registerDeployment: jest.fn().mockResolvedValue({ rollback: mockOwnershipRollback }),
+};
+jest.mock('../resources/remote-inventory', () => ({
+  ...jest.requireActual('../resources/remote-inventory'),
+  assertRemotePorts: jest.fn().mockResolvedValue(undefined),
+}));
+import { assertRemotePorts, ListenerNotReadyError, resourcePaths } from '../resources/remote-inventory';
+const mockAssertPorts = assertRemotePorts as jest.Mock;
+
 const svc = new NodeDeployService(
   mockPrisma,
   mockCrypto,
@@ -122,6 +151,7 @@ const svc = new NodeDeployService(
   mockCfService,
   mockXrayTest,
   mockSocksExitResolver,
+  mockResources as any,
 );
 
 interface InternalDeployService {
@@ -149,6 +179,7 @@ interface InternalDeployService {
   autoInstall(ssh: typeof mockSsh, impl: string, log: (msg: string) => void): Promise<string | null>;
   deployChainExit(...args: unknown[]): Promise<unknown>;
   commitChainExitDeployment(deployment: unknown, log: (msg: string) => void): Promise<void>;
+  prepareChainFirewall(deployment: unknown, log: (msg: string) => void): Promise<void>;
   rollbackChainExitDeployment(deployment: unknown, log: (msg: string) => void): Promise<boolean>;
   restoreDeploymentRollback(
     ssh: typeof mockSsh,
@@ -194,15 +225,14 @@ function singBoxRelease(version = '1.13.0', arch = 'amd64') {
  * After binary check, the SSH command sequence is:
  *   1. daemon-reload
  *   2. systemctl stop  (port cleanup)
- *   3. pkill           (orphan cleanup)
- *   4. fuser {statsPort}/tcp  → empty stdout (freePortIfOrphaned — no pid found)
- *   5. fuser {listenPort}/tcp → empty stdout (freePortIfOrphaned — no pid found)
- *   6. systemctl enable && start
- *   7. systemctl is-active (post-start check)
- *   8. openFirewallPort (1 call for VMESS/TCP)
- *   9. systemctl is-active  → 'active'
+ *   3. systemctl enable && start
+ *   4. systemctl is-active (post-start check)
+ *   5. openFirewallPort (1 call for VMESS/TCP)
+ *   6. systemctl is-active (final)
+ * Socket ownership and resource manifests have dedicated fixtures below.
  */
 function setupHappyPath() {
+  mockExecCommand.mockReset();
   (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
   (mockPrisma.configSnapshot.findFirst as jest.Mock).mockResolvedValue({ version: 1 });
   (mockPrisma.configSnapshot.create as jest.Mock).mockResolvedValue({});
@@ -212,18 +242,19 @@ function setupHappyPath() {
   mockExecCommand
     .mockResolvedValueOnce({ stderr: '' })        // 1. daemon-reload
     .mockResolvedValueOnce({ stderr: '' })        // 2. systemctl stop
-    .mockResolvedValueOnce({ stdout: '' })        // 3. pkill
-    .mockResolvedValueOnce({ stdout: '' })        // 4. fuser statsPort (no pid)
-    .mockResolvedValueOnce({ stdout: '' })        // 5. fuser listenPort (no pid)
-    .mockResolvedValueOnce({ stderr: '' })        // 6. systemctl enable && start
-    .mockResolvedValueOnce({ stdout: 'active' })  // 7. is-active (post-start)
-    .mockResolvedValueOnce({ stdout: '' })        // 8. openFirewallPort
-    .mockResolvedValueOnce({ stdout: 'active' }); // 9. is-active (final)
+    .mockResolvedValueOnce({ stderr: '' })        // 3. systemctl enable && start
+    .mockResolvedValueOnce({ stdout: 'active' })  // 4. is-active (post-start)
+    .mockResolvedValueOnce({ stdout: '' })        // 5. openFirewallPort
+    .mockResolvedValueOnce({ stdout: 'active' }); // 6. is-active (final)
 }
 
 beforeEach(() => {
   jest.restoreAllMocks();
   jest.clearAllMocks();
+  mockExecCommand.mockReset();
+  mockAssertPorts.mockReset().mockResolvedValue(undefined);
+  mockResources.assertDeploymentOwner.mockReset().mockResolvedValue(undefined);
+  mockResources.registerDeployment.mockReset().mockResolvedValue({ rollback: mockOwnershipRollback });
   // Restore defaults that clearAllMocks wipes
   mockUploadText.mockResolvedValue(undefined);
   mockDispose.mockReturnValue(undefined);
@@ -255,9 +286,6 @@ beforeEach(() => {
   mockExecCommand
     .mockResolvedValueOnce({ stderr: '' })        // daemon-reload
     .mockResolvedValueOnce({ stderr: '' })        // systemctl stop
-    .mockResolvedValueOnce({ stdout: '' })        // pkill
-    .mockResolvedValueOnce({ stdout: '' })        // fuser statsPort
-    .mockResolvedValueOnce({ stdout: '' })        // fuser listenPort
     .mockResolvedValueOnce({ stderr: '' })        // systemctl enable && start
     .mockResolvedValueOnce({ stdout: 'active' })  // is-active (post-start)
     .mockResolvedValueOnce({ stdout: '' })        // openFirewallPort
@@ -267,7 +295,87 @@ beforeEach(() => {
 // Speed up the 2s timer in deploy
 jest.useFakeTimers();
 
+describe('detached resource cleanup', () => {
+  const job = { id: 'cleanup', ownerId: 'user-1', serverId: 'srv-1', nodeId: 'node-1', role: 'ENTRY', payload: { port: 10086, statsPort: 30086, protocols: ['tcp'] } };
+  beforeEach(() => {
+    (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
+    mockResources.connect.mockReset().mockResolvedValue(mockSsh);
+    mockResources.prepareCleanup.mockReset().mockResolvedValue(resourcePaths('node-1', 'ENTRY'));
+    mockExecCommand.mockReset().mockImplementation(async () => ({ code: 0, stdout: '', stderr: '' }));
+  });
+
+  it('validates persisted targets and ownership before issuing a stop/remove command', async () => {
+    await expect(svc.cleanupDetachedResource({ ...job, payload: {} } as any)).rejects.toThrow('Missing remote');
+    expect(mockResources.connect).not.toHaveBeenCalled();
+    mockResources.prepareCleanup.mockRejectedValueOnce(new Error('Ownership mismatch'));
+    await expect(svc.cleanupDetachedResource(job as any)).rejects.toThrow('Ownership mismatch');
+    expect(mockExecCommand).not.toHaveBeenCalled();
+    expect(mockDispose).toHaveBeenCalled();
+  });
+
+  it('verifies stop/disable/config removal and port release before removing only tagged firewall rules', async () => {
+    await svc.cleanupDetachedResource(job as any);
+    const commands = mockExecCommand.mock.calls.map(([command]) => command as string);
+    expect(commands[0]).toContain("systemctl disable 'nextpanel-node-1'");
+    expect(commands[0]).toContain("! systemctl is-enabled --quiet 'nextpanel-node-1'");
+    expect(commands[0]).toContain("test ! -e '/etc/systemd/system/nextpanel-node-1.service'");
+    expect(mockAssertPorts).toHaveBeenCalledWith(mockSsh, [10086, 30086]);
+    expect(commands[1]).toContain('nextpanel-managed');
+    expect(commands.at(-1)).toContain('/etc/nextpanel/ownership/nextpanel-node-1.json');
+    expect(commands.at(-1)).toContain('/etc/nextpanel/certs/node-1.key');
+    expect(commands.every(c => !/pkill|fuser|kill -9/.test(c))).toBe(true);
+  });
+
+  it('does not close firewall access used by another listener after stopping its own unit', async () => {
+    mockAssertPorts.mockRejectedValueOnce(new Error('another listener'));
+    await expect(svc.cleanupDetachedResource(job as any)).rejects.toThrow('another listener');
+    expect(mockExecCommand).toHaveBeenCalledTimes(1);
+    expect(mockExecCommand.mock.calls[0][0]).not.toContain('iptables');
+  });
+
+  it('cleans an exit independently without connecting to the deleted entry host', async () => {
+    mockResources.prepareCleanup.mockResolvedValue(resourcePaths('node-1', 'EXIT'));
+    await svc.cleanupDetachedResource({ ...job, role: 'EXIT', payload: { port: 15000, protocols: ['tcp'], entryIp: '192.0.2.1' } } as any);
+    expect(mockResources.connect).toHaveBeenCalledTimes(1);
+    expect(mockExecCommand.mock.calls[0][0]).toContain('nextpanel-chain-node-1');
+    expect(mockExecCommand.mock.calls[1][0]).toContain('nextpanel-chain-managed');
+    expect(mockExecCommand.mock.calls[1][0]).toContain('192.0.2.1');
+  });
+
+  it('cleans DNS without requiring either SSH endpoint', async () => {
+    (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({ apiToken: 'fixture', zoneId: 'zone' });
+    await svc.cleanupDetachedResource({ ...job, role: 'DNS', payload: { cfRecordId: 'record', cfZoneId: 'original-zone' } } as any);
+    expect(mockCfService.verifyZoneAccess).toHaveBeenCalledWith('fixture', 'original-zone');
+    expect(mockCfService.deleteRecord).toHaveBeenCalledWith('fixture', 'original-zone', 'record');
+    expect(mockResources.connect).not.toHaveBeenCalled();
+  });
+
+  it('does not treat an unknown DNS zone as an already-deleted record', async () => {
+    await expect(svc.cleanupDetachedResource({ ...job, role: 'DNS', payload: { cfRecordId: 'record' } } as any)).rejects.toThrow('original zone');
+    expect(mockCfService.deleteRecord).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('does not delete before verification and preserves retryable=%s', async retryable => {
+    (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({ apiToken: 'fixture', zoneId: 'zone' });
+    (mockCfService.verifyZoneAccess as jest.Mock).mockResolvedValueOnce({ valid: false, retryable });
+    const error = await svc.cleanupDetachedResource({ ...job, role: 'DNS', payload: { cfRecordId: 'record', cfZoneId: 'original-zone' } } as any).catch(e => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error instanceof CleanupBlockedError).toBe(!retryable);
+    expect(mockCfService.deleteRecord).not.toHaveBeenCalled();
+  });
+});
+
 describe('NodeDeployService', () => {
+  it('waits for asynchronous socket startup but never retries foreign-port conflicts', async () => {
+    mockAssertPorts.mockRejectedValueOnce(new ListenerNotReadyError('Expected listener missing'));
+    const ready = (svc as any).waitForListeners(mockSsh, 10086, 'nextpanel-node-1', 'VMESS');
+    await jest.runAllTimersAsync();
+    await ready;
+    expect(mockAssertPorts).toHaveBeenCalledTimes(2);
+    mockAssertPorts.mockReset().mockRejectedValue(new Error('foreign listener'));
+    await expect((svc as any).waitForListeners(mockSsh, 10086, 'nextpanel-node-1', 'VMESS')).rejects.toThrow('foreign listener');
+    expect(mockAssertPorts).toHaveBeenCalledTimes(1);
+  });
   describe('deploy', () => {
     it('throws NotFoundException when node is not found', async () => {
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(null);
@@ -347,9 +455,6 @@ describe('NodeDeployService', () => {
       mockExecCommand
         .mockResolvedValueOnce({ stderr: '' })        // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })        // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })        // pkill
-        .mockResolvedValueOnce({ stdout: '' })        // fuser statsPort
-        .mockResolvedValueOnce({ stdout: '' })        // fuser listenPort
         .mockResolvedValueOnce({ stderr: '' })        // systemctl enable && start
         .mockResolvedValueOnce({ stdout: 'active' })  // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })        // openFirewallPort
@@ -374,9 +479,6 @@ describe('NodeDeployService', () => {
       mockExecCommand
         .mockResolvedValueOnce({ stderr: '' })         // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })         // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })         // pkill
-        .mockResolvedValueOnce({ stdout: '' })         // fuser statsPort
-        .mockResolvedValueOnce({ stdout: '' })         // fuser listenPort
         .mockResolvedValueOnce({ stderr: '' })         // systemctl enable && start
         .mockResolvedValueOnce({ stdout: 'active' })   // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })         // openFirewallPort
@@ -435,9 +537,6 @@ describe('NodeDeployService', () => {
         .mockResolvedValueOnce({ code: 0 })                                            // test -x xray
         .mockResolvedValueOnce({ stderr: '' })                                         // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })                                         // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })                                         // pkill
-        .mockResolvedValueOnce({ stdout: '' })                                         // fuser statsPort
-        .mockResolvedValueOnce({ stdout: '' })                                         // fuser listenPort
         .mockResolvedValueOnce({ stderr: '' })                                         // systemctl enable && start
         .mockResolvedValueOnce({ stdout: 'active' })                                  // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })                                         // openFirewallPort
@@ -515,9 +614,6 @@ describe('NodeDeployService', () => {
       mockExecCommand
         .mockResolvedValueOnce({ stderr: 'some warning' }) // daemon-reload with warning
         .mockResolvedValueOnce({ stderr: '' })             // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })             // pkill
-        .mockResolvedValueOnce({ stdout: '' })             // fuser statsPort
-        .mockResolvedValueOnce({ stdout: '' })             // fuser listenPort
         .mockResolvedValueOnce({ stderr: '' })             // systemctl enable && start
         .mockResolvedValueOnce({ stdout: 'active' })       // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })             // openFirewallPort
@@ -542,9 +638,6 @@ describe('NodeDeployService', () => {
       mockExecCommand
         .mockResolvedValueOnce({ stderr: '' })              // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })              // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })              // pkill
-        .mockResolvedValueOnce({ stdout: '' })              // fuser statsPort
-        .mockResolvedValueOnce({ stdout: '' })              // fuser listenPort
         .mockResolvedValueOnce({ stderr: 'start warning' }) // systemctl enable+start
         .mockResolvedValueOnce({ stdout: 'active' })        // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })              // openFirewallPort
@@ -712,9 +805,6 @@ describe('NodeDeployService', () => {
         .mockResolvedValueOnce({ stderr: '' })    // TLS cert (openssl)
         .mockResolvedValueOnce({ stderr: '' })    // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })    // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })    // pkill
-        .mockResolvedValueOnce({ stdout: '' })    // fuser statsPort
-        .mockResolvedValueOnce({ stdout: '' })    // fuser listenPort
         .mockResolvedValueOnce({ stderr: '' })    // systemctl enable && start
         .mockResolvedValueOnce({ stdout: 'active' })  // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })    // openFirewallPort
@@ -745,9 +835,6 @@ describe('NodeDeployService', () => {
       mockExecCommand
         .mockResolvedValueOnce({ stderr: '' })    // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })    // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })    // pkill
-        .mockResolvedValueOnce({ stdout: '' })    // fuser statsPort
-        .mockResolvedValueOnce({ stdout: '' })    // fuser listenPort
         .mockResolvedValueOnce({ stderr: '' })    // systemctl enable && start
         .mockResolvedValueOnce({ stdout: 'active' })  // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })    // openFirewallPort
@@ -778,9 +865,6 @@ describe('NodeDeployService', () => {
         .mockResolvedValueOnce({ stderr: '' })    // openssl (self-signed fallback)
         .mockResolvedValueOnce({ stderr: '' })    // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })    // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })    // pkill
-        .mockResolvedValueOnce({ stdout: '' })    // fuser statsPort
-        .mockResolvedValueOnce({ stdout: '' })    // fuser listenPort
         .mockResolvedValueOnce({ stderr: '' })    // systemctl enable && start
         .mockResolvedValueOnce({ stdout: 'active' })  // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })    // openFirewallPort
@@ -808,9 +892,6 @@ describe('NodeDeployService', () => {
         .mockResolvedValueOnce({ stderr: 'openssl warning' }) // openssl with warning
         .mockResolvedValueOnce({ stderr: '' })         // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })         // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })         // pkill
-        .mockResolvedValueOnce({ stdout: '' })         // fuser statsPort
-        .mockResolvedValueOnce({ stdout: '' })         // fuser listenPort
         .mockResolvedValueOnce({ stderr: '' })         // systemctl enable && start
         .mockResolvedValueOnce({ stdout: 'active' })   // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })         // openFirewallPort
@@ -890,8 +971,6 @@ describe('NodeDeployService', () => {
         .mockResolvedValueOnce({ stdout: '', stderr: '' }) // apt install ss-libev
         .mockResolvedValueOnce({ stderr: '' })             // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })             // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })             // pkill
-        .mockResolvedValueOnce({ stdout: '' })             // fuser listenPort (no statsPort for SS_LIBEV)
         .mockResolvedValueOnce({ stderr: '' })             // systemctl enable && start
         .mockResolvedValueOnce({ stdout: 'active' })       // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })             // openFirewallPort tcp (VMESS = TCP only)
@@ -951,96 +1030,15 @@ describe('NodeDeployService', () => {
     });
   });
 
-  describe('deploy — freePortIfOrphaned kills orphaned proxy process', () => {
-    it('kills orphaned xray process occupying the listen port', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
-      (mockPrisma.configSnapshot.findFirst as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.configSnapshot.create as jest.Mock).mockResolvedValue({});
-      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
-      mockConnectSsh.mockResolvedValue(mockSsh);
-      mockBinaryExists.mockResolvedValue(true);
-      mockExecCommand.mockReset();
-      mockExecCommand
-        .mockResolvedValueOnce({ stderr: '' })        // daemon-reload
-        .mockResolvedValueOnce({ stderr: '' })        // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })        // pkill
-        .mockResolvedValueOnce({ stdout: '' })        // fuser statsPort (no pid)
-        .mockResolvedValueOnce({ stdout: '1234' })    // fuser listenPort (pid found)
-        .mockResolvedValueOnce({ stdout: 'xray' })    // cat /proc/1234/comm
-        .mockResolvedValueOnce({ stdout: '' })        // cgroup has no managed unit
-        .mockResolvedValueOnce({ code: 0, stdout: '' }) // kill -9
-        .mockResolvedValueOnce({ stderr: '' })        // systemctl enable && start
-        .mockResolvedValueOnce({ stdout: 'active' })  // is-active (post-start)
-        .mockResolvedValueOnce({ stdout: '' })        // openFirewallPort
-        .mockResolvedValueOnce({ stdout: 'active' }); // is-active (final)
-
-      const logs: string[] = [];
-      const promise = svc.deploy('node-1', (l) => logs.push(l));
-      jest.runAllTimersAsync();
-      const result = await promise;
-
-      expect(result.success).toBe(true);
-      expect(logs.some((l) => l.includes('orphaned xray'))).toBe(true);
-    });
-
-    it('fails closed for a non-proxy process occupying the listen port', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
-      (mockPrisma.configSnapshot.findFirst as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.configSnapshot.create as jest.Mock).mockResolvedValue({});
-      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
-      mockConnectSsh.mockResolvedValue(mockSsh);
-      mockBinaryExists.mockResolvedValue(true);
-      mockExecCommand.mockReset();
-      mockExecCommand
-        .mockResolvedValueOnce({ stderr: '' })        // daemon-reload
-        .mockResolvedValueOnce({ stderr: '' })        // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })        // pkill
-        .mockResolvedValueOnce({ stdout: '' })        // fuser statsPort (no pid)
-        .mockResolvedValueOnce({ stdout: '9999' })    // fuser listenPort (pid found)
-        .mockResolvedValueOnce({ stdout: 'nginx' })   // cat /proc/9999/comm (not a proxy)
-        .mockResolvedValueOnce({ stderr: '' })        // systemctl enable && start
-        .mockResolvedValueOnce({ stdout: 'active' })  // is-active (post-start)
-        .mockResolvedValueOnce({ stdout: '' })        // openFirewallPort
-        .mockResolvedValueOnce({ stdout: 'active' }); // is-active (final)
-
-      const logs: string[] = [];
-      const promise = svc.deploy('node-1', (l) => logs.push(l));
-      jest.runAllTimersAsync();
-      const result = await promise;
-
+  describe('deploy port ownership gates', () => {
+    it.each(['missing ss', 'foreign xray', 'nginx', 'duplicate listener'])('refuses %s before modifying the host', async (reason) => {
+      setupHappyPath();
+      mockAssertPorts.mockRejectedValueOnce(new Error(reason));
+      const result = await svc.deploy('node-1');
       expect(result.success).toBe(false);
-      expect(result.log).toContain('refusing to terminate it');
-      expect(mockExecCommand.mock.calls.some(
-        (call) => String(call[0]).includes('kill -9 9999'),
-      )).toBe(false);
-    });
-
-    it('does not kill a proxy process owned by another NextPanel service', async () => {
-      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(fakeNode);
-      (mockPrisma.configSnapshot.findFirst as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.configSnapshot.create as jest.Mock).mockResolvedValue({});
-      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
-      mockConnectSsh.mockResolvedValue(mockSsh);
-      mockBinaryExists.mockResolvedValue(true);
-      mockExecCommand.mockReset();
-      mockExecCommand
-        .mockResolvedValueOnce({ stderr: '' })
-        .mockResolvedValueOnce({ stderr: '' })
-        .mockResolvedValueOnce({ stdout: '' })
-        .mockResolvedValueOnce({ stdout: '' })
-        .mockResolvedValueOnce({ stdout: '4321' })
-        .mockResolvedValueOnce({ stdout: 'sing-box' })
-        .mockResolvedValueOnce({ stdout: 'nextpanel-other.service' });
-
-      const promise = svc.deploy('node-1');
-      jest.runAllTimersAsync();
-      const result = await promise;
-
-      expect(result.success).toBe(false);
-      expect(result.log).toContain('owned by managed service nextpanel-other.service');
-      expect(mockExecCommand.mock.calls.some(
-        (call) => String(call[0]).includes('kill -9 4321'),
-      )).toBe(false);
+      expect(result.log).toContain(reason);
+      expect(mockUploadText).not.toHaveBeenCalled();
+      expect(mockExecCommand.mock.calls.some(call => /kill|systemctl stop/.test(String(call[0])))).toBe(false);
     });
   });
 
@@ -1173,9 +1171,6 @@ describe('NodeDeployService', () => {
       mockExecCommand
         .mockResolvedValueOnce({ stderr: '' })  // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })  // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })  // pkill
-        .mockResolvedValueOnce({ stdout: '' })  // fuser statsPort
-        .mockResolvedValueOnce({ stdout: '' })  // fuser listenPort
         .mockResolvedValueOnce({ stderr: '' })  // systemctl enable && start
         .mockResolvedValueOnce({ stdout: 'active' })  // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })  // openFirewallPort tcp
@@ -1206,8 +1201,6 @@ describe('NodeDeployService', () => {
       mockExecCommand
         .mockResolvedValueOnce({ stderr: '' })  // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })  // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })  // pkill
-        .mockResolvedValueOnce({ stdout: '' })  // fuser listenPort (no statsPort for SING_BOX)
         .mockResolvedValueOnce({ stderr: '' })  // systemctl enable && start
         .mockResolvedValueOnce({ stdout: 'active' })  // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })  // openFirewallPort udp only
@@ -1261,15 +1254,11 @@ describe('NodeDeployService', () => {
 
     it('fails deployment when an active host firewall cannot be configured', async () => {
       setupHappyPath();
-      mockExecCommand.mockReset()
-        .mockResolvedValueOnce({ stderr: '' })
-        .mockResolvedValueOnce({ stderr: '' })
-        .mockResolvedValueOnce({ stdout: '' })
-        .mockResolvedValueOnce({ stdout: '' })
-        .mockResolvedValueOnce({ stdout: '' })
-        .mockResolvedValueOnce({ stderr: '' })
-        .mockResolvedValueOnce({ stdout: 'active' })
-        .mockResolvedValueOnce({ code: 1, stdout: '', stderr: 'permission denied' });
+      mockExecCommand.mockReset().mockImplementation(async (command: string) => {
+        if (command.includes('ufw allow')) return { code: 1, stdout: '', stderr: 'permission denied' };
+        if (command === 'systemctl is-active nextpanel-node-1') return { code: 0, stdout: 'active', stderr: '' };
+        return { code: 0, stdout: '', stderr: '' };
+      });
 
       const promise = svc.deploy('node-1');
       await jest.runAllTimersAsync();
@@ -1322,9 +1311,6 @@ describe('NodeDeployService', () => {
         .mockResolvedValueOnce({ code: 0 })                // test -x /usr/local/bin/v2ray
         .mockResolvedValueOnce({ stderr: '' })             // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })             // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })             // pkill
-        .mockResolvedValueOnce({ stdout: '' })             // fuser statsPort/tcp (V2RAY is xray-like, has statsPort)
-        .mockResolvedValueOnce({ stdout: '' })             // fuser listenPort/tcp
         .mockResolvedValueOnce({ stderr: '' })             // systemctl enable && start
         .mockResolvedValueOnce({ stdout: 'active' })       // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })             // openFirewallPort tcp
@@ -1379,8 +1365,6 @@ describe('NodeDeployService', () => {
         .mockResolvedValueOnce({ code: 0 })                        // test -x sing-box
         .mockResolvedValueOnce({ stderr: '' })                     // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })                     // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })                     // pkill
-        .mockResolvedValueOnce({ stdout: '' })                     // fuser listenPort (SING_BOX: isXray=false)
         .mockResolvedValueOnce({ stderr: '' })                     // systemctl enable && start
         .mockResolvedValueOnce({ stdout: 'active' })               // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })                     // openFirewallPort tcp
@@ -1494,8 +1478,6 @@ describe('NodeDeployService', () => {
         .mockResolvedValueOnce({ stdout: 'installed output', stderr: '' }) // dnf install
         .mockResolvedValueOnce({ stderr: '' })   // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })   // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })   // pkill
-        .mockResolvedValueOnce({ stdout: '' })   // fuser listenPort
         .mockResolvedValueOnce({ stderr: '' })   // systemctl enable && start
         .mockResolvedValueOnce({ stdout: 'active' })   // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })   // openFirewallPort
@@ -1527,8 +1509,6 @@ describe('NodeDeployService', () => {
         .mockResolvedValueOnce({ stdout: '', stderr: '' }) // yum install
         .mockResolvedValueOnce({ stderr: '' })   // daemon-reload
         .mockResolvedValueOnce({ stderr: '' })   // systemctl stop
-        .mockResolvedValueOnce({ stdout: '' })   // pkill
-        .mockResolvedValueOnce({ stdout: '' })   // fuser listenPort
         .mockResolvedValueOnce({ stderr: '' })   // systemctl enable && start
         .mockResolvedValueOnce({ stdout: 'active' })   // is-active (post-start)
         .mockResolvedValueOnce({ stdout: '' })   // openFirewallPort
@@ -2060,7 +2040,7 @@ describe('NodeDeployService', () => {
       );
 
       const commands = mockExecCommand.mock.calls.map((call) => call[0] as string);
-      expect(commands).toContain(`fuser ${modernNode.listenPort}/${socket} 2>/dev/null || true`);
+      expect(mockAssertPorts).toHaveBeenCalledWith(mockSsh, [modernNode.listenPort]);
       expect(commands.some(
         (command) => command.includes(`ufw allow ${modernNode.listenPort}/${socket}`),
       )).toBe(true);
@@ -2316,6 +2296,7 @@ describe('NodeDeployService', () => {
 
   describe('deploy — modern chain ordering', () => {
     function setupChainNode(overrides: Record<string, unknown> = {}) {
+      jest.spyOn(internalSvc, 'prepareChainFirewall').mockResolvedValue(undefined);
       const chainNode = {
         ...fakeNode,
         protocol: 'VLESS',
@@ -2604,6 +2585,7 @@ describe('NodeDeployService', () => {
       )).toBe(false);
       expect(disposeSpy).not.toHaveBeenCalled();
 
+      await internalSvc.prepareChainFirewall(deployment, jest.fn());
       await internalSvc.commitChainExitDeployment(deployment, jest.fn());
 
       expect(execSpy.mock.calls.some(

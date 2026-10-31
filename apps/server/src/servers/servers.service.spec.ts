@@ -75,7 +75,8 @@ const mockIpCheck = {
   triggerCheck: jest.fn(),
 } as unknown as IpCheckService;
 
-const svc = new ServersService(mockPrisma, mockCrypto, mockNodeDeploy, mockCfService, mockCfSettings, mockIpCheck);
+const mockResources = { queueServerDeletion: jest.fn() };
+const svc = new ServersService(mockPrisma, mockCrypto, mockNodeDeploy, mockCfService, mockCfSettings, mockIpCheck, mockResources as any);
 
 const fakeServer = {
   id: 'srv-1', name: 'Test Server', ip: '1.2.3.4',
@@ -268,133 +269,19 @@ describe('ServersService', () => {
     });
   });
 
-  describe('remove', () => {
-    const flushPromises = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-
-    // runDelete queries node.findMany twice: own nodes (where.serverId) and
-    // chain-exit nodes (where.exitServerId). Route each query to the right list.
-    const mockNodeQueries = (own: any[], chain: any[] = []) => {
-      (mockPrisma.node.findMany as jest.Mock).mockImplementation((args: any) =>
-        Promise.resolve(args?.where?.exitServerId ? chain : own),
-      );
-    };
-
-    it('returns DELETING status and fires background cleanup', async () => {
-      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]);
-      (mockPrisma.server.delete as jest.Mock).mockResolvedValue(fakeServer);
-
-      const result = await svc.remove('srv-1', 'user-id-1');
-      await flushPromises();
-
-      expect(result).toEqual({ status: 'DELETING' });
-      expect(mockPrisma.server.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ status: 'DELETING' }) }),
-      );
-    });
-
-    it('deletes the server after background cleanup with no nodes', async () => {
-      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]);
-      (mockPrisma.server.delete as jest.Mock).mockResolvedValue(fakeServer);
-
-      await svc.remove('srv-1', 'user-id-1');
-      await flushPromises();
-
-      expect(mockPrisma.server.delete).toHaveBeenCalledWith({ where: { id: 'srv-1' } });
-    });
-
-    it('throws NotFoundException when server is missing', async () => {
-      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(null);
-
-      await expect(svc.remove('bad', 'user-id-1')).rejects.toThrow(NotFoundException);
-    });
-
-    it('undeploys all nodes before deleting (best-effort)', async () => {
-      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.delete as jest.Mock).mockResolvedValue(fakeServer);
-      mockNodeQueries([{ id: 'node-1', name: 'N1', userId: 'user-1', cfDnsRecordId: null }]);
-      (mockNodeDeploy.undeploy as jest.Mock).mockResolvedValue(undefined);
-
-      await svc.remove('srv-1', 'user-id-1');
-      await flushPromises();
-
-      expect(mockNodeDeploy.undeploy).toHaveBeenCalledWith('node-1');
-    });
-
-    it('sets server to ERROR state when a node undeploy fails (no delete)', async () => {
-      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
-      mockNodeQueries([{ id: 'node-1', name: 'N1', userId: 'user-1', cfDnsRecordId: null }]);
-      (mockNodeDeploy.undeploy as jest.Mock).mockRejectedValue(new Error('SSH failed'));
-
-      await svc.remove('srv-1', 'user-id-1');
-      await flushPromises();
-
-      // Server is set to ERROR, NOT deleted, when undeploy fails
-      expect(mockPrisma.server.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ status: 'ERROR' }) }),
-      );
+  describe('durable deletion', () => {
+    it.each([false, true])('queues cleanup before retiring (force=%s)', async (force) => {
+      mockResources.queueServerDeletion.mockResolvedValue({ status: 'DELETING', cleanupPending: true, retired: force });
+      const result = force ? await svc.forceRemove('srv-1', 'user-id-1') : await svc.remove('srv-1', 'user-id-1');
+      expect(mockResources.queueServerDeletion).toHaveBeenCalledWith('srv-1', 'user-id-1', force);
+      expect(result.cleanupPending).toBe(true);
       expect(mockPrisma.server.delete).not.toHaveBeenCalled();
+      expect(mockNodeDeploy.undeploy).not.toHaveBeenCalled();
     });
-
-    it('cleans up Cloudflare DNS records when nodes have cfDnsRecordId', async () => {
-      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.delete as jest.Mock).mockResolvedValue(fakeServer);
-      mockNodeQueries([{ id: 'node-1', name: 'N1', userId: 'user-1', cfDnsRecordId: 'rec-abc' }]);
-      (mockNodeDeploy.undeploy as jest.Mock).mockResolvedValue(undefined);
-      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({
-        apiToken: 'cf-token', zoneId: 'zone-1',
-      });
-
-      await svc.remove('srv-1', 'user-id-1');
-      await flushPromises();
-
-      expect(mockCfService.deleteRecord).toHaveBeenCalledWith('cf-token', 'zone-1', 'rec-abc');
-    });
-
-    it('tears down chain nodes that exit through this server, then deletes (cascade removes records)', async () => {
-      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.delete as jest.Mock).mockResolvedValue(fakeServer);
-      // No own nodes; one chain node exits through this server (lives on another entry server)
-      mockNodeQueries([], [{ id: 'chain-1', name: 'C1', userId: 'user-1', cfDnsRecordId: null }]);
-      (mockNodeDeploy.undeploy as jest.Mock).mockResolvedValue(undefined);
-
-      await svc.remove('srv-1', 'user-id-1');
-      await flushPromises();
-
-      // Chain-exit node is undeployed from its entry server, and the server is deleted
-      // (FK cascade then removes the chain node's DB record).
-      expect(mockNodeDeploy.undeploy).toHaveBeenCalledWith('chain-1');
-      expect(mockPrisma.server.delete).toHaveBeenCalledWith({ where: { id: 'srv-1' } });
-    });
-
-    it('sets the server to ERROR and aborts deletion when a chain node undeploy fails', async () => {
-      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.update as jest.Mock).mockResolvedValue(fakeServer);
-      (mockPrisma.server.delete as jest.Mock).mockResolvedValue(fakeServer);
-      mockNodeQueries([], [{ id: 'chain-1', name: 'C1', userId: 'user-1', cfDnsRecordId: null }]);
-      // Chain-exit node lives on a different server that is unreachable
-      (mockNodeDeploy.undeploy as jest.Mock).mockRejectedValue(new Error('entry server unreachable'));
-
-      await svc.remove('srv-1', 'user-id-1');
-      await flushPromises();
-
+    it('propagates ownership and durable transaction failures', async () => {
+      mockResources.queueServerDeletion.mockRejectedValueOnce(new NotFoundException());
+      await expect(svc.forceRemove('foreign', 'user-id-1')).rejects.toThrow(NotFoundException);
       expect(mockPrisma.server.delete).not.toHaveBeenCalled();
-      expect(mockPrisma.server.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'srv-1' },
-          data: expect.objectContaining({
-            status: 'ERROR',
-            deleteError: expect.stringContaining('entry server unreachable'),
-          }),
-        }),
-      );
     });
   });
 

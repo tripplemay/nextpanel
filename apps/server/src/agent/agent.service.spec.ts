@@ -29,13 +29,14 @@ const mockConfig = {
   get: jest.fn().mockReturnValue('tripplemay/nextpanel-releases'),
 } as unknown as ConfigService;
 
-let svc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
+const mockResources = { observeServices: jest.fn().mockResolvedValue(undefined) };
+let svc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig, mockResources as any);
 
 const fakeServer = { id: 'srv-1', agentToken: 'tok-abc', pendingAgentUpdate: false };
 
 beforeEach(() => {
   jest.clearAllMocks();
-  svc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
+  svc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig, mockResources as any);
 });
 afterEach(() => jest.restoreAllMocks());
 
@@ -207,7 +208,7 @@ describe('AgentService', () => {
     });
 
     it('clears pendingAgentUpdate flag after timeout even when command is being delivered (e.g. agent too old)', async () => {
-      const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
+      const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig, mockResources as any);
       const serverWithUpdate = { ...fakeServer, id: 'srv-timeout', pendingAgentUpdate: true };
       (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue(serverWithUpdate);
       (mockPrisma.server.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
@@ -282,7 +283,7 @@ describe('AgentService', () => {
         .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v1.5.0' }) } as Response)
         .mockResolvedValueOnce({ ok: true, text: async () => '## 1.5.0\n- New feature' } as Response);
 
-      const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
+      const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig, mockResources as any);
       const result = await freshSvc.getLatestVersion();
 
       expect(result.version).toBe('1.5.0');
@@ -295,7 +296,7 @@ describe('AgentService', () => {
         .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v1.5.0' }) } as Response)
         .mockResolvedValueOnce({ ok: false } as Response);
 
-      const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
+      const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig, mockResources as any);
       await freshSvc.getLatestVersion();
       await freshSvc.getLatestVersion(); // second call should use cache
 
@@ -306,7 +307,7 @@ describe('AgentService', () => {
     it('returns empty version on fetch failure with no cache', async () => {
       const fetchSpy = jest.spyOn(global, 'fetch').mockRejectedValue(new Error('Network error'));
 
-      const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
+      const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig, mockResources as any);
       const result = await freshSvc.getLatestVersion();
 
       expect(result.version).toBe('');
@@ -318,7 +319,7 @@ describe('AgentService', () => {
         .mockResolvedValueOnce({ ok: true, json: async () => ({ tag_name: 'v3.0.0' }) } as Response)
         .mockResolvedValueOnce({ ok: false } as Response);
 
-      const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig);
+      const freshSvc = new AgentService(mockPrisma, mockMetrics, mockIpCheck, mockConfig, mockResources as any);
       const result = await freshSvc.getLatestVersion();
 
       expect(result.version).toBe('3.0.0');

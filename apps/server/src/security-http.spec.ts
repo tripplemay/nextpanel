@@ -19,6 +19,8 @@ import { AuditService } from './audit/audit.service';
 import { connectSsh } from './nodes/ssh/ssh.util';
 import { MetricsController } from './metrics/metrics.controller';
 import { MetricsService } from './metrics/metrics.service';
+import { ResourcesController } from './resources/resources.controller';
+import { ResourceLifecycleService } from './resources/resource-lifecycle.service';
 
 jest.mock('./nodes/ssh/ssh.util', () => ({ connectSsh: jest.fn() }));
 
@@ -27,9 +29,15 @@ describe('real HTTP routing, JWT, roles and ownership (isolated persistence)', (
   let base: string;
   let jwt: JwtService;
   const db = {
+    resourceCleanup: {
+      findMany: jest.fn(async ({ where }) => where.ownerId === 'owner' ? [{ id: 'cleanup-1', state: 'BLOCKED' }] : []),
+      updateMany: jest.fn(async ({ where }) => ({ count: where.id === 'cleanup-1' && where.ownerId === 'owner' ? 1 : 0 })),
+    },
+    resourceFinding: { findMany: jest.fn(async () => []) },
     serverMetric: { findMany: jest.fn(async () => []) },
     $queryRaw: jest.fn(async () => []),
     server: {
+      findMany: jest.fn(async () => []),
       findFirst: jest.fn(async ({ where }) => where.id === 'srv-1' && where.userId === 'owner'
         ? { id: 'srv-1', userId: 'owner', sshAuthEnc: 'encrypted', agentToken: 'SECRET' } : null),
       findUnique: jest.fn(async () => ({ agentToken: 'SECRET' })),
@@ -39,14 +47,14 @@ describe('real HTTP routing, JWT, roles and ownership (isolated persistence)', (
       findMany: jest.fn(async ({ where }) => !where.ownerId || where.ownerId === 'owner' ? [{ id: 'log-1' }] : []),
     },
   };
-  const servers = new ServersService(db as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+  const servers = new ServersService(db as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
   const install = jest.spyOn(servers as any, 'installAgent').mockResolvedValue(true);
   const heartbeat = jest.fn(async () => ({ ok: true }));
 
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       imports: [PassportModule, JwtModule.register({ secret: 'isolated-test-key' })],
-      controllers: [ServersController, OperationLogController, AgentController, MetricsController],
+      controllers: [ServersController, OperationLogController, AgentController, MetricsController, ResourcesController],
       providers: [
         JwtStrategy, ServerOwnerGuard,
         { provide: ConfigService, useValue: { getOrThrow: () => 'isolated-test-key' } },
@@ -59,6 +67,7 @@ describe('real HTTP routing, JWT, roles and ownership (isolated persistence)', (
         { provide: OperationLogService, useValue: new OperationLogService(db as any) },
         { provide: AgentService, useValue: { handleHeartbeat: heartbeat } },
         { provide: MetricsService, useValue: new MetricsService(db as any) },
+        { provide: ResourceLifecycleService, useValue: new ResourceLifecycleService(db as any, {} as any) },
         { provide: AuditService, useValue: { log: jest.fn() } },
         { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
       ],
@@ -73,6 +82,22 @@ describe('real HTTP routing, JWT, roles and ownership (isolated persistence)', (
   afterAll(async () => { await app?.close(); });
   beforeEach(() => jest.clearAllMocks());
   const headers = (id: string) => ({ Authorization: `Bearer ${jwt.sign({ sub: id, jti: id })}` });
+
+  it('protects cleanup state/retry and blocks cross-owner inventory before opening SSH', async () => {
+    expect((await fetch(`${base}/api/resources`)).status).toBe(401);
+    expect((await fetch(`${base}/api/resources/cleanup/cleanup-1/retry`, { method: 'POST' })).status).toBe(401);
+    for (const id of ['other', 'admin']) {
+      const response = await fetch(`${base}/api/resources`, { headers: headers(id) });
+      expect(await response.json()).toEqual({ tasks: [], findings: [], retirements: [] });
+      expect((await fetch(`${base}/api/resources/cleanup/cleanup-1/retry`, { method: 'POST', headers: headers(id) })).status).toBe(404);
+      expect((await fetch(`${base}/api/resources/servers/srv-1/scan`, { method: 'POST', headers: headers(id) })).status).toBe(404);
+    }
+    expect(connectSsh).not.toHaveBeenCalled();
+    const own = await fetch(`${base}/api/resources`, { headers: headers('owner') });
+    expect(await own.json()).toEqual(expect.objectContaining({ tasks: [{ id: 'cleanup-1', state: 'BLOCKED' }] }));
+    const retried = await fetch(`${base}/api/resources/cleanup/cleanup-1/retry`, { method: 'POST', headers: headers('owner') });
+    expect(await retried.json()).toEqual({ queued: true });
+  });
 
   it.each(['0', '-1', '1.5', '601', 'Infinity', 'NaN', 'abc', '', '60&limit=61'])('rejects invalid metric limit %s before querying data', async (limit) => {
     const response = await fetch(`${base}/api/metrics/servers/srv-1?limit=${limit}`, { headers: headers('owner') });
