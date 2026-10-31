@@ -39,6 +39,19 @@ uses port 9000 and forwards Web request paths. Confirm the selected URL preserve
 no permissive CORS, no request-body/header logging and no unnecessary cloud role.
 These resource values are proposed pilot settings, not measured capacity.
 
+## Native SCF Node.js 22.21 ZIP alternative
+
+The Guangzhou console also offers Node.js 22.21 for Web functions. This avoids
+creating a separate container registry. Package the pinned official Xray Linux
+amd64 archive with `node scripts/cf-probe/package-scf.mjs Xray-linux-64.zip OUTPUT.zip`.
+The packager verifies the archive digest and ELF architecture, includes only the
+worker, executable bootstrap and Xray, and emits a checksum manifest. The ZIP
+contains no token. Select Web function / Node.js 22.21, upload it and set startup
+command `bash /var/user/scf_bootstrap`, port 9000 and the same bounded resources.
+The runtime must supply curl; verify authenticated capabilities and actual E2E
+before enabling the scheduler. A missing native runtime fails closed with 503.
+The new credential must be entered securely in the console, not added to the ZIP.
+
 ## Protocol
 
 Both endpoints require `Authorization: Bearer <secret>` and return `no-store`.
