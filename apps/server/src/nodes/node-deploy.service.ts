@@ -3,6 +3,7 @@ import { isIP } from 'net';
 import { Injectable, Logger, MessageEvent, NotFoundException, BadRequestException } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { NodeSSH } from 'node-ssh';
+import type { ResourceCleanup, Server } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { OperationLogService } from '../operation-log/operation-log.service';
@@ -19,6 +20,8 @@ import {
   SocksExitResolverService,
   type SocksExitCandidate,
 } from './socks-exit-resolver.service';
+import { CleanupBlockedError, cleanupPayload, resourceProtocols, ResourceLifecycleService } from '../resources/resource-lifecycle.service';
+import { assertRemotePorts, ListenerNotReadyError, resourcePaths } from '../resources/remote-inventory';
 
 export interface DeployResult {
   success: boolean;
@@ -54,6 +57,7 @@ export class NodeDeployService {
     private cfService: CloudflareService,
     private xrayTest: XrayTestService,
     private socksExitResolver: SocksExitResolverService,
+    private resources: ResourceLifecycleService,
   ) {}
 
   /** Stream deploy logs as SSE events */
@@ -220,6 +224,7 @@ export class NodeDeployService {
     let certUpdate: RemoteCertUpdate | null = null;
     let firewallChanges: FirewallChange[] = [];
     let rollbackFailed = false;
+    let ownershipUpdate: { rollback(): Promise<void> } | null = null;
 
     try {
       log(`Connecting via SSH...`);
@@ -232,6 +237,8 @@ export class NodeDeployService {
         readyTimeout: 30000,
       });
       log(`SSH connected to ${server.ip}:${server.sshPort}`);
+      await assertRemotePorts(ssh, [node.listenPort, ...(statsPort ? [statsPort] : [])], serviceName);
+      await this.resources.assertDeploymentOwner(ssh, server, node.id, 'ENTRY');
 
       // ── 4. Check binary, auto-install if missing ──────────────────────────
       log(`Checking binary: ${bin}`);
@@ -360,19 +367,14 @@ export class NodeDeployService {
           exitServer,
           log,
         );
+        await this.prepareChainFirewall(chainExitDeployment, log);
       }
 
       const unitContent = buildSystemdUnit(node.name, bin, args);
       const unitPath = `/etc/systemd/system/${serviceName}.service`;
-      if (coreRequirement || isChainNode || options.forceRollback || node.listenPort === 443) {
-        deploymentRollback = await this.prepareDeploymentRollback(
-          ssh,
-          configPath,
-          unitPath,
-          serviceName,
-          log,
-        );
-      }
+      deploymentRollback = await this.prepareDeploymentRollback(
+        ssh, configPath, unitPath, serviceName, log,
+      );
 
       // ── 6. Upload config file (base64 to avoid shell escaping issues) ──────
       if (stagedConfigPath) {
@@ -400,16 +402,9 @@ export class NodeDeployService {
       // new xray finds the port still held by the brief first instance.
       await ssh.execCommand(`systemctl stop ${serviceName} 2>/dev/null || true`);
 
-      // Kill any orphaned process for THIS node (e.g. stale from a failed previous
-      // deploy that bypassed systemd). Target by config file path, not port, to
-      // avoid killing other nodes running on the same server.
-      await ssh.execCommand(`pkill -f "${configPath}" 2>/dev/null || true`);
-
-      // Kill any orphaned proxy process occupying our ports (e.g. a deleted node
-      // whose xray was not fully cleaned up). This handles cases where the DB no
-      // longer has the record but the process is still holding the port.
-      if (statsPort) await this.freePortIfOrphaned(ssh, statsPort, 'stats', log);
-      await this.freePortIfOrphaned(
+      // Stop only our unit. Unknown processes are never orphaned merely by name.
+      if (statsPort) await this.assertPortFree(ssh, statsPort, 'stats', log);
+      await this.assertPortFree(
         ssh,
         node.listenPort,
         'listen',
@@ -451,6 +446,8 @@ export class NodeDeployService {
       );
       let isActive = activeOut.trim() === 'active';
       log(`Service status: ${activeOut.trim()}`);
+      if (isActive) await assertRemotePorts(ssh, [node.listenPort, ...(statsPort ? [statsPort] : [])], serviceName, true,
+        { [node.listenPort]: resourceProtocols(node.protocol), ...(statsPort ? { [statsPort]: ['tcp' as const] } : {}) });
 
       if (isActive && node.exitType === 'SOCKS5') {
         log('正在验证 SOCKS5 出口的 TCP 与 UDP 端到端连通性...');
@@ -458,6 +455,14 @@ export class NodeDeployService {
         isActive = connectivity.reachable;
         log(connectivity.message);
       }
+      if (isActive && node.exitServerId) {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const result = await this.xrayTest.testNode(node.id);
+          log(`Chain acceptance ${attempt + 1}/3: ${result.message}`);
+          if (!result.reachable) { isActive = false; break; }
+        }
+      }
+      if (isActive) ownershipUpdate = await this.resources.registerDeployment(ssh, server, node.id, 'ENTRY', configJson);
 
       if (!isActive) {
         const { stdout: journalOut } = await ssh.execCommand(
@@ -467,6 +472,7 @@ export class NodeDeployService {
         const firewallRestored = await this.rollbackFirewallChanges(firewallChanges, log);
         rollbackFailed ||= !firewallRestored;
         firewallChanges = [];
+        ownershipUpdate = null;
         if (certUpdate?.changed) {
           const restored = await certUpdate.rollback();
           rollbackFailed ||= !restored;
@@ -523,6 +529,7 @@ export class NodeDeployService {
           }
         }
         firewallChanges = [];
+        ownershipUpdate = null;
       }
 
       ssh.dispose();
@@ -540,6 +547,9 @@ export class NodeDeployService {
       };
     } catch (err: unknown) {
       rollbackFailed ||= isDeploymentRollbackFailure(err);
+      if (ownershipUpdate) {
+        try { await ownershipUpdate.rollback(); } catch { rollbackFailed = true; }
+      }
       if (ssh && stagedConfigPath) {
         await this.cleanupStagedConfig(ssh, stagedConfigPath, log);
       }
@@ -1076,6 +1086,8 @@ export class NodeDeployService {
         auth: sshAuth,
         readyTimeout: 30000,
       });
+      await this.resources.assertDeploymentOwner(ssh, node.server, node.id, 'ENTRY');
+      if (enable) await assertRemotePorts(ssh, [node.listenPort, ...(node.statsPort ? [node.statsPort] : [])], serviceName);
       const result = await ssh.execCommand(cmd);
       if ((result.code ?? 0) !== 0) {
         throw new Error(
@@ -1084,6 +1096,7 @@ export class NodeDeployService {
             `: ${commandDetail(result.stdout, result.stderr)}` : ''}`,
         );
       }
+      if (enable) await this.waitForListeners(ssh, node.listenPort, serviceName, node.protocol);
       ssh.dispose();
     } catch (err: unknown) {
       ssh?.dispose();
@@ -1129,6 +1142,8 @@ export class NodeDeployService {
         auth: sshAuth,
         readyTimeout: 30000,
       });
+      await this.resources.assertDeploymentOwner(ssh, node.server, node.id, 'ENTRY');
+      await assertRemotePorts(ssh, [node.listenPort], serviceName);
       certUpdate = await this.certService.pushCertToNode(ssh, node.id, baseDomain, (msg) =>
         this.logger.log(`[refreshCert ${nodeId}] ${msg}`),
       );
@@ -1153,6 +1168,7 @@ export class NodeDeployService {
       if (health.code !== 0) {
         throw new Error(`${serviceName} is not active after certificate update`);
       }
+      await this.waitForListeners(ssh, node.listenPort, serviceName, node.protocol);
       await certUpdate.commit();
       certUpdate = null;
     } catch (err: unknown) {
@@ -1202,7 +1218,7 @@ export class NodeDeployService {
   private async deployChainExit(
     node: { id: string; exitPort: number; chainCredEnc: string; egressIpPolicy: string },
     entryServer: { ip: string },
-    exitServer: { id: string; ip: string; sshPort: number; sshUser: string; sshAuthType: string; sshAuthEnc: string },
+    exitServer: Server,
     log: (msg: string) => void,
   ): Promise<ChainExitDeployment> {
     const exitSsh = new NodeSSH();
@@ -1210,6 +1226,7 @@ export class NodeDeployService {
     let stagedExitConfig: string | null = null;
     let rollback: DeploymentRollback | null = null;
     let handedOff = false;
+    let ownership: { rollback(): Promise<void> } | undefined;
 
     try {
       log(`[出口] 连接 ${exitServer.ip}:${exitServer.sshPort}...`);
@@ -1220,6 +1237,8 @@ export class NodeDeployService {
         ...(exitServer.sshAuthType === 'KEY' ? { privateKey: sshAuth } : { password: sshAuth }),
         readyTimeout: 30000,
       });
+      await assertRemotePorts(exitSsh, [node.exitPort], resourcePaths(node.id, 'EXIT').service);
+      await this.resources.assertDeploymentOwner(exitSsh, exitServer, node.id, 'EXIT');
 
       log(`[出口] 检查 Xray...`);
       const { code } = await exitSsh.execCommand('test -x /usr/local/bin/xray');
@@ -1302,55 +1321,7 @@ export class NodeDeployService {
         throw new Error(`现有链式出口服务 ${exitServiceName} 仍处于活动状态`);
       }
 
-      // Kill any orphaned process occupying the exit port before starting.
-      log(`[出口] 检查端口 ${node.exitPort} 是否被占用...`);
-      const { stdout: fuserOut } = await exitSsh.execCommand(
-        `fuser ${node.exitPort}/tcp 2>/dev/null || true`,
-      );
-      const occupyingPids = fuserOut.trim().split(/\s+/).filter(Boolean);
-      if (occupyingPids.length > 0) {
-        const { stdout: unitList } = await exitSsh.execCommand(
-          `systemctl list-units 'nextpanel-*' --plain --no-legend --all | awk '{print $1}'`,
-        );
-        for (const occupiedUnit of unitList.trim().split('\n').filter(Boolean)) {
-          if (occupiedUnit === `${exitServiceName}.service`) continue;
-          const { stdout: mainPid } = await exitSsh.execCommand(
-            `systemctl show ${occupiedUnit} -p MainPID --value 2>/dev/null || true`,
-          );
-          if (occupyingPids.includes(mainPid.trim())) {
-            throw new Error(
-              `出口端口 ${node.exitPort} 已被受管服务 ${occupiedUnit} ` +
-              `(PID ${mainPid.trim()}) 占用，拒绝覆盖`,
-            );
-          }
-        }
-        for (const pid of occupyingPids) {
-          const { stdout: comm } = await exitSsh.execCommand(
-            `cat /proc/${pid}/comm 2>/dev/null || true`,
-          );
-          if (comm.trim() !== 'xray') {
-            throw new Error(
-              `出口端口 ${node.exitPort} 已被 ${comm.trim() || '未知进程'} ` +
-              `(PID ${pid}) 占用，拒绝终止`,
-            );
-          }
-          const { stdout: ownerUnit } = await exitSsh.execCommand(
-            `sed -n 's#.*\\(/nextpanel-[^/]*\\.service\\).*#\\1#p' ` +
-            `/proc/${pid}/cgroup 2>/dev/null | sed 's#^/##' | head -n 1`,
-          );
-          if (ownerUnit.trim()) {
-            throw new Error(
-              `出口端口 ${node.exitPort} 已被受管服务 ${ownerUnit.trim()} ` +
-              `(PID ${pid}) 占用，拒绝覆盖`,
-            );
-          }
-          log(`[出口] 终止占用端口的孤儿进程 (PID ${pid})...`);
-          const killed = await exitSsh.execCommand(`kill -9 ${pid} 2>/dev/null`);
-          if (killed.code !== 0) {
-            throw new Error(`无法释放出口端口 ${node.exitPort} (PID ${pid})`);
-          }
-        }
-      }
+      await assertRemotePorts(exitSsh, [node.exitPort]);
 
       await exitSsh.execCommand('systemctl daemon-reload');
       await exitSsh.execCommand(
@@ -1369,6 +1340,8 @@ export class NodeDeployService {
         throw new Error('出口服务器链式服务启动失败');
       }
 
+      await assertRemotePorts(exitSsh, [node.exitPort], exitServiceName, true, { [node.exitPort]: ['tcp'] });
+      ownership = await this.resources.registerDeployment(exitSsh, exitServer, node.id, 'EXIT', exitConfig);
       handedOff = true;
       log(`[出口] 服务已就绪，等待入口服务确认后提交`);
       return {
@@ -1376,8 +1349,13 @@ export class NodeDeployService {
         rollback,
         entryIp: entryServer.ip,
         exitPort: node.exitPort,
+        ownership,
       };
     } catch (err) {
+      let ownershipRestored = true;
+      if (ownership) {
+        try { await ownership.rollback(); } catch { ownershipRestored = false; }
+      }
       if (stagedExitConfig) {
         await this.cleanupStagedConfig(
           exitSsh,
@@ -1391,7 +1369,7 @@ export class NodeDeployService {
           rollback,
           (message) => log(`[出口] ${message}`),
         );
-        if (!restored) {
+        if (!restored || !ownershipRestored) {
           const message = err instanceof Error ? err.message : String(err);
           throw new DeploymentRollbackFailureError(
             `${message}; 出口服务器旧配置恢复失败`,
@@ -1404,11 +1382,11 @@ export class NodeDeployService {
     }
   }
 
-  private async commitChainExitDeployment(
+  private async prepareChainFirewall(
     deployment: ChainExitDeployment,
     log: (msg: string) => void,
   ): Promise<void> {
-    const { ssh, rollback, entryIp, exitPort } = deployment;
+    const { ssh, entryIp, exitPort } = deployment;
     const addressFamily = entryIp.includes(':') ? 'ipv6' : 'ipv4';
     const iptables = addressFamily === 'ipv6' ? 'ip6tables' : 'iptables';
     const ruleComment = 'nextpanel-chain-managed';
@@ -1455,13 +1433,17 @@ export class NodeDeployService {
           `: ${commandDetail(firewall.stdout, firewall.stderr)}` : ''}`,
       );
     }
+    deployment.firewallAdded = (firewall.stdout ?? '').includes(addedMarker);
+  }
+
+  private async commitChainExitDeployment(deployment: ChainExitDeployment, log: (msg: string) => void): Promise<void> {
     await this.cleanupDeploymentRollback(
-      ssh,
-      rollback,
+      deployment.ssh,
+      deployment.rollback,
       (message) => log(`[出口] ${message}`),
     );
     log(`[出口] 链式出口部署完成`);
-    ssh.dispose();
+    deployment.ssh.dispose();
   }
 
   private async rollbackChainExitDeployment(
@@ -1469,11 +1451,21 @@ export class NodeDeployService {
     log: (msg: string) => void,
   ): Promise<boolean> {
     try {
-      return await this.restoreDeploymentRollback(
+      let restored = true;
+      if (deployment.firewallAdded) {
+        try { await this.removeChainFirewallRuleRemote(deployment.ssh, deployment.entryIp, deployment.exitPort); }
+        catch { restored = false; log('[出口] 新增防火墙规则撤销失败'); }
+      }
+      if (deployment.ownership) {
+        try { await deployment.ownership.rollback(); }
+        catch { restored = false; log('[出口] 归属清单恢复失败'); }
+      }
+      const configRestored = await this.restoreDeploymentRollback(
         deployment.ssh,
         deployment.rollback,
         (message) => log(`[出口] ${message}`),
       );
+      return restored && configRestored;
     } finally {
       deployment.ssh.dispose();
     }
@@ -2195,10 +2187,11 @@ export class NodeDeployService {
     ssh: NodeSSH,
     nodeId: string,
     log?: (msg: string) => void,
+    chain = false,
   ): Promise<void> {
-    const serviceName = `nextpanel-${nodeId}`;
+    const serviceName = `nextpanel-${chain ? 'chain-' : ''}${nodeId}`;
     const unitPath = `/etc/systemd/system/${serviceName}.service`;
-    const configPath = `/etc/nextpanel/nodes/${nodeId}.json`;
+    const configPath = `/etc/nextpanel/nodes/${chain ? 'chain-' : ''}${nodeId}.json`;
     const result = await ssh.execCommand(
       `set -eu; ` +
       `systemctl stop ${shellQuote(serviceName)} 2>/dev/null || true; ` +
@@ -2465,58 +2458,63 @@ export class NodeDeployService {
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
-  /**
-   * If `port` is already in use by an orphaned proxy binary (xray, sing-box, etc.),
-   * kill it so the new deployment can bind the port cleanly.
-   * Only proxy binaries are killed — arbitrary system processes are left alone.
-   */
-  private async freePortIfOrphaned(
+  private async waitForListeners(ssh: NodeSSH, port: number, service: string, protocol: string) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await assertRemotePorts(ssh, [port], service, true, { [port]: resourceProtocols(protocol) });
+        return;
+      } catch (error) {
+        if (!(error instanceof ListenerNotReadyError) || attempt >= 9) throw error;
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+  }
+
+  private async assertPortFree(
     ssh: NodeSSH,
     port: number,
     label: string,
     log: (msg: string) => void,
     protocol: 'tcp' | 'udp' = 'tcp',
   ): Promise<void> {
-    const { stdout: pidRaw } = await ssh.execCommand(
-      `fuser ${port}/${protocol} 2>/dev/null || true`,
-    );
-    const pids = (pidRaw ?? '').trim().split(/\s+/).filter(Boolean);
-    if (pids.length === 0) return;
-    if (pids.some((pid) => !/^\d+$/.test(pid))) {
-      throw new Error(`${label} port ${port} returned an invalid owner PID list`);
+    await assertRemotePorts(ssh, [port]);
+    log(`${label} port ${port}/${protocol} verified free`);
+  }
+
+  /** Called only with a durable deletion intent and the node/host locks held. */
+  async cleanupDetachedResource(job: ResourceCleanup): Promise<void> {
+    const payload = cleanupPayload(job.payload);
+    if (job.role === 'DNS') {
+      if (!payload.cfRecordId || !payload.cfZoneId) throw new CleanupBlockedError('DNS cleanup record or original zone is missing; ownership review required');
+      const settings = await this.cfSettings.getDecryptedToken(job.ownerId);
+      if (!settings) throw new CleanupBlockedError('Cloudflare credentials unavailable');
+      const access = await this.cfService.verifyZoneAccess(settings.apiToken, payload.cfZoneId);
+      if (!access.valid) throw new CleanupBlockedError('Cannot verify access to the original DNS zone');
+      await this.cfService.deleteRecord(settings.apiToken, payload.cfZoneId, payload.cfRecordId);
+      return;
     }
-
-    const PROXY_BINS = new Set(['xray', 'sing-box', 'hysteria', 'hysteria2', 'v2ray']);
-    for (const pid of pids) {
-      const { stdout: commRaw } = await ssh.execCommand(
-        `cat /proc/${pid}/comm 2>/dev/null || true`,
-      );
-      const comm = commRaw?.trim();
-      if (!PROXY_BINS.has(comm ?? '')) {
-        throw new Error(
-          `${label} port ${port} is owned by ${comm || 'an unknown process'} (PID ${pid}); refusing to terminate it`,
-        );
-      }
-
-      const { stdout: unitRaw } = await ssh.execCommand(
-        `sed -n 's#.*\\(/nextpanel-[^/]*\\.service\\).*#\\1#p' /proc/${pid}/cgroup 2>/dev/null | ` +
-        `sed 's#^/##' | head -n 1`,
-      );
-      const unit = unitRaw?.trim();
-      if (unit) {
-        throw new Error(
-          `${label} port ${port} is owned by managed service ${unit} (PID ${pid}); refusing to terminate it`,
-        );
-      }
-
-      log(`${label} port ${port} occupied by orphaned ${comm} (PID ${pid}), killing...`);
-      const killed = await ssh.execCommand(`kill -9 ${pid} 2>/dev/null`);
-      if (killed.code !== 0) {
-        throw new Error(`${label} port ${port} owner PID ${pid} could not be terminated`);
-      }
-      await new Promise((r) => setTimeout(r, 300));
-      log(`Orphaned process killed, ${label} port ${port} freed`);
+    if (job.role !== 'ENTRY' && job.role !== 'EXIT') throw new CleanupBlockedError('Invalid cleanup role');
+    if (!payload.port || !payload.protocols?.length || (job.role === 'EXIT' && !payload.entryIp)) {
+      throw new CleanupBlockedError('Missing remote cleanup target');
     }
+    const server = await this.prisma.server.findFirst({ where: { id: job.serverId, userId: job.ownerId } });
+    if (!server) throw new CleanupBlockedError('Cleanup host registration is missing');
+    const ssh = await this.resources.connect(server);
+    try {
+      const paths = await this.resources.prepareCleanup(ssh, server, job);
+      await this.cleanupMainNodeRemote(ssh, job.nodeId, undefined, job.role === 'EXIT');
+      await assertRemotePorts(ssh, [payload.port, payload.statsPort].filter((p): p is number => !!p));
+      if (job.role === 'EXIT') {
+        if (!payload.entryIp || !payload.port) throw new CleanupBlockedError('Missing chain firewall target');
+        await this.removeChainFirewallRuleRemote(ssh, payload.entryIp, payload.port);
+      } else {
+        if (!payload.port || !payload.protocols?.length) throw new CleanupBlockedError('Missing entry firewall target');
+        for (const protocol of payload.protocols) await this.closeFirewallPort(ssh, payload.port, protocol, undefined, server.ip, true);
+      }
+      const artifacts = await ssh.execCommand(`set -eu; rm -f -- ${shellQuote(paths.manifest)}` +
+        (job.role === 'ENTRY' ? ` ${shellQuote(`/etc/nextpanel/certs/${job.nodeId}.crt`)} ${shellQuote(`/etc/nextpanel/certs/${job.nodeId}.key`)}` : ''));
+      if (artifacts.code !== 0) throw new Error('Cannot remove owned cleanup artifacts');
+    } finally { ssh.dispose(); }
   }
 
   private async finalize(
@@ -2622,6 +2620,8 @@ interface ChainExitDeployment {
   rollback: DeploymentRollback;
   entryIp: string;
   exitPort: number;
+  firewallAdded?: boolean;
+  ownership?: { rollback(): Promise<void> };
 }
 
 interface SocksExitProbeResult {

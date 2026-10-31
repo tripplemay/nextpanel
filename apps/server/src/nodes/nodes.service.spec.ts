@@ -49,7 +49,8 @@ const mockCfSettings = {
   verify: jest.fn().mockResolvedValue({ valid: true, zoneStatus: 'active' }),
 } as unknown as CloudflareSettingsService;
 
-const svc = new NodesService(mockPrisma, mockCrypto, mockDeploy, mockCfService, mockCfSettings);
+const mockResources = { unavailablePorts: jest.fn().mockResolvedValue(new Set()) };
+const svc = new NodesService(mockPrisma, mockCrypto, mockDeploy, mockCfService, mockCfSettings, mockResources as any);
 
 const fakeNode = {
   id: 'node-1', serverId: 'srv-1', name: 'Test Node',
@@ -61,6 +62,7 @@ const fakeNode = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockResources.unavailablePorts.mockResolvedValue(new Set());
   (mockDeploy.deploy as jest.Mock).mockResolvedValue({ success: true, log: '' });
   (mockDeploy.undeploy as jest.Mock).mockResolvedValue(undefined);
   (mockDeploy.toggleService as jest.Mock).mockResolvedValue(undefined);
@@ -992,6 +994,30 @@ describe('NodesService', () => {
 
       const createData = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
       expect(createData.listenPort).toBe(443);
+    });
+
+    it('skips real occupied listen/stats ports and pending cleanup reservations', async () => {
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]);
+      mockResources.unavailablePorts.mockResolvedValue(new Set([10000, 30001]));
+      expect(await (svc as any).pickPort('srv-1', null, 10000, 'XRAY')).toBe(10002);
+      mockResources.unavailablePorts.mockResolvedValue(new Set([15000, 15001]));
+      expect(await (svc as any).pickChainExitPort('srv-exit')).toBe(15002);
+    });
+
+    it('does not assume free ports when the remote inspection fails', async () => {
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]);
+      mockResources.unavailablePorts.mockRejectedValue(new Error('ss unavailable'));
+      await expect((svc as any).pickPort('srv-1', null, 10000, 'XRAY')).rejects.toThrow('ss unavailable');
+      await expect((svc as any).pickChainExitPort('srv-exit')).rejects.toThrow('ss unavailable');
+      expect(mockPrisma.node.create).not.toHaveBeenCalled();
+    });
+
+    it.each([443, 20443])('rejects actual fixed/stats port %s even with an empty database', async port => {
+      (mockPrisma.node.findMany as jest.Mock).mockResolvedValue([]);
+      mockResources.unavailablePorts.mockResolvedValue(new Set([port]));
+      await expect((svc as any).pickPort('srv-1', 443, null, 'XRAY')).rejects.toThrow(String(port));
+      await expect((svc as any).assertPortAvailable('srv-1', 443, 'XRAY', 'own-node')).rejects.toThrow(String(port));
+      expect(mockResources.unavailablePorts).toHaveBeenLastCalledWith('srv-1', 'own-node');
     });
 
     it('creates VLESS_XHTTP_REALITY on recommended port 443 with complete credentials', async () => {

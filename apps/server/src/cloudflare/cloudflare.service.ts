@@ -80,6 +80,7 @@ export class CloudflareService {
     const res = await fetch(url, {
       method: 'DELETE',
       headers: this.headers(apiToken),
+      signal: AbortSignal.timeout(15000),
     });
 
     if (res.status === 404) {
@@ -105,7 +106,7 @@ export class CloudflareService {
   async verifyZoneAccess(apiToken: string, zoneId: string): Promise<CfVerifyResult> {
     const url = `${CF_API}/zones/${zoneId}`;
     try {
-      const res = await fetch(url, { headers: this.headers(apiToken) });
+      const res = await fetch(url, { headers: this.headers(apiToken), signal: AbortSignal.timeout(15000) });
       const data = (await res.json()) as {
         success: boolean;
         errors: { message: string; code: number }[];

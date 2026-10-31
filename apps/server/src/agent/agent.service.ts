@@ -5,6 +5,7 @@ import { MetricsService } from '../metrics/metrics.service';
 import { IpCheckService } from '../ip-check/ip-check.service';
 import { performance } from 'node:perf_hooks';
 import { NetworkRateTracker } from './network-rate';
+import { ResourceLifecycleService } from '../resources/resource-lifecycle.service';
 
 export interface HeartbeatPayload {
   agentToken: string;
@@ -42,6 +43,7 @@ export class AgentService {
     private metricsService: MetricsService,
     private ipCheck: IpCheckService,
     private config: ConfigService,
+    private resources: ResourceLifecycleService,
   ) {}
 
   async getLatestVersion(): Promise<{ version: string; releaseNotes: string }> {
@@ -196,6 +198,7 @@ export class AgentService {
     );
 
     if (payload.nodeStatuses) {
+      await this.resources.observeServices(server, payload.nodeStatuses.map(n => `nextpanel-chain-${n.nodeId}`));
       for (const { nodeId, status } of payload.nodeStatuses) {
         // Update regular nodes on this server OR chain exit nodes hosted on this server
         await this.prisma.node.updateMany({

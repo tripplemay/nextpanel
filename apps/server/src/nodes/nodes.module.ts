@@ -12,10 +12,12 @@ import { OperationLogModule } from '../operation-log/operation-log.module';
 import { CloudflareModule } from '../cloudflare/cloudflare.module';
 import { CertModule } from '../common/cert/cert.module';
 import { SocksExitResolverService } from './socks-exit-resolver.service';
+import { ResourcesModule } from '../resources/resources.module';
+import { ResourceCleanupScheduler } from './resource-cleanup.scheduler';
 
 @Module({
-  imports: [AuditModule, OperationLogModule, CloudflareModule, CertModule],
-  providers: [NodesService, NodeDeployService, CryptoService, XrayTestService, SingboxTestService, SocksExitResolverService, ConnectivityScheduler, CertRenewalScheduler],
+  imports: [AuditModule, OperationLogModule, CloudflareModule, CertModule, ResourcesModule],
+  providers: [NodesService, NodeDeployService, CryptoService, XrayTestService, SingboxTestService, SocksExitResolverService, ConnectivityScheduler, CertRenewalScheduler, ResourceCleanupScheduler],
   controllers: [NodesController],
   exports: [NodesService, NodeDeployService, XrayTestService, SingboxTestService, SocksExitResolverService],
 })

@@ -13,6 +13,7 @@ import { buildShareUri } from '../subscriptions/uri-builder';
 import { PROTOCOL_PRESETS, CREDENTIAL_GENERATORS, type SupportedProtocol } from './protocols/presets';
 import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
 import { parseSocksUri, SocksUriParseError, type ParsedSocksUri } from './socks-uri';
+import { ResourceLifecycleService } from '../resources/resource-lifecycle.service';
 
 const CLOUDFLARE_PRESETS = new Set<SupportedProtocol>([
   'VLESS_WS_TLS',
@@ -33,6 +34,7 @@ export class NodesService {
     private nodeDeploy: NodeDeployService,
     private cfService: CloudflareService,
     private cfSettings: CloudflareSettingsService,
+    private resources: ResourceLifecycleService,
   ) {}
 
   async create(dto: CreateNodeDto, userId: string) {
@@ -618,6 +620,7 @@ export class NodesService {
       },
     });
     const usedPorts = collectServerPorts(existingNodes, exitServerId);
+    for (const port of await this.resources.unavailablePorts(exitServerId)) usedPorts.add(port);
     for (let i = 0; i < 1000; i++) {
       const port = 15000 + i;
       if (!usedPorts.has(port)) return port;
@@ -650,6 +653,7 @@ export class NodesService {
     // Reserve both listenPort and statsPort of every existing node so neither
     // the new listen port nor its derived stats port (listenPort+20000) collides.
     const usedPorts = collectServerPorts(existingNodes, serverId);
+    for (const port of await this.resources.unavailablePorts(serverId)) usedPorts.add(port);
 
     if (fixedPort !== null) {
       const derivedStats = derivedStatsPort(fixedPort, implementation);
@@ -669,9 +673,7 @@ export class NodesService {
       throw new BadRequestException('Preset misconfiguration: no fixedPort or portBase');
     }
 
-    // Scan [portBase, portBase+999] in order — deterministic, no randomness.
-    // Each preset has its own non-overlapping range so collisions between
-    // different protocol types are structurally impossible.
+    // Preset ranges are candidate pools, not proof of remote availability.
     for (let i = 0; i < 1000; i++) {
       const port = portBase + i;
       const derivedStats = derivedStatsPort(port, implementation);
@@ -717,6 +719,10 @@ export class NodesService {
           `服务器端口 ${conflict} 已被节点 ${node.id} 占用，请选择其他端口`,
         );
       }
+    }
+    const remote = await this.resources.unavailablePorts(serverId, excludeNodeId);
+    for (const port of candidatePorts) {
+      if (remote.has(port)) throw new BadRequestException(`Remote port ${port} is occupied or reserved for pending cleanup`);
     }
   }
 

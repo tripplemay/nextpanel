@@ -37,7 +37,7 @@ try {
     if (Date.now() > deadline) throw new Error('Fixture server did not become ready');
     await sleep(250);
   }
-  for (const script of ['security-closeout-browser.py', 'p1-browser.py']) {
+  for (const script of ['security-closeout-browser.py', 'p1-browser.py', 'resource-lifecycle-browser.py']) {
     console.log(`[browser] starting ${script}`);
     const child = spawn(process.env.PYTHON || 'python3', ['-u', join(root, 'scripts/tests', script), base], { stdio: 'inherit', detached: true });
     const code = await new Promise((resolve, reject) => {

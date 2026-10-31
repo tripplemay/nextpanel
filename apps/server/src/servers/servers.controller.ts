@@ -86,7 +86,7 @@ export class ServersController {
   @Delete(':id')
   @Roles('ADMIN', 'OPERATOR', 'VIEWER')
   @Audit('DELETE', 'server')
-  @ApiOperation({ summary: 'Delete a server. Adds ?force=true to skip SSH cleanup.' })
+  @ApiOperation({ summary: 'Queue durable server cleanup. ?force=true hides the server while cleanup remains pending.' })
   remove(
     @Param('id') id: string,
     @Query('force') force: string,

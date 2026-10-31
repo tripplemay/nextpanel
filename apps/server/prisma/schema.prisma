@@ -99,6 +99,11 @@ model Server {
   agentToken         String       @unique @default(cuid())
   pendingAgentUpdate Boolean      @default(false)
   deleteError        String?
+  /// Stable remote identity; never infer host identity from an IP address alone.
+  remoteHostId       String?
+  /// Hidden from the normal list, but retained while cleanup still needs credentials.
+  retiredAt          DateTime?
+  cleanupQueuedAt    DateTime?
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 
@@ -108,6 +113,56 @@ model Server {
   ipCheck        ServerIpCheck?
 
   @@index([userId])
+}
+
+model PanelIdentity {
+  id         String @id
+  instanceId String @unique @default(uuid())
+}
+
+// Deliberately no cascading server/node FK: deletion must not erase cleanup intent.
+model ResourceCleanup {
+  id                 String   @id @default(cuid())
+  ownerId            String
+  deletionServerId   String
+  serverId           String
+  serverName         String
+  nodeId             String
+  nodeName           String
+  role               String
+  panelInstanceId    String
+  remoteHostId       String?
+  expectedConfigHashEnc String?
+  payload            Json
+  state              String   @default("PENDING")
+  attempts           Int      @default(0)
+  nextAttemptAt      DateTime @default(now())
+  lastError          String?
+  completedAt        DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([serverId, nodeId, role])
+  @@index([state, nextAttemptAt])
+  @@index([ownerId, createdAt])
+  @@index([deletionServerId, state])
+  @@index([remoteHostId, state])
+}
+
+model ResourceFinding {
+  id          String   @id @default(cuid())
+  ownerId     String
+  serverId    String
+  serviceName String
+  nodeId      String
+  kind        String
+  detail      String
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  resolvedAt  DateTime?
+
+  @@unique([serverId, serviceName, kind])
+  @@index([ownerId, resolvedAt])
 }
 
 enum SshAuthType {
