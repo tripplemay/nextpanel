@@ -10,6 +10,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { gzipSync } from 'node:zlib';
 import { createRequire } from 'node:module';
 import { verifyResourceLifecycle } from './resource-lifecycle-pg.fixture.mjs';
+import { verifyCfAccess } from './cf-access-pg.fixture.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(join(root, 'apps/server/package.json'));
@@ -99,6 +100,7 @@ test('isolated PostgreSQL migration, concurrency and restore drill', { timeout: 
     assert.equal((await metrics.getServerMetrics('srv', 'owner', 600)).length, 600);
     await prisma.serverMetric.deleteMany();
     const cipher = new CryptoService({ getOrThrow: () => 'ab'.repeat(32) });
+    await verifyCfAccess({ prisma, cipher, require, root });
     await verifyResourceLifecycle({ prisma, cipher, databaseUrl: `postgresql://review@localhost:55432/nextpanel?host=${encodeURIComponent(socket)}`, require, root, sql });
     await prisma.externalNode.create({ data: { id: 'zzz', userId: 'owner', name: 'encrypted', protocol: 'HTTP', address: 'proxy.test', port: 80,
       credentialsEnc: sealExternalSecrets(cipher, 'owner', { password: 'existing-secret' }) } });

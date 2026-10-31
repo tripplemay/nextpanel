@@ -18,11 +18,21 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { SubscriptionsService } from './subscriptions.service';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
+import { CfAccessService } from './cf-access.service';
+import { CheckCfAccessDto } from './dto/check-cf-access.dto';
 
 @ApiTags('subscriptions')
 @Controller('subscriptions')
 export class SubscriptionsController {
-  constructor(private subscriptionsService: SubscriptionsService) {}
+  constructor(private subscriptionsService: SubscriptionsService, private cfAccess: CfAccessService) {}
+
+  @Post('cf-access/check')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  checkCfAccess(@Body() dto: CheckCfAccessDto, @CurrentUser() user: { id: string }) {
+    return this.cfAccess.check(dto.nodeId, user.id, dto.ip);
+  }
 
   @Post()
   @ApiBearerAuth()
@@ -33,7 +43,7 @@ export class SubscriptionsController {
     @Body() dto: CreateSubscriptionDto,
     @CurrentUser() user: { id: string; role: string },
   ) {
-    return this.subscriptionsService.create(dto.name, dto.nodeIds, user.id, dto.externalNodeIds);
+    return this.subscriptionsService.create(dto.name, dto.nodeIds, user.id, dto.externalNodeIds, dto);
   }
 
   @Get()
@@ -61,7 +71,7 @@ export class SubscriptionsController {
     @Body() dto: UpdateSubscriptionDto,
     @CurrentUser() user: { id: string },
   ) {
-    return this.subscriptionsService.update(id, dto.name, dto.nodeIds, user.id, dto.externalNodeIds);
+    return this.subscriptionsService.update(id, dto.name, dto.nodeIds, user.id, dto.externalNodeIds, dto);
   }
 
   @Post(':id/refresh-token')
@@ -194,6 +204,14 @@ export class SubscriptionsController {
   }
 
   /** Public — VIEWER shareToken Sing-box JSON */
+  @Get('share/:shareToken/homeproxy')
+  async getShareHomeProxyContent(@Param('shareToken') shareToken: string, @Res() res: Response) {
+    const content = await this.subscriptionsService.generateHomeProxyContentByShareToken(shareToken);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', 'inline; filename="homeproxy-singbox.json"');
+    res.send(content);
+  }
+
   @Get('share/:shareToken/singbox')
   @ApiOperation({ summary: 'VIEWER shared subscription — Sing-box JSON' })
   async getShareSingboxContent(@Param('shareToken') shareToken: string, @Res() res: Response) {

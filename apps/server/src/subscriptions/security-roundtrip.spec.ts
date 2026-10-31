@@ -4,6 +4,7 @@ import { importedTransportHost, parseUri } from '../external-nodes/uri-parser';
 import { buildClashProxy, buildSingboxOutbound, NodeExportInfo } from './uri-builder';
 import { buildXrayClientConfig } from '../nodes/xray-test/config-builder';
 import { CryptoService } from '../common/crypto/crypto.service';
+import { CfAccessService } from './cf-access.service';
 
 describe('subscription security and import/export round trips', () => {
   const db = {
@@ -12,7 +13,7 @@ describe('subscription security and import/export round trips', () => {
     subscriptionShare: { findMany: jest.fn(), findUnique: jest.fn() },
   };
   const cipher = new CryptoService({ getOrThrow: () => 'ab'.repeat(32) } as any);
-  const service = new SubscriptionsService(db as any, {} as any, {} as any, cipher);
+  const service = new SubscriptionsService(db as any, {} as any, {} as any, cipher, {} as CfAccessService);
   const importer = new ExternalNodesService(db as any, {} as any, {} as any, {} as any, cipher);
   beforeEach(() => jest.resetAllMocks());
 
@@ -67,7 +68,7 @@ describe('subscription security and import/export round trips', () => {
     const subscription = { ownerId: 'owner', name: 'fixture', nodes: [], externalNodes: [{ externalNode: stored }] };
     db.subscription.findUnique.mockResolvedValue(subscription);
     db.subscriptionShare.findUnique.mockResolvedValue({ shareToken: 'recipient-token', subscription });
-    const exporter = new SubscriptionsService(db as any, {} as any, { get: () => 'https://panel.test' } as any, cipher);
+    const exporter = new SubscriptionsService(db as any, {} as any, { get: () => 'https://panel.test' } as any, cipher, {} as CfAccessService);
     expect(await exporter.generateContentByShareToken('recipient-token')).toBe(await exporter.generateContent('owner-token'));
     expect(await exporter.generateClashContentByShareToken('recipient-token')).toEqual(await exporter.generateClashContent('owner-token'));
     expect(await exporter.generateSingboxContentByShareToken('recipient-token')).toBe(await exporter.generateSingboxContent('owner-token'));

@@ -6,6 +6,7 @@ import ServerTagList from '@/components/servers/ServerTagList';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { subscriptionsApi, nodesApi, externalNodesApi } from '@/lib/api';
 import type { CreateSubscriptionDto, Subscription, Node, ExternalNode } from '@/types/api';
+import CfAccessFields, { subscriptionError } from './CfAccessFields';
 
 const STATUS_COLOR: Record<string, string> = {
   RUNNING: 'green',
@@ -51,9 +52,12 @@ export default function SubscriptionFormModal({
           name: subscription.name,
           nodeIds: subscription.nodes.map((sn) => sn.node.id),
           externalNodeIds: (subscription.externalNodes ?? []).map((en) => en.externalNode.id),
+          cfOnly: subscription.cfOnly ?? false,
+          cfPreferredIps: subscription.cfPreferredIps ?? [],
         });
       } else {
         form.resetFields();
+        form.setFieldsValue({ nodeIds: [], externalNodeIds: [], cfOnly: false, cfPreferredIps: [] });
       }
     }
   }, [open, isEdit, subscription, form]);
@@ -61,14 +65,14 @@ export default function SubscriptionFormModal({
   const createMutation = useMutation({
     mutationFn: (data: CreateSubscriptionDto) => subscriptionsApi.create(data),
     onSuccess: () => { message.success('订阅已创建'); onSuccess(); },
-    onError: () => message.error('创建失败'),
+    onError: (error) => message.error(subscriptionError(error)),
   });
 
   const updateMutation = useMutation({
     mutationFn: (data: CreateSubscriptionDto) =>
       subscriptionsApi.update(subscription!.id, data),
     onSuccess: () => { message.success('订阅已更新'); onSuccess(); },
-    onError: () => message.error('更新失败'),
+    onError: (error) => message.error(subscriptionError(error)),
   });
 
   async function handleSubmit() {
@@ -162,6 +166,7 @@ export default function SubscriptionFormModal({
             }}
           />
         </Form.Item>
+        <CfAccessFields key={subscription?.id ?? 'new'} form={form} nodes={nodes ?? []} locked={subscription?.cfOnly === true} />
       </Form>
     </Modal>
   );

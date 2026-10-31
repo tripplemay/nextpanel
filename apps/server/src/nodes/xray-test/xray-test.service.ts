@@ -134,6 +134,7 @@ export class XrayTestService {
     domain: string | null;
     credentials: Record<string, string>;
     requireUdp?: boolean;
+    secureProbe?: boolean;
   }): Promise<TestResult> {
     if (this.usesSingbox(params.protocol)) {
       return this.withSemaphore(() =>
@@ -164,6 +165,7 @@ export class XrayTestService {
     domain: string | null;
     credentials: Record<string, string>;
     requireUdp?: boolean;
+    secureProbe?: boolean;
   }): Promise<TestResult> {
     const testedAt = new Date().toISOString();
     const id = crypto.randomUUID();
@@ -189,7 +191,7 @@ export class XrayTestService {
 
     try {
       await this.waitForPort(socksPort, XRAY_STARTUP_MS);
-      const tcpResult = await this.curlTest(socksPort);
+      const tcpResult = await this.curlTest(socksPort, node.secureProbe ? 'https://www.gstatic.com/generate_204' : TEST_URL);
       if (!tcpResult.reachable || !node.requireUdp) {
         return { ...tcpResult, testedAt };
       }
@@ -239,7 +241,7 @@ export class XrayTestService {
   }
 
   /** Make a test request through the SOCKS5 proxy using curl. */
-  private curlTest(socksPort: number): Promise<{ reachable: boolean; latency: number; message: string }> {
+  private curlTest(socksPort: number, testUrl = TEST_URL): Promise<{ reachable: boolean; latency: number; message: string }> {
     return new Promise((resolve) => {
       const start = Date.now();
       execFile(
@@ -251,7 +253,7 @@ export class XrayTestService {
           '--socks5-hostname', `127.0.0.1:${socksPort}`,
           '--max-time', String(TEST_TIMEOUT_MS / 1000),
           '--connect-timeout', '10',
-          TEST_URL,
+          testUrl,
         ],
         { timeout: TEST_TIMEOUT_MS + 2000 },
         (err, stdout) => {

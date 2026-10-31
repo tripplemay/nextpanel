@@ -329,6 +329,7 @@ export default function SubscriptionsPage() {
               </div>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 {totalCount} 个节点
+                {sub.cfOnly ? ` · CF-only / ${sub.cfPreferredIps?.length ?? 0} 条优选` : ''}
               </Typography.Text>
             </div>
             <div style={{ flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>

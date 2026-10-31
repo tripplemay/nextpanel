@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, ConflictException, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service';
 import { NodesService } from '../nodes/nodes.service';
@@ -7,6 +7,10 @@ import type { NodeExportInfo } from './uri-builder';
 import { importedTransportHost } from '../external-nodes/uri-parser';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { externalNodePublicSelect, openExternalSecrets } from '../external-nodes/external-credentials';
+import { CfAccessService } from './cf-access.service';
+import { assertCfManagedNode, cfVariants, normalizeCfPreferredIps } from './cf-access.util';
+
+type CfOptions = { cfOnly?: boolean; cfPreferredIps?: string[] };
 
 type SubscriptionNode = {
   node: {
@@ -18,6 +22,7 @@ type SubscriptionNode = {
     tls: string;
     listenPort: number;
     domain: string | null;
+    cfDnsRecordId?: string | null;
     enabled: boolean;
     status: string;
     server: { ip: string };
@@ -31,9 +36,13 @@ export class SubscriptionsService {
     private nodesService: NodesService,
     private config: ConfigService,
     private crypto: CryptoService,
+    private cfAccess: CfAccessService,
   ) {}
 
-  async create(name: string, nodeIds: string[], ownerId: string, externalNodeIds?: string[]) {
+  async create(name: string, nodeIds: string[], ownerId: string, externalNodeIds?: string[], options: CfOptions = {}) {
+    const cfPreferredIps = normalizeCfPreferredIps(options.cfPreferredIps ?? []);
+    if (options.cfOnly) await this.cfAccess.validateSelection(nodeIds, externalNodeIds ?? [], ownerId);
+    else if (cfPreferredIps.length) throw new BadRequestException('Preferred IPs require CF-only mode');
     // Filter out non-existent IDs to prevent FK constraint violations
     let validNodeIds = nodeIds;
     if (nodeIds.length > 0) {
@@ -57,6 +66,8 @@ export class SubscriptionsService {
       data: {
         name,
         ownerId,
+        cfOnly: options.cfOnly ?? false,
+        cfPreferredIps,
         nodes: {
           create: validNodeIds.map((nodeId) => ({ nodeId })),
         },
@@ -120,8 +131,12 @@ export class SubscriptionsService {
       name: s.subscription.name,
       createdAt: s.subscription.createdAt,
       updatedAt: s.subscription.updatedAt,
-      nodes: s.subscription.nodes,
+      nodes: s.subscription.cfOnly ? s.subscription.nodes.map(({ node }) => ({
+        node: { ...node, server: { ...node.server, ip: undefined } },
+      })) : s.subscription.nodes,
       externalNodes: s.subscription.externalNodes,
+      cfOnly: s.subscription.cfOnly,
+      cfPreferredIps: s.subscription.cfPreferredIps,
       shareToken: s.shareToken,
     }));
   }
@@ -166,9 +181,23 @@ export class SubscriptionsService {
     });
   }
 
-  async update(id: string, name: string | undefined, nodeIds: string[] | undefined, ownerId: string, externalNodeIds?: string[]) {
-    const sub = await this.prisma.subscription.findFirst({ where: { id, ownerId } });
+  async update(id: string, name: string | undefined, nodeIds: string[] | undefined, ownerId: string, externalNodeIds?: string[], options: CfOptions = {}) {
+    const sub = await this.prisma.subscription.findFirst({
+      where: { id, ownerId },
+      include: { nodes: { select: { nodeId: true } }, externalNodes: { select: { externalNodeId: true } } },
+    });
     if (!sub) throw new NotFoundException(`Subscription ${id} not found`);
+    if (sub.cfOnly && options.cfOnly === false) {
+      throw new BadRequestException('CF-only cannot be disabled; clear preferred IPs to restore default CDN access');
+    }
+    const cfOnly = options.cfOnly ?? sub.cfOnly ?? false;
+    const cfPreferredIps = normalizeCfPreferredIps(options.cfPreferredIps ?? sub.cfPreferredIps ?? []);
+    if (cfOnly) {
+      await this.cfAccess.validateSelection(
+        nodeIds ?? sub.nodes.map((n) => n.nodeId),
+        externalNodeIds ?? sub.externalNodes.map((n) => n.externalNodeId), ownerId,
+      );
+    } else if (cfPreferredIps.length) throw new BadRequestException('Preferred IPs require CF-only mode');
 
     // Filter out non-existent node IDs to prevent FK constraint violations
     let validNodeIds = nodeIds;
@@ -190,8 +219,10 @@ export class SubscriptionsService {
     }
 
     return this.prisma.subscription.update({
-      where: { id },
+      where: { id, ...(options.cfOnly === false && { cfOnly: false }) },
       data: {
+        ...(options.cfOnly !== undefined && { cfOnly }),
+        ...(options.cfPreferredIps !== undefined && { cfPreferredIps }),
         ...(name !== undefined && { name }),
         ...(validNodeIds !== undefined && {
           nodes: {
@@ -283,6 +314,10 @@ export class SubscriptionsService {
     return buildHomeProxyConfig(nodes);
   }
 
+  async generateHomeProxyContentByShareToken(shareToken: string): Promise<string> {
+    return buildHomeProxyConfig(await this.fetchActiveNodes({ shareToken }));
+  }
+
   // ─── Private helpers ──────────────────────────────────────────────────────
 
   private async fetchActiveNodes(by: { token?: string; shareToken?: string }): Promise<NodeExportInfo[]> {
@@ -299,7 +334,7 @@ export class SubscriptionsService {
       externalNodes: { include: { externalNode: true } },
     };
 
-    let sub: { ownerId: string; nodes: SubscriptionNode[]; externalNodes: { externalNode: import('@prisma/client').ExternalNode }[] } | null = null;
+    let sub: { ownerId: string; cfOnly?: boolean; cfPreferredIps?: string[]; nodes: SubscriptionNode[]; externalNodes: { externalNode: import('@prisma/client').ExternalNode }[] } | null = null;
 
     if (by.shareToken) {
       const share = await this.prisma.subscriptionShare.findUnique({
@@ -315,11 +350,21 @@ export class SubscriptionsService {
     if (!sub) throw new NotFoundException('Subscription not found');
 
     const result: NodeExportInfo[] = [];
+    const preferredIps = sub.cfOnly ? normalizeCfPreferredIps(sub.cfPreferredIps ?? []) : [];
+    if (sub.cfOnly && (sub.externalNodes.length > 0 || sub.nodes.length > 20)) {
+      throw new ServiceUnavailableException('CF-only subscription selection is invalid');
+    }
+    const activeNodes = sub.nodes.filter(({ node }) => node.enabled && node.status === 'RUNNING');
+    let defaultIps = new Map<string, string | null>();
+    if (sub.cfOnly) {
+      activeNodes.forEach(({ node }) => assertCfManagedNode(node));
+      const domains = [...new Set(activeNodes.map(({ node }) => node.domain!))];
+      defaultIps = new Map(await Promise.all(domains.map(async (domain) => [domain, await this.cfAccess.defaultIp(domain)] as const)));
+    }
 
-    for (const { node } of sub.nodes as SubscriptionNode[]) {
-      if (!node.enabled || node.status !== 'RUNNING') continue;
+    for (const { node } of activeNodes) {
       const credentials = await this.nodesService.getCredentials(node.id, sub.ownerId);
-      result.push({
+      const exported: NodeExportInfo = {
         name: node.name,
         protocol: node.protocol,
         host: node.tls === 'REALITY' ? node.server.ip : (node.domain ?? node.server.ip),
@@ -328,7 +373,13 @@ export class SubscriptionsService {
         tls: node.tls,
         domain: node.domain,
         credentials,
-      });
+      };
+      if (sub.cfOnly) {
+        const defaultIp = defaultIps.get(node.domain!) ?? null;
+        const variants = cfVariants(exported, node.id, preferredIps, defaultIp);
+        if (variants.length === 0) throw new ServiceUnavailableException('No Cloudflare endpoint available; direct fallback is forbidden');
+        result.push(...variants);
+      } else result.push(exported);
     }
 
     for (const { externalNode: stored } of sub.externalNodes) {
@@ -359,6 +410,9 @@ export class SubscriptionsService {
       });
     }
 
+    if (sub.cfOnly && result.length === 0) {
+      throw new ServiceUnavailableException('No active CF-only nodes; direct fallback is forbidden');
+    }
     return result;
   }
 }

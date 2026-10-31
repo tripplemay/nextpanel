@@ -4,6 +4,7 @@ import { NodesService } from '../nodes/nodes.service';
 import { NotFoundException } from '@nestjs/common';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { sealExternalSecrets } from '../external-nodes/external-credentials';
+import { CfAccessService } from './cf-access.service';
 
 const mockPrisma = {
   subscription: {
@@ -28,7 +29,7 @@ const mockNodes = {
 
 const mockConfig = { get: jest.fn((key: string) => key === 'PANEL_URL' ? 'http://localhost:3001' : undefined) } as unknown as import('@nestjs/config').ConfigService;
 const cipher = new CryptoService({ getOrThrow: () => 'ab'.repeat(32) } as any);
-const svc = new SubscriptionsService(mockPrisma, mockNodes, mockConfig, cipher);
+const svc = new SubscriptionsService(mockPrisma, mockNodes, mockConfig, cipher, {} as CfAccessService);
 
 beforeEach(() => jest.clearAllMocks());
 
