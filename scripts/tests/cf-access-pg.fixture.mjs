@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 
 // Called exclusively inside database-integration.mjs's disposable local cluster.
-export async function verifyCfAccess({ prisma, cipher, require, root }) {
+export async function verifyCfAccess({ prisma, cipher, require, root, databaseUrl }) {
   const { CfAccessService } = require(`${root}/apps/server/src/subscriptions/cf-access.service.ts`);
   const { SubscriptionsService } = require(`${root}/apps/server/src/subscriptions/subscriptions.service.ts`);
   const original = await prisma.subscription.findUniqueOrThrow({ where: { id: 'sub' } });
   assert.equal(original.cfOnly, false);
+  assert.equal(original.cfAuto, false);
   assert.deepEqual(original.cfPreferredIps, []);
   const resourceCount = await prisma.configSnapshot.count();
   const cleanupCount = await prisma.resourceCleanup.count();
@@ -24,7 +25,10 @@ export async function verifyCfAccess({ prisma, cipher, require, root }) {
   } };
   const cf = new CfAccessService(prisma, nodes, { testWithParams: async () => { throw new Error('No network in PG fixture'); } });
   cf.defaultIp = async () => '104.16.0.2';
-  const subscriptions = new SubscriptionsService(prisma, nodes, { get: () => 'https://panel.example.com' }, cipher, cf);
+  const { CfOptimizationService, nodeFingerprint } = require(`${root}/apps/server/src/subscriptions/cf-optimization.service.ts`);
+  const { fingerprint } = require(`${root}/apps/server/src/subscriptions/cf-optimization.util.ts`);
+  const optimizer = new CfOptimizationService(prisma, nodes, cf);
+  const subscriptions = new SubscriptionsService(prisma, nodes, { get: () => 'https://panel.example.com' }, cipher, cf, optimizer);
   await assert.rejects(subscriptions.create('foreign', ['cf-node'], 'owner', [], { cfOnly: true }), /selection is not available/);
   const created = await subscriptions.create('CF fixture', ['cf-node'], 'cf-owner', [], { cfOnly: true, cfPreferredIps: ['104.16.0.1'] });
   assert.equal(created.cfOnly, true);
@@ -46,9 +50,53 @@ export async function verifyCfAccess({ prisma, cipher, require, root }) {
   assert.equal(updated.cfOnly, true);
   assert.equal(Buffer.from(await subscriptions.generateContent(updated.token), 'base64').toString().split('\n').length, 1);
   assert.equal((await prisma.subscriptionShare.findUniqueOrThrow({ where: { id: share.id } })).shareToken, share.shareToken);
+  await subscriptions.update(created.id, undefined, undefined, 'cf-owner', undefined, { cfAuto: true });
+  const probe = { id: 'fixture', url: 'https://probe.example.com', tokenEnv: 'CF_FIXTURE_TOKEN', carrier: 'TELECOM', region: 'fixture-city',
+    expectedEgressIp: '192.0.2.1', verifiedAt: new Date().toISOString() };
+  const oldRegistry = process.env.CF_OPTIMIZATION_PROBES;
+  const oldToken = process.env.CF_FIXTURE_TOKEN;
+  const oldDatabase = process.env.DATABASE_URL;
+  try {
+    process.env.CF_OPTIMIZATION_PROBES = JSON.stringify([probe]); process.env.CF_FIXTURE_TOKEN = 'f'.repeat(32);
+    const current = await prisma.node.findUniqueOrThrow({ where: { id: 'cf-node' } });
+    const observations = [{ ip: '104.16.0.1', latency: 50, passed: 2, failed: 0, checkedAt: Date.now() }];
+    await prisma.cfOptimization.create({ data: { nodeId: current.id, probeId: probe.id,
+      fingerprint: fingerprint([nodeFingerprint(current), fingerprint([probe, fingerprint('f'.repeat(32))])]), carrier: 'TELECOM', region: probe.region,
+      observations, published: observations, previous: [{ ...observations[0], ip: '104.16.0.3' }], checkedAt: new Date(), discoveredAt: new Date() } });
+    const ownerProvider = await subscriptions.generateCfProvider({ token: updated.token }, current.id);
+    assert.equal(ownerProvider, await subscriptions.generateCfProvider({ shareToken: share.shareToken }, current.id));
+    assert.ok(ownerProvider.includes('TELECOM')); assert.ok(!ownerProvider.includes('192.0.2.90'));
+    await assert.rejects(subscriptions.generateCfProvider({ token: original.token }, current.id), /not available/);
+    const sharedClash = (await subscriptions.generateClashContentByShareToken(share.shareToken)).content;
+    assert.ok(sharedClash.includes(`/share/${share.shareToken}/cf-provider/cf-node`));
+    assert.ok(!sharedClash.includes(updated.token));
+    await assert.rejects(optimizer.status(current.id, 'owner'), /not found/);
+    assert.deepEqual((await optimizer.status(current.id, 'cf-owner')).missingCarriers, ['UNICOM', 'MOBILE']);
+    process.env.DATABASE_URL = databaseUrl;
+    await optimizer.rollback(current.id, 'cf-owner');
+    assert.equal((await optimizer.status(current.id, 'cf-owner')).paused, true);
+    assert.ok((await subscriptions.generateCfProvider({ token: updated.token }, current.id)).includes('104.16.0.3'));
+    await optimizer.resume(current.id, 'cf-owner');
+    assert.equal((await optimizer.status(current.id, 'cf-owner')).paused, false);
+    await prisma.cfOptimization.updateMany({ where: { nodeId: current.id }, data: {
+      previous: [{ ...observations[0], checkedAt: Date.now() - 25 * 3600_000 }],
+    } });
+    await assert.rejects(optimizer.rollback(current.id, 'cf-owner'), /No safe previous/);
+    assert.equal((await optimizer.status(current.id, 'cf-owner')).paused, false);
+    await subscriptions.removeShare(created.id, 'owner', 'cf-owner');
+    await assert.rejects(subscriptions.generateCfProvider({ shareToken: share.shareToken }, current.id), /not found/);
+    const rotated = await subscriptions.refreshToken(created.id, 'cf-owner');
+    await assert.rejects(subscriptions.generateCfProvider({ token: updated.token }, current.id), /not found/);
+    updated.token = rotated.token;
+  } finally {
+    if (oldRegistry === undefined) delete process.env.CF_OPTIMIZATION_PROBES; else process.env.CF_OPTIMIZATION_PROBES = oldRegistry;
+    if (oldToken === undefined) delete process.env.CF_FIXTURE_TOKEN; else process.env.CF_FIXTURE_TOKEN = oldToken;
+    if (oldDatabase === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = oldDatabase;
+  }
   await prisma.node.update({ where: { id: 'cf-node' }, data: { enabled: false } });
   await assert.rejects(subscriptions.generateHomeProxyContent(updated.token), /direct fallback is forbidden/);
   await prisma.node.delete({ where: { id: 'cf-node' } });
+  assert.equal(await prisma.cfOptimization.count(), 0);
   await assert.rejects(subscriptions.generateClashContent(updated.token), /direct fallback is forbidden/);
   assert.equal(await prisma.configSnapshot.count(), resourceCount);
   assert.equal(await prisma.resourceCleanup.count(), cleanupCount);

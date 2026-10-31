@@ -49,7 +49,7 @@ TUIC 和 AnyTLS 创建时要求用户已配置状态为 `active` 的 Cloudflare 
 - 节点列表中以"托管"/"外部"标签区分来源
 - 支持刷新订阅链接（重新生成 token）
 - 导出弹窗含链接复制 + QR 码
-- 可选 CF-only 订阅：中国大陆电信试点，VLESS + WS + TLS 支持最多 3 个手动 CF 优选 IP、固定的默认 CF 地址和客户端内线路回退；保持原 SNI/WS Host 与 TLS 校验，空线路拒绝导出，不回退源站。面板侧测试不代表大陆速度，源站隐藏需独立核验。配置、验收与安全回退见 [CF 接入运行手册](docs/RUNBOOK-cf-access.md)。
+- 可选 CF-only 订阅：VLESS + WS + TLS 支持自动候选探查、三网实测分组和 Clash/Mihomo 动态候选更新，无需手填 IP；也保留手工优选模式。始终保留原 SNI/WS Host、TLS 校验和 CDN，空线路不回退源站。缺少真实运营商测点时仅提供通用/默认 CF 候选，不冒充三网实测。后台任务默认关闭；配置与验收见 [自动优选手册](docs/RUNBOOK-cf-auto.md) 和 [源站隐藏验收](docs/RUNBOOK-cf-access.md)。
 
 新增协议的导出兼容性：
 
@@ -245,6 +245,8 @@ Auth, Servers, Nodes, ExternalNodes, Subscriptions, IpCheck, Metrics, Agent, Aud
 | `GITHUB_REPO` | Agent 发布的 GitHub 仓库路径 |
 | `GFW_CHECK_FUNCTION_URL` | 可达性检测函数地址（可选，见下方说明） |
 | `GFW_CHECK_FUNCTION_TOKEN` | 可达性检测函数认证 Token（可选） |
+| `CF_OPTIMIZATION_ENABLED` | 自动 CF 探查调度开关（默认关闭） |
+| `CF_OPTIMIZATION_PROBES` | 独立 v2 测点登记 JSON；密钥通过引用的环境变量注入，见自动优选手册 |
 
 **前端** (`apps/web/.env.local`)：
 
@@ -259,6 +261,10 @@ IP 检测中的大部分功能（地理位置、流媒体解锁、AI 服务可�
 **可达性检测**是唯一需要额外配置的可选功能。该功能通过部署在中国大陆的 Serverless 函数，从国内测试目标服务器 IP 是否可达。不配置此功能不影响其他检测。
 
 ### 工作原理
+
+本工程原腾讯云 `gfw-check` 的已部署源码和运行配置已只读找回，归档于
+[`scripts/gfw-check/legacy/`](scripts/gfw-check/legacy/)。它只做 TCP 检查，不是
+TLS/VLESS 或吞吐测速；自动 CF 优选使用独立 v2 探针，不覆盖原检测函数。
 
 1. 面板向你部署的 Serverless 函数发送 HTTP POST 请求，包含 `{ "ip": "1.2.3.4", "port": 443 }`
 2. 函数从中国大陆网络尝试连接目标 IP 和端口

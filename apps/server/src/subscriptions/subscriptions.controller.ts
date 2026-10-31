@@ -20,11 +20,45 @@ import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { CfAccessService } from './cf-access.service';
 import { CheckCfAccessDto } from './dto/check-cf-access.dto';
+import { CfOptimizationService } from './cf-optimization.service';
 
 @ApiTags('subscriptions')
 @Controller('subscriptions')
 export class SubscriptionsController {
-  constructor(private subscriptionsService: SubscriptionsService, private cfAccess: CfAccessService) {}
+  constructor(private subscriptionsService: SubscriptionsService, private cfAccess: CfAccessService, private cfOptimizer: CfOptimizationService) {}
+
+  @Get('cf-access/optimization/:nodeId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  optimizationStatus(@Param('nodeId') nodeId: string, @CurrentUser() user: { id: string }) {
+    return this.cfOptimizer.status(nodeId, user.id);
+  }
+
+  @Post('cf-access/optimization/:nodeId/rollback')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  rollbackOptimization(@Param('nodeId') nodeId: string, @CurrentUser() user: { id: string }) {
+    return this.cfOptimizer.rollback(nodeId, user.id);
+  }
+
+  @Post('cf-access/optimization/:nodeId/resume')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'OPERATOR')
+  resumeOptimization(@Param('nodeId') nodeId: string, @CurrentUser() user: { id: string }) {
+    return this.cfOptimizer.resume(nodeId, user.id);
+  }
+
+  @Get('link/:token/cf-provider/:nodeId')
+  async cfProvider(@Param('token') token: string, @Param('nodeId') nodeId: string, @Res() res: Response) {
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.type('text/plain').send(await this.subscriptionsService.generateCfProvider({ token }, nodeId));
+  }
+
+  @Get('share/:shareToken/cf-provider/:nodeId')
+  async sharedCfProvider(@Param('shareToken') shareToken: string, @Param('nodeId') nodeId: string, @Res() res: Response) {
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.type('text/plain').send(await this.subscriptionsService.generateCfProvider({ shareToken }, nodeId));
+  }
 
   @Post('cf-access/check')
   @ApiBearerAuth()

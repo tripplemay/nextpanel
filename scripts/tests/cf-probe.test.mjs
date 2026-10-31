@@ -1,0 +1,55 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { createProbeServer, validateBatch, xrayConfig, isCfIp, probeOne } from '../cf-probe/server.mjs';
+
+const batch = { ips: ['104.16.0.1'], downloadIps: [], domain: 'cdn.example.com',
+  uuid: '00000000-0000-4000-8000-000000000001', path: '/ws' };
+test('probe validates bounded CF-only targets and rejects arbitrary proxy configuration', () => {
+  assert.equal(validateBatch(batch), batch);
+  for (const ip of ['127.0.0.1', '::1', '::ffff:104.16.0.1', '192.0.2.1', '169.254.169.254']) {
+    assert.equal(isCfIp(ip), false); assert.throws(() => validateBatch({ ...batch, ips: [ip] }));
+  }
+  for (const change of [{ ips: Array(9).fill('104.16.0.1') }, { domain: '127.0.0.1' }, { path: '/\r\nHost: internal' },
+    { downloadIps: ['104.16.0.2'] }, { url: 'http://internal/' }, { port: 22 }, { config: {} }]) {
+    assert.throws(() => validateBatch({ ...batch, ...change }));
+  }
+  const config = xrayConfig(batch, batch.ips[0], 1080);
+  assert.equal(config.inbounds[0].listen, '127.0.0.1');
+  assert.equal(config.outbounds[0].streamSettings.tlsSettings.allowInsecure, false);
+  assert.equal(config.outbounds[0].streamSettings.wsSettings.headers.Host, batch.domain);
+  assert.equal(config.outbounds[0].settings.vnext[0].address, batch.ips[0]);
+});
+test('missing runtime is infrastructure failure, never an IP reachability verdict', async t => {
+  const server = createProbeServer({ token: 'f'.repeat(32), id: 'fixture', checkRuntime: async () => false });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/capabilities`, { headers: { Authorization: `Bearer ${'f'.repeat(32)}` } });
+  assert.equal(response.status, 503); assert.equal((await response.json()).error, 'PROBE_RUNTIME_UNAVAILABLE');
+});
+test('missing Xray process cleans up and terminates within the bounded startup deadline', { timeout: 7000 }, async () => {
+  const old = process.env.XRAY_BINARY;
+  try {
+    process.env.XRAY_BINARY = '/nonexistent/nextpanel-fixture-xray';
+    const result = await probeOne(batch, batch.ips[0], new AbortController().signal);
+    assert.equal(result.error, 'PROBE_RUNTIME_UNAVAILABLE');
+  } finally { if (old === undefined) delete process.env.XRAY_BINARY; else process.env.XRAY_BINARY = old; }
+});
+test('probe authentication, identity and exact-target HTTP contract without external IO', async t => {
+  let calls = 0;
+  const token = 'f'.repeat(32);
+  const server = createProbeServer({ token, id: 'fixture', lookupEgress: async () => '192.0.2.1', checkRuntime: async () => true,
+    test: async (_body, ip) => { calls++; return { ip, ok: true, latency: 50 }; } });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const url = `http://127.0.0.1:${server.address().port}`;
+  assert.equal((await fetch(url + '/capabilities')).status, 401);
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const capabilities = await (await fetch(url + '/capabilities', { headers })).json();
+  assert.equal(capabilities.carrier, 'UNVERIFIED'); assert.equal(capabilities.probeId, 'fixture');
+  const response = await fetch(url + '/probe', { method: 'POST', headers, body: JSON.stringify(batch) });
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).results, [{ ip: batch.ips[0], ok: true, latency: 50 }]);
+  assert.equal((await fetch(url + '/probe', { method: 'POST', headers, body: JSON.stringify({ ...batch, ips: ['127.0.0.1'] }) })).status, 400);
+  assert.equal(calls, 1);
+});

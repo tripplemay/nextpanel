@@ -49,12 +49,15 @@ with sync_playwright() as p:
                     route.fulfill(json={'reachable': True, 'latency': 100, 'message': 'fixture OK', 'testedAt': '2026-10-31T00:00:00Z',
                                         'address': '104.16.0.1', 'domain': 'cdn.example.com', 'vantage': 'PANEL',
                                         'audit': {'status': 'UNVERIFIED', 'findings': ['ENTRY_IS_EXIT', 'DNS_HISTORY_AND_FIREWALL_UNVERIFIED']}})
+            elif url.path == '/api/subscriptions/cf-access/optimization/cf-node':
+                route.fulfill(json={'enabled': False, 'registryError': False, 'rangeError': False,
+                                    'rangeUpdatedAt': None, 'profiles': [], 'missingCarriers': ['TELECOM', 'UNICOM', 'MOBILE']})
             elif url.path == '/api/subscriptions/s1':
                 assert route.request.method == 'PATCH'
                 body = route.request.post_data_json
                 mutations.append(body)
                 assert 'token' not in body
-                state['sub'].update({k: body[k] for k in ('cfOnly', 'cfPreferredIps', 'name')})
+                state['sub'].update({k: body[k] for k in ('cfOnly', 'cfAuto', 'cfPreferredIps', 'name') if k in body})
                 route.fulfill(json=state['sub'])
             else:
                 route.fulfill(json=[])
@@ -77,6 +80,8 @@ with sync_playwright() as p:
         expect(switch).not_to_be_checked()
         switch.click()
         expect(page.get_by_text('全程 CDN；源站隐藏需独立验收', exact=True)).to_be_visible()
+        expect(page.get_by_role('radio', name='自动优选（无需填写 IP）')).to_be_checked()
+        page.get_by_role('radio', name='手工优选（高级）').check()
         page.locator('#cfPreferredIps').fill('104.16.0.1')
         page.locator('#cfPreferredIps').press('Enter')
         page.locator('#cfPreferredIps').press('Escape')
@@ -108,6 +113,21 @@ with sync_playwright() as p:
         page.get_by_role('button', name=re.compile(r'^保\s*存$')).click()
         expect(page.get_by_role('dialog')).to_be_hidden()
         assert mutations[-1]['cfOnly'] is True and mutations[-1]['cfPreferredIps'] == []
+        edit()
+        page.get_by_role('radio', name='自动优选（无需填写 IP）').check()
+        expect(page.locator('#cfPreferredIps')).to_have_count(0)
+        page.get_by_label('检查 CF 节点').click()
+        page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter(has_text='Telecom fixture — cdn.example.com').click()
+        expect(page.get_by_text('后台自动维护未开启，当前仅使用已有安全候选/默认 CDN', exact=True)).to_be_visible()
+        expect(page.get_by_text(re.compile('缺少有效实测：电信、联通、移动'))).to_be_visible()
+        expect(page.locator('.ant-select-dropdown:visible')).to_have_count(0)
+        expect(page.get_by_text('Only literal Cloudflare IPv4/IPv6 addresses are allowed', exact=True)).to_have_count(0)
+        page.get_by_text('后台自动维护未开启，当前仅使用已有安全候选/默认 CDN', exact=True).scroll_into_view_if_needed()
+        page.screenshot(path=str(output / f'cf-auto-{width}.png'), full_page=True)
+        page.get_by_role('button', name=re.compile(r'^保\s*存$')).click()
+        expect(page.get_by_role('dialog')).to_be_hidden()
+        assert mutations[-1]['cfAuto'] is True and state['sub']['cfPreferredIps'] == []
+        expect(page.get_by_text('1 个节点 · CF-only / 自动三网候选', exact=True)).to_be_visible()
         assert state['sub']['token'] == 'fixture-owner-token'
         assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), 'viewport overflow'
         assert errors == [], errors

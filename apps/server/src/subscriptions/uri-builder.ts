@@ -14,7 +14,12 @@ export interface NodeExportInfo {
   credentials: Record<string, string>;
   /** Export-only endpoint variants; never a separate deployment. */
   cfGroup?: string;
+  cfAuto?: boolean;
+  cfNodeId?: string;
+  cfCarrier?: 'GENERIC' | 'TELECOM' | 'UNICOM' | 'MOBILE' | 'DNS';
 }
+
+import { CF_LABELS } from './cf-optimization.util';
 
 import { REALITY_DEFAULT_SNI, REALITY_FLOW } from '../nodes/protocols/reality';
 import { parseXhttpExtra, parseXhttpHost, parseXhttpMode } from '../nodes/protocols/xhttp';
@@ -700,24 +705,33 @@ function yamlQuotedString(value: string): string {
 
 // ─── Full Sing-box subscription JSON ─────────────────────────────────────────
 
-function cfGroups(nodes: NodeExportInfo[]) {
-  const groups = new Map<string, string[]>();
+function cfGroups(nodes: NodeExportInfo[], dynamic = false) {
+  const groups = new Map<string, NodeExportInfo[]>();
   for (const node of nodes) {
-    if (node.cfGroup) groups.set(node.cfGroup, [...(groups.get(node.cfGroup) ?? []), node.name]);
+    if (node.cfGroup) groups.set(node.cfGroup, [...(groups.get(node.cfGroup) ?? []), node]);
   }
-  return [...groups].map(([tag, outbounds]) => ({ tag, outbounds }));
+  return [...groups].flatMap(([tag, members]) => {
+    const auto = members.some(n => n.cfAuto);
+    const base = { tag, outbounds: members.map(n => n.name), auto, nodeId: members[0].cfNodeId, carrier: 'ALL' };
+    if (!auto) return [base];
+    return [base, ...(['TELECOM', 'UNICOM', 'MOBILE'] as const).flatMap(carrier => {
+      const outbounds = members.filter(n => n.cfCarrier === carrier || n.cfCarrier === 'GENERIC' || n.cfCarrier === 'DNS').map(n => n.name);
+      return outbounds.length || dynamic ? [{ ...base, tag: `${tag} ${CF_LABELS[carrier]}`, carrier, outbounds }] : [];
+    })];
+  });
 }
 
 function cfSingboxGroups(nodes: NodeExportInfo[]) {
-  return cfGroups(nodes).map((group) => ({
-    type: 'urltest', ...group, url: 'https://www.gstatic.com/generate_204',
+  return cfGroups(nodes).map(({ tag, outbounds }) => ({
+    type: 'urltest', tag, outbounds, url: 'https://www.gstatic.com/generate_204',
     interval: '5m', tolerance: 50, interrupt_exist_connections: false,
   }));
 }
 
 function selectableTags(nodes: NodeExportInfo[], exportedTags: string[]): string[] {
   if (!nodes.some((node) => node.cfGroup)) return exportedTags;
-  return [...new Set(nodes.filter((node) => exportedTags.includes(node.name)).map((node) => node.cfGroup ?? node.name))];
+  const included = nodes.filter(node => exportedTags.includes(node.name));
+  return [...new Set([...cfGroups(included).map(g => g.tag), ...included.filter(n => !n.cfGroup).map(n => n.name)])];
 }
 
 export function buildFullSingboxConfig(nodes: NodeExportInfo[]): string {
@@ -1067,7 +1081,7 @@ const RULE_BEHAVIOR: Record<typeof RULE_NAMES[number], string> = {
   openai: 'classical',
 };
 
-export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string): string {
+export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string, cfProviderBase?: string): string {
   const proxyEntries: { name: string; yaml: string }[] = [];
   for (const node of nodes) {
     const yaml = buildClashProxy(node);
@@ -1077,7 +1091,9 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
     throw new Error('Mihomo supports XHTTP only with VLESS; no compatible nodes remain');
   }
 
-  const nodeNames = selectableTags(nodes, proxyEntries.map((e) => e.name));
+  const dynamic = !!cfProviderBase && nodes.some(n => n.cfAuto);
+  if (dynamic && new URL(cfProviderBase!).protocol !== 'https:') throw new Error('CF providers require an HTTPS panel URL');
+  const nodeNames = dynamic ? cfGroups(nodes, true).map(g => g.tag) : selectableTags(nodes, proxyEntries.map((e) => e.name));
   // url-test 至少需要 1 个 proxy；无可用节点时回退到 DIRECT，避免 YAML 解析失败
   const fallbackNames = nodeNames.length > 0 ? nodeNames : ['DIRECT'];
 
@@ -1095,10 +1111,17 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
   }
 
   // ── proxies ───────────────────────────────────────────────────────────────
+  const inlineEntries = dynamic ? proxyEntries.filter(e => !nodes.find(n => n.name === e.name)?.cfAuto) : proxyEntries;
+  const providers = dynamic ? [...new Set(nodes.filter(n => n.cfAuto).map(n => n.cfNodeId!))].map(id => [
+    `  cf-${id}:`, '    type: http', `    url: ${yamlScalar(`${cfProviderBase}/${encodeURIComponent(id)}`)}`,
+    '    interval: 900', '    proxy: DIRECT', '    size-limit: 262144',
+    '    health-check:', '      enable: true', '      url: https://www.gstatic.com/generate_204',
+    '      interval: 300', '      timeout: 5000', '      lazy: false', '      expected-status: 204',
+  ].join('\n')) : [];
   const proxiesSection =
-    proxyEntries.length === 0
+    inlineEntries.length === 0
       ? 'proxies: []'
-      : ['proxies:', ...proxyEntries.map((e) => e.yaml)].join('\n');
+      : ['proxies:', ...inlineEntries.map((e) => e.yaml)].join('\n');
 
   // ── proxy-groups ──────────────────────────────────────────────────────────
   function nodeList(prefix: string[] = [], names: string[] = fallbackNames): string {
@@ -1106,14 +1129,20 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
   }
 
   const groups: string[] = [
-    ...cfGroups(nodes).map((group) => [
+    ...cfGroups(nodes, dynamic).map((group) => [
       `  - name: ${yamlScalar(group.tag)}`,
-      '    type: fallback',
+      group.auto ? '    type: url-test' : '    type: fallback',
       '    url: https://www.gstatic.com/generate_204',
       '    interval: 300',
       '    lazy: false',
-      '    proxies:',
-      ...group.outbounds.map((name) => `      - ${yamlScalar(name)}`),
+      ...(group.auto ? ['    tolerance: 50'] : []),
+      ...(dynamic && group.auto ? [
+        `    use: [cf-${group.nodeId}]`,
+        `    filter: ${yamlScalar(`\\[CF:(${group.carrier === 'ALL' ? 'TELECOM|UNICOM|MOBILE' : group.carrier}|GENERIC|DNS)\\]$`)}`,
+        '    empty-fallback: REJECT',
+        // Empty/failed provider groups must never inherit a DIRECT fallback.
+        '    proxies: [REJECT]',
+      ] : ['    proxies:', ...group.outbounds.map((name) => `      - ${yamlScalar(name)}`)]),
     ].join('\n')),
     [
       '  - name: 🚀 节点选择',
@@ -1194,6 +1223,7 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
     topLevel,
     '',
     ruleProviderLines.join('\n'),
+    ...(providers.length ? ['', 'proxy-providers:', providers.join('\n')] : []),
     '',
     proxiesSection,
     '',
