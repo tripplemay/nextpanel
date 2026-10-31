@@ -52,7 +52,7 @@ test('missing Xray process cleans up and terminates within the bounded startup d
 test('probe authentication, identity and exact-target HTTP contract without external IO', async t => {
   let calls = 0;
   const token = 'f'.repeat(32);
-  const server = createProbeServer({ token, id: 'fixture', lookupEgress: async () => '192.0.2.1', checkRuntime: async () => true,
+  const server = createProbeServer({ token, id: 'fixture', regionKey: 'ap-chengdu', lookupEgress: async () => '192.0.2.1', checkRuntime: async () => true,
     test: async (_body, ip) => { calls++; return { ip, ok: true, latency: 50 }; } });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   t.after(() => { server.closeAllConnections(); server.close(); });
@@ -60,10 +60,26 @@ test('probe authentication, identity and exact-target HTTP contract without exte
   assert.equal((await fetch(url + '/capabilities')).status, 401);
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   const capabilities = await (await fetch(url + '/capabilities', { headers })).json();
-  assert.equal(capabilities.carrier, 'UNVERIFIED'); assert.equal(capabilities.probeId, 'fixture');
+  assert.equal(capabilities.regionKey, 'ap-chengdu'); assert.equal(capabilities.networkType, 'CLOUD'); assert.equal(capabilities.probeId, 'fixture');
+  assert.equal(capabilities.carrier, undefined);
   const response = await fetch(url + '/probe', { method: 'POST', headers, body: JSON.stringify(batch) });
   assert.equal(response.status, 200);
-  assert.deepEqual((await response.json()).results, [{ ip: batch.ips[0], ok: true, latency: 50 }]);
+  const result = await response.json();
+  assert.equal(result.regionKey, capabilities.regionKey);
+  assert.deepEqual(result.results, [{ ip: batch.ips[0], ok: true, latency: 50 }]);
   assert.equal((await fetch(url + '/probe', { method: 'POST', headers, body: JSON.stringify({ ...batch, ips: ['127.0.0.1'] }) })).status, 400);
   assert.equal(calls, 1);
+});
+test('SCF deployment region takes precedence and conflicts fail closed', async t => {
+  const old = { ...process.env };
+  t.after(() => { process.env = old; });
+  process.env.TENCENTCLOUD_REGION = 'ap-chengdu';
+  delete process.env.CF_PROBE_REGION;
+  const server = createProbeServer({ token: 'f'.repeat(32), id: 'fixture', lookupEgress: async () => null, checkRuntime: async () => true });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const result = await (await fetch(`http://127.0.0.1:${server.address().port}/capabilities`, { headers: { Authorization: `Bearer ${'f'.repeat(32)}` } })).json();
+  assert.equal(result.regionKey, 'ap-chengdu');
+  process.env.CF_PROBE_REGION = 'ap-guangzhou';
+  assert.throws(() => createProbeServer({ token: 'f'.repeat(32), id: 'fixture' }), /conflicts/);
 });

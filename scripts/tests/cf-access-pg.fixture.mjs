@@ -86,8 +86,7 @@ export async function verifyCfAccess({ prisma, cipher, require, root, databaseUr
   assert.equal(Buffer.from(await subscriptions.generateContent(updated.token), 'base64').toString().split('\n').length, 1);
   assert.equal((await prisma.subscriptionShare.findUniqueOrThrow({ where: { id: share.id } })).shareToken, share.shareToken);
   await subscriptions.update(created.id, undefined, undefined, 'cf-owner', undefined, { cfAuto: true });
-  const probe = { id: 'fixture', url: 'https://probe.example.com', tokenEnv: 'CF_FIXTURE_TOKEN', carrier: 'TELECOM', region: 'fixture-city',
-    expectedEgressIp: '192.0.2.1', verifiedAt: new Date().toISOString() };
+  const probe = { id: 'fixture', url: 'https://probe.example.com', tokenEnv: 'CF_FIXTURE_TOKEN', regionKey: 'ap-chengdu', region: '成都' };
   const oldRegistry = process.env.CF_OPTIMIZATION_PROBES;
   const oldToken = process.env.CF_FIXTURE_TOKEN;
   const oldDatabase = process.env.DATABASE_URL;
@@ -96,11 +95,13 @@ export async function verifyCfAccess({ prisma, cipher, require, root, databaseUr
     const current = await prisma.node.findUniqueOrThrow({ where: { id: 'cf-node' } });
     const observations = [{ ip: '104.16.0.1', latency: 50, passed: 2, failed: 0, checkedAt: Date.now() }];
     await prisma.cfOptimization.create({ data: { nodeId: current.id, probeId: probe.id,
-      fingerprint: fingerprint([nodeFingerprint(current), fingerprint([probe, fingerprint('f'.repeat(32))])]), carrier: 'TELECOM', region: probe.region,
+      fingerprint: fingerprint([nodeFingerprint(current), fingerprint([probe, fingerprint('f'.repeat(32))])]), profile: 'REGION:ap-chengdu', region: probe.region,
       observations, published: observations, previous: [{ ...observations[0], ip: '104.16.0.3' }], checkedAt: new Date(), discoveredAt: new Date() } });
     const ownerProvider = await subscriptions.generateCfProvider({ token: updated.token }, current.id);
     assert.equal(ownerProvider, await subscriptions.generateCfProvider({ shareToken: share.shareToken }, current.id));
-    assert.ok(ownerProvider.includes('TELECOM')); assert.ok(!ownerProvider.includes('192.0.2.90'));
+    assert.ok(ownerProvider.includes('CF-REGION:ap-chengdu')); assert.ok(!ownerProvider.includes('192.0.2.90'));
+    const physical = await prisma.$queryRaw`SELECT carrier FROM "CfOptimization" WHERE "nodeId" = ${current.id}`;
+    assert.equal(physical[0].carrier, 'REGION:ap-chengdu');
     const withDns = cf.defaultIp;
     try {
       cf.defaultIp = async () => null;
@@ -118,7 +119,7 @@ export async function verifyCfAccess({ prisma, cipher, require, root, databaseUr
     assert.ok(sharedClash.includes(`/share/${share.shareToken}/cf-provider/cf-node`));
     assert.ok(!sharedClash.includes(updated.token));
     await assert.rejects(optimizer.status(current.id, 'owner'), /not found/);
-    assert.deepEqual((await optimizer.status(current.id, 'cf-owner')).missingCarriers, ['UNICOM', 'MOBILE']);
+    assert.deepEqual((await optimizer.status(current.id, 'cf-owner')).missingRegions, []);
     process.env.DATABASE_URL = databaseUrl;
     const budgetTime = Date.parse('2026-10-31T00:00:00Z');
     const secondOptimizer = new CfOptimizationService(prisma, nodes, cf);

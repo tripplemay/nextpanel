@@ -3,16 +3,15 @@ import { BlockList, isIP } from 'net';
 import { CF_IP_RANGES, isCloudflareIp } from './cf-access.util';
 import type { NodeExportInfo } from './uri-builder';
 
-export const CARRIERS = ['GENERIC', 'TELECOM', 'UNICOM', 'MOBILE'] as const;
-export type CfCarrier = typeof CARRIERS[number];
-export const CF_LABELS: Record<CfCarrier | 'DNS', string> = {
-  GENERIC: '通用候选', TELECOM: '电信优选', UNICOM: '联通优选', MOBILE: '移动优选', DNS: '默认 CDN',
-};
 export const FRESH_MS = 30 * 60_000;
 export const STALE_MS = 24 * 60 * 60_000;
+export interface CfRegion { key: string; label: string }
 export interface CfProbe {
-  id: string; url: string; tokenEnv: string; carrier: CfCarrier; region: string;
-  expectedEgressIp?: string; verifiedAt?: string;
+  id: string; url: string; tokenEnv: string; region: string; regionKey?: string;
+  expectedEgressIp?: string;
+  nodeIds?: string[];
+  /** Legacy registry metadata is retained only for snapshot identity compatibility. */
+  carrier?: string; verifiedAt?: string;
 }
 export interface CfObservation {
   ip: string; passed: number; failed: number; latency: number; checkedAt: number;
@@ -24,19 +23,29 @@ export function fingerprint(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-export function probeRegistry(raw: string | undefined, now = Date.now()): CfProbe[] {
+export function probeRegistry(raw: string | undefined): CfProbe[] {
   if (!raw) return [];
   const probes = JSON.parse(raw) as CfProbe[];
   if (!Array.isArray(probes) || probes.length > 9) throw new Error('Invalid CF probe registry');
-  const ids = new Set<string>();
+  const ids = new Set<string>(); const regions = new Map<string, string>(); const labels = new Map<string, string>();
   for (const p of probes) {
+    if (!p || typeof p !== 'object' || typeof p.id !== 'string' || typeof p.url !== 'string'
+      || typeof p.tokenEnv !== 'string') throw new Error('Invalid CF probe registry');
     const url = new URL(p.url);
     if (!/^[a-z0-9-]{1,40}$/.test(p.id) || ids.has(p.id) || url.protocol !== 'https:' || url.username || url.password
-      || url.search || url.hash || !/^[A-Z][A-Z0-9_]{2,80}$/.test(p.tokenEnv) || !CARRIERS.includes(p.carrier)
-      || typeof p.region !== 'string' || p.region.length < 1 || p.region.length > 80) throw new Error('Invalid CF probe registry');
-    if (p.carrier !== 'GENERIC' && (!p.expectedEgressIp || !isIP(p.expectedEgressIp) || !p.verifiedAt
-      || !Number.isFinite(Date.parse(p.verifiedAt)) || Date.parse(p.verifiedAt) > now
-      || now - Date.parse(p.verifiedAt) > 30 * 86400_000)) throw new Error('Carrier probe requires recent verified egress evidence');
+      || url.search || url.hash || !/^[A-Z][A-Z0-9_]{2,80}$/.test(p.tokenEnv)
+      || typeof p.region !== 'string' || !/^[\p{L}\p{N} ._-]{1,40}$/u.test(p.region)) throw new Error('Invalid CF probe registry');
+    if (p.regionKey !== undefined && (typeof p.regionKey !== 'string' || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(p.regionKey) || p.regionKey.length > 40)) throw new Error('Invalid probe region');
+    if (p.expectedEgressIp !== undefined && !isIP(p.expectedEgressIp)) throw new Error('Invalid expected egress');
+    if (p.carrier !== undefined && !['GENERIC', 'TELECOM', 'UNICOM', 'MOBILE'].includes(p.carrier)) throw new Error('Invalid legacy probe metadata');
+    if (p.nodeIds !== undefined && (!Array.isArray(p.nodeIds) || p.nodeIds.length > 20 || new Set(p.nodeIds).size !== p.nodeIds.length
+      || p.nodeIds.some(id => typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(id)))) throw new Error('Invalid probe node scope');
+    if (p.regionKey) {
+      if (regions.has(p.regionKey) && regions.get(p.regionKey) !== p.region) throw new Error('Inconsistent region labels');
+      if (labels.has(p.region) && labels.get(p.region) !== p.regionKey) throw new Error('Duplicate region labels');
+      regions.set(p.regionKey, p.region);
+      labels.set(p.region, p.regionKey);
+    }
     ids.add(p.id);
   }
   return probes;
@@ -132,12 +141,35 @@ export function rankCandidates(observations: CfObservation[], incumbent: CfObser
   return retained.sort(compare).slice(0, 3);
 }
 
-export function automaticVariants(node: NodeExportInfo, nodeId: string, profiles: { carrier: CfCarrier; ips: string[] }[], defaultIp: string | null): NodeExportInfo[] {
+export function automaticVariants(node: NodeExportInfo, nodeId: string, profiles: { region?: CfRegion; ips: string[] }[], defaultIp: string | null, regions: CfRegion[] = profiles.flatMap(p => p.region ? [p.region] : [])): NodeExportInfo[] {
   const base = `${node.name} [CF ${nodeId}]`;
-  const endpoints = profiles.flatMap(p => [...new Set(p.ips)].slice(0, 3).map((ip, i) => ({ ip, carrier: p.carrier as CfCarrier | 'DNS', label: `${CF_LABELS[p.carrier]} ${i + 1}` })));
-  if (defaultIp) endpoints.push({ ip: defaultIp, carrier: 'DNS', label: CF_LABELS.DNS });
-  return endpoints.map(e => ({ ...node, host: e.ip, name: `${base} ${e.label} [CF:${e.carrier}]`,
-    cfGroup: base, cfAuto: true, cfNodeId: nodeId, cfCarrier: e.carrier,
+  const endpoints: { ip: string; profile: string; label: string; region?: CfRegion }[] = profiles.flatMap(p => [...new Set(p.ips)].slice(0, 3).map((ip, i) => ({ ip,
+    profile: p.region ? `REGION:${p.region.key}` : 'GENERIC', region: p.region,
+    label: `${p.region ? `${p.region.label}云测优选` : '通用候选'} ${i + 1}` })));
+  if (defaultIp) endpoints.push({ ip: defaultIp, profile: 'DNS', label: '默认 CDN' });
+  // Keep the old terminal GENERIC/DNS marker so cached carrier-era provider filters
+  // continue to receive safe CDN endpoints until a full subscription refresh.
+  return endpoints.map(e => ({ ...node, host: e.ip, name: `${base} ${e.label} [CF-REGION:${e.region?.key ?? e.profile}] [CF:${e.profile === 'DNS' ? 'DNS' : 'GENERIC'}]`,
+    cfGroup: base, cfAuto: true, cfNodeId: nodeId, cfProfile: e.profile, cfRegion: e.region, cfRegions: regions,
     credentials: { ...node.credentials, transportHost: node.domain! },
   }));
+}
+
+export function regionalCandidates(profiles: { region?: CfRegion; observations: CfObservation[] }[], regions: CfRegion[]) {
+  return [...regions.map(region => ({ region, rows: profiles.filter(p => p.region?.key === region.key) })),
+    { region: undefined, rows: profiles.filter(p => !p.region) }].map(({ region, rows }) => {
+    const scores = new Map<string, { votes: number; rank: number; failures: number }>();
+    for (const row of rows) {
+      // Published order already incorporates comparable throughput and hysteresis.
+      const sorted = [...new Map(row.observations.map(o => [o.ip, o])).values()].sort((a, b) => a.failed - b.failed);
+      for (const [rank, o] of sorted.entries()) {
+        const score = scores.get(o.ip) ?? { votes: 0, rank: 0, failures: 0 };
+        score.votes++; score.rank += rank / Math.max(1, sorted.length); score.failures += o.failed;
+        scores.set(o.ip, score);
+      }
+    }
+    const ips = [...scores].sort(([a, x], [b, y]) => x.failures - y.failures || y.votes - x.votes
+      || x.rank / x.votes - y.rank / y.votes || a.localeCompare(b)).slice(0, 3).map(([ip]) => ip);
+    return { region, ips };
+  }).filter(p => p.ips.length);
 }

@@ -73,7 +73,7 @@ export class UsageService {
             return tx.usageCredential.create({ data: {
               nodeId, ownerId: grant.ownerId, subscriptionId: grant.subscriptionId, subjectUserId: grant.subjectUserId,
               grantId: grant.grantId, grantVersion: version, candidateKey: key,
-              candidateIp: variant.host, carrier: variant.cfCarrier ?? 'MANUAL', label: variant.name,
+              candidateIp: variant.host, profile: variant.cfProfile ?? 'MANUAL', label: variant.name,
               uuidEnc: this.crypto.encrypt(randomUUID()),
             } });
           });
@@ -162,7 +162,8 @@ export class UsageService {
       const fresh = status === 'ACTIVE' || status === 'IDLE';
       return { id: r.id, subscriptionId: r.subscriptionId, subscriptionName: subs.get(r.subscriptionId)!.name,
         subjectId: r.subjectUserId, subjectName: users.get(r.subjectUserId) ?? '已删除用户', grantKind: r.grantId === 'owner' ? 'OWNER' : 'SHARE',
-        nodeId: r.nodeId, nodeName: r.node.name, candidateIp: r.candidateIp, carrier: r.carrier, label: r.label,
+        nodeId: r.nodeId, nodeName: r.node.name, candidateIp: r.candidateIp, profile: r.profile, label: r.label,
+        carrier: ['DNS', 'MANUAL'].includes(r.profile) ? r.profile : 'GENERIC',
         status, sampledAt: r.sampledAt, lastActiveAt: r.lastActiveAt, installedAt: r.installedAt,
         upRate: fresh ? r.upRate : null, downRate: fresh ? r.downRate : null,
         evidence: 'SERVER_CREDENTIAL', actualEdgeIp: null };

@@ -16,16 +16,16 @@ export interface NodeExportInfo {
   cfGroup?: string;
   cfAuto?: boolean;
   cfNodeId?: string;
-  cfCarrier?: 'GENERIC' | 'TELECOM' | 'UNICOM' | 'MOBILE' | 'DNS';
+  cfProfile?: string;
+  cfRegion?: { key: string; label: string };
+  cfRegions?: { key: string; label: string }[];
 }
 
 export function buildCfUnavailableProvider(nodeId: string): string {
   // Mihomo rejects a zero-proxy HTTP update and retains old entries. This inert
-  // sentinel replaces them but matches no CF carrier filter, leaving REJECT only.
+  // sentinel replaces them but matches no CF region filter, leaving REJECT only.
   return `proxies:\n  - name: ${JSON.stringify(`CF unavailable [${nodeId}]`)}\n    type: reject\n`;
 }
-
-import { CF_LABELS } from './cf-optimization.util';
 
 import { REALITY_DEFAULT_SNI, REALITY_FLOW } from '../nodes/protocols/reality';
 import { parseXhttpExtra, parseXhttpHost, parseXhttpMode } from '../nodes/protocols/xhttp';
@@ -718,11 +718,12 @@ function cfGroups(nodes: NodeExportInfo[], dynamic = false) {
   }
   return [...groups].flatMap(([tag, members]) => {
     const auto = members.some(n => n.cfAuto);
-    const base = { tag, outbounds: members.map(n => n.name), auto, nodeId: members[0].cfNodeId, carrier: 'ALL' };
+    const base = { tag, outbounds: members.map(n => n.name), auto, nodeId: members[0].cfNodeId, region: 'ALL' };
     if (!auto) return [base];
-    return [base, ...(['TELECOM', 'UNICOM', 'MOBILE'] as const).flatMap(carrier => {
-      const outbounds = members.filter(n => n.cfCarrier === carrier || n.cfCarrier === 'GENERIC' || n.cfCarrier === 'DNS').map(n => n.name);
-      return outbounds.length || dynamic ? [{ ...base, tag: `${tag} ${CF_LABELS[carrier]}`, carrier, outbounds }] : [];
+    const regions = [...new Map(members.flatMap(n => n.cfRegions ?? (n.cfRegion ? [n.cfRegion] : [])).map(r => [r.key, r])).values()];
+    return [base, ...regions.flatMap(region => {
+      const outbounds = members.filter(n => n.cfRegion?.key === region.key || n.cfProfile === 'GENERIC' || n.cfProfile === 'DNS').map(n => n.name);
+      return outbounds.length || dynamic ? [{ ...base, tag: `${tag} ${region.label}云测优选`, region: region.key, outbounds }] : [];
     })];
   });
 }
@@ -732,6 +733,13 @@ function cfSingboxGroups(nodes: NodeExportInfo[]) {
     type: 'urltest', tag, outbounds, url: 'https://www.gstatic.com/generate_204',
     interval: '5m', tolerance: 50, interrupt_exist_connections: false,
   }));
+}
+
+function cfRegionFilter(region: string): string {
+  const key = region === 'ALL' ? '[a-z0-9-]+' : region;
+  // A rollback can serve the old safe generic/DNS names. Do not broadly match
+  // terminal GENERIC: new candidates from other regions also carry that marker.
+  return `(?:\\[CF-REGION:(${key}|GENERIC|DNS)\\] \\[CF:(GENERIC|DNS)\\]|通用候选 [1-3] \\[CF:GENERIC\\]|默认 CDN \\[CF:DNS\\])$`;
 }
 
 function selectableTags(nodes: NodeExportInfo[], exportedTags: string[]): string[] {
@@ -1146,7 +1154,7 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
       ...(group.auto ? ['    tolerance: 50'] : []),
       ...(dynamic && group.auto ? [
         `    use: [cf-${group.nodeId}]`,
-        `    filter: ${yamlScalar(`\\[CF:(${group.carrier === 'ALL' ? 'TELECOM|UNICOM|MOBILE' : group.carrier}|GENERIC|DNS)\\]$`)}`,
+        `    filter: ${yamlScalar(cfRegionFilter(group.region))}`,
         '    empty-fallback: REJECT',
         // Empty/failed provider groups must never inherit a DIRECT fallback.
         '    proxies: [REJECT]',

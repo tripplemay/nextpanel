@@ -299,10 +299,13 @@ export interface CfAccessCheckResult extends ConnectivityResult {
 
 export interface CfOptimizationStatus {
   paused: boolean;
-  budget?: { lowBudget: boolean; monthlyLimit: number | null; error: boolean };
+  budget?: { lowBudget: boolean; intervalMinutes: number | null; monthlyLimit: number | null; used: number | null; remaining: number | null;
+    estimatedMonthlyBatchesPerNode: number; constrained: boolean; error: boolean };
   enabled: boolean; registryError: boolean; rangeError: boolean; rangeUpdatedAt: string | null;
-  missingCarriers: string[];
-  profiles: Array<{ probeId: string; carrier: string; region: string; checkedAt: string | null;
+  regions: Array<{ key: string; label: string }>;
+  missingRegions: string[];
+  profiles: Array<{ probeId: string; regionKey: string | null; region: string; networkType: 'CLOUD';
+    classification: 'REGIONAL' | 'GENERIC'; checkedAt: string | null;
     stale: boolean; error: string | null; revision: number;
     candidates: Array<{ ip: string; latency: number; checkedAt: number; failed: number }> }>;
 }

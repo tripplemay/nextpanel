@@ -34,7 +34,7 @@ with sync_playwright() as p:
                          'subjectId': f'user-{i}', 'subjectName': ['Alex Chen', 'Taylor Lin', 'Morgan', '新分享接收者', 'Jordan', '已暂停观测'][i],
                          'grantKind': 'OWNER' if i == 0 else 'SHARE', 'nodeId': 'n1', 'nodeName': '香港 · CDN 入口',
                          'candidateIp': '2606:4700:4700::1111' if i == 1 else f'104.16.0.{i+1}',
-                         'carrier': ['TELECOM', 'GENERIC', 'DNS', 'UNICOM', 'MOBILE', 'GENERIC'][i],
+                         'profile': ['REGION:ap-guangzhou', 'REGION:ap-chengdu', 'DNS', 'GENERIC', 'TELECOM', 'GENERIC'][i],
                          'label': '香港 [CF fixture] 通用候选 1', 'status': status,
                          'sampledAt': old if status == 'STALE' else stamp,
                          'lastActiveAt': stamp if status in ('ACTIVE', 'STALE') else None,
@@ -42,7 +42,7 @@ with sync_playwright() as p:
                          'upRate': 20480 if status == 'ACTIVE' else None,
                          'downRate': 2457600 if status == 'ACTIVE' else None,
                          'evidence': 'SERVER_CREDENTIAL', 'actualEdgeIp': None})
-        state = {'failed': False, 'enabled': True, 'rows': rows}
+        state = {'failed': False, 'enabled': True, 'rows': rows, 'regional_rollout': False}
         payload = {'enabled': True, 'asOf': stamp, 'freshnessSeconds': 90, 'activeWindowSeconds': 60, 'limited': False,
                    'subscriptions': [{'id': 's1', 'name': 'AI 工作空间', 'enabled': True, 'externalCount': 2, 'automatic': True, 'protectedCount': 2}],
                    'nodes': [{'id': 'n1', 'name': '香港 · CDN 入口', 'eligible': True, 'preparedAt': stamp, 'syncedAt': stamp, 'sampledAt': stamp, 'legacyActiveAt': stamp, 'error': None},
@@ -70,10 +70,13 @@ with sync_playwright() as p:
                 route.fulfill(json=[{'timestamp': stamp, 'upBytes': '1048576', 'downBytes': '8388608'}])
             elif path.path.startswith('/api/subscriptions/cf-access/optimization/'):
                 route.fulfill(json={'paused': False, 'enabled': True, 'registryError': False, 'rangeError': False, 'rangeUpdatedAt': stamp,
-                                    'missingCarriers': ['TELECOM', 'UNICOM', 'MOBILE'],
-                                    'budget': {'lowBudget': True, 'monthlyLimit': 200, 'error': False},
-                                    'profiles': [{'probeId': 'fixture', 'carrier': 'GENERIC', 'region': '广州', 'checkedAt': stamp, 'stale': False,
-                                                  'error': None, 'revision': 3, 'candidates': [{'ip': '104.16.0.1', 'latency': 180, 'checkedAt': int(now.timestamp() * 1000), 'failed': 0}]}]})
+                                    'regions': [{'key': 'ap-guangzhou', 'label': '广州'}, {'key': 'ap-chengdu', 'label': '成都'}], 'missingRegions': ['ap-chengdu'],
+                                    'budget': ({'lowBudget': False, 'intervalMinutes': 15, 'monthlyLimit': 25000, 'used': 24, 'remaining': 24976, 'estimatedMonthlyBatchesPerNode': 5760, 'constrained': False, 'error': False}
+                                               if state['regional_rollout'] else {'lowBudget': True, 'intervalMinutes': 5, 'monthlyLimit': 200, 'used': 24, 'remaining': 176, 'estimatedMonthlyBatchesPerNode': 360, 'constrained': True, 'error': False}),
+                                    'profiles': [{'probeId': 'guangzhou-cloud', 'regionKey': 'ap-guangzhou', 'classification': 'REGIONAL', 'networkType': 'CLOUD', 'region': '广州', 'checkedAt': stamp, 'stale': False,
+                                                  'error': None, 'revision': 3, 'candidates': [{'ip': '104.16.0.1', 'latency': 180, 'checkedAt': int(now.timestamp() * 1000), 'failed': 0}]},
+                                                 {'probeId': 'chengdu-cloud', 'regionKey': 'ap-chengdu', 'classification': 'REGIONAL', 'networkType': 'CLOUD', 'region': '成都', 'checkedAt': None,
+                                                  'stale': True, 'error': 'PROBE_UNAVAILABLE', 'revision': 0, 'candidates': []}]})
             elif route.request.method == 'POST':
                 mutations.append((path.path, route.request.post_data_json))
                 if path.path == '/api/subscriptions/s1/usage':
@@ -110,9 +113,28 @@ with sync_playwright() as p:
         page.get_by_role('tab', name='优选状态', exact=True).click()
         expect(page.get_by_text('后台自动维护已开启', exact=True)).to_be_visible()
         expect(page.get_by_text('自动优选已开启', exact=True)).to_be_visible()
-        expect(page.get_by_text('最多 200 批（不是云账单硬限额）', exact=True)).to_be_visible()
+        expect(page.get_by_text('已用 24 / 200 批 · 剩余 176 批（不是云账单硬限额）', exact=True)).to_be_visible()
+        expect(page.get_by_text('广州 · 有新鲜候选', exact=True)).to_be_visible()
+        expect(page.get_by_text('成都 · 缺少新鲜候选', exact=True)).to_be_visible()
+        expect(page.get_by_text('当前批次额度不足以持续覆盖所有地区', exact=True)).to_be_visible()
+        assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), 'CF status overflow'
         assert not mutations, 'viewing optimization must not trigger probes or server writes'
         page.screenshot(path=str(output / f'usage-cf-{width}-{mode}.png'))
+        state['regional_rollout'] = True
+        page.reload()
+        page.wait_for_load_state('networkidle')
+        page.get_by_role('tab', name='优选状态', exact=True).click()
+        expect(page.get_by_text('每 15 分钟（额度、失败退避与任务队列可能延后）', exact=True)).to_be_visible()
+        expect(page.get_by_text('已用 24 / 25000 批 · 剩余 24976 批（不是云账单硬限额）', exact=True)).to_be_visible()
+        expect(page.get_by_text('当前批次额度不足以持续覆盖所有地区', exact=True)).not_to_be_visible()
+        assert not mutations, 'regional status refresh must be read-only'
+        assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), 'regional status overflow'
+        page.get_by_text('广州 · 云测点', exact=True).scroll_into_view_if_needed()
+        expect(page.get_by_text('广州 · 云测点', exact=True)).to_be_in_viewport()
+        page.screenshot(path=str(output / f'usage-cf-regional-{width}-{mode}.png'))
+        page.get_by_text('成都 · 云测点', exact=True).scroll_into_view_if_needed()
+        expect(page.get_by_text('成都 · 云测点', exact=True)).to_be_in_viewport()
+        page.screenshot(path=str(output / f'usage-cf-regional-missing-{width}-{mode}.png'))
         page.get_by_role('tab', name='接入与覆盖').click()
         page.get_by_role('button', name='准备节点', exact=True).click()
         expect(page.get_by_text(re.compile('首次准备可能需要重启此节点'))).to_be_visible()
