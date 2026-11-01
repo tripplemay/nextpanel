@@ -50,7 +50,7 @@ const mockCfSettings = {
 } as unknown as CloudflareSettingsService;
 
 const mockResources = { unavailablePorts: jest.fn().mockResolvedValue(new Set()) };
-const mockOrigin = { prepare: jest.fn().mockResolvedValue({}), remove: jest.fn().mockResolvedValue(undefined) };
+const mockOrigin = { preflight: jest.fn().mockResolvedValue(undefined), prepare: jest.fn().mockResolvedValue({}), remove: jest.fn().mockResolvedValue(undefined) };
 const svc = new NodesService(mockPrisma, mockCrypto, mockDeploy, mockCfService, mockCfSettings, mockResources as any, mockOrigin as any);
 
 const fakeNode = {
@@ -64,6 +64,7 @@ const fakeNode = {
 beforeEach(() => {
   jest.clearAllMocks();
   mockOrigin.prepare.mockResolvedValue({});
+  mockOrigin.preflight.mockResolvedValue(undefined);
   mockResources.unavailablePorts.mockResolvedValue(new Set());
   (mockDeploy.deploy as jest.Mock).mockResolvedValue({ success: true, log: '' });
   (mockDeploy.undeploy as jest.Mock).mockResolvedValue(undefined);
@@ -104,20 +105,23 @@ describe('NodesService', () => {
       (mockPrisma.node.create as jest.Mock).mockImplementation(async ({ data }) => ({ ...fakeNode, ...data, id: 'pilot' }));
       await svc.createFromPreset('owner', { serverId: 'srv-1', name: 'pilot', preset: 'VLESS_XHTTP_TLS' });
       expect(mockPrisma.node.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ listenPort: 8443, publicPort: 443 }) }));
-      expect(mockOrigin.prepare).toHaveBeenCalledWith('pilot');
+      expect(mockOrigin.preflight).toHaveBeenCalledWith('owner', 'srv-1', true);
+      expect(mockOrigin.prepare).not.toHaveBeenCalled();
+      expect(mockCfService.createARecord).not.toHaveBeenCalled();
       expect(mockDeploy.undeploy).not.toHaveBeenCalled();
     });
     it.each([443, 20443])('skips listen and stats conflicts (%s) and pending cleanup reservations', async busy => {
       mockResources.unavailablePorts.mockResolvedValue(new Set([busy, 28443, 18000, 38001]));
       expect(await (svc as any).pickPort('srv-1', 443, null, 'XRAY', true)).toBe(18002);
     });
-    it('retains mapping intent and node identity when the provider fails', async () => {
+    it('rejects provider preflight before creating a node or cloud resources', async () => {
       mockResources.unavailablePorts.mockResolvedValue(new Set([443]));
       (mockPrisma.node.create as jest.Mock).mockImplementation(async ({ data }) => ({ ...fakeNode, ...data, id: 'pilot' }));
-      mockOrigin.prepare.mockRejectedValue(new Error('Origin permission denied'));
-      await expect(svc.createFromPreset('owner', { serverId: 'srv-1', name: 'pilot', preset: 'VLESS_XHTTP_TLS' })).rejects.toThrow('已保留记录');
+      mockOrigin.preflight.mockRejectedValue(new Error('Origin permission denied'));
+      await expect(svc.createFromPreset('owner', { serverId: 'srv-1', name: 'pilot', preset: 'VLESS_XHTTP_TLS' })).rejects.toThrow('Origin permission denied');
+      expect(mockPrisma.node.create).not.toHaveBeenCalled();
       expect(mockPrisma.node.delete).not.toHaveBeenCalled();
-      expect(mockPrisma.node.update).toHaveBeenCalledWith({ where: { id: 'pilot' }, data: { status: 'ERROR' } });
+      expect(mockCfService.createARecord).not.toHaveBeenCalled();
     });
     it('removes the new record on DNS provisioning failure without touching WS', async () => {
       (mockCfService.createARecord as jest.Mock).mockRejectedValue(new Error('DNS fixture failure'));

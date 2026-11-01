@@ -17,6 +17,7 @@ if (process.argv[2] !== 'isolated') {
   assert.notEqual(fs.readlinkSync('/proc/self/ns/net'), process.env.NP_PARENT_NETNS);
   assert.notEqual(fs.readlinkSync('/proc/self/ns/mnt'), process.env.NP_PARENT_MNTNS);
   const { originFirewall, installOriginFirewall, verifyOriginFirewall, removeOriginFirewall } = require('../../apps/server/dist/cloudflare/cf-origin-firewall.js');
+  const { ensureOriginNftables } = require('../../apps/server/dist/cloudflare/cf-origin-dependencies.js');
   execFileSync('mount', ['--make-rprivate', '/']);
   execFileSync('mount', ['-t', 'tmpfs', 'tmpfs', '/etc']);
   execFileSync('ip', ['link', 'set', 'lo', 'up']);
@@ -40,6 +41,9 @@ if (process.argv[2] !== 'isolated') {
         servers.push(server);
       }
       assert.equal(await request(443, '127.0.0.1'), '443');
+      const before = execFileSync('nft', ['-s', 'list', 'ruleset'], { encoding: 'utf8' });
+      await ensureOriginNftables(ssh, 'fixture', 8443, ref);
+      assert.equal(execFileSync('nft', ['-s', 'list', 'ruleset'], { encoding: 'utf8' }), before, 'Kernel preflight must not install rules');
       await installOriginFirewall(ssh, 'fixture', 8443, ref);
       assert.ok(tableState().includes(`comment "${f.marker}"`), 'Ownership must be set on initial creation');
       await verifyOriginFirewall(ssh, 'fixture', 8443, ref);

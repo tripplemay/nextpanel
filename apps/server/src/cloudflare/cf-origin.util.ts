@@ -8,6 +8,8 @@ export interface OriginRoute {
   port: number;
   rulesetId?: string;
   ruleId?: string;
+  tlsRulesetId?: string;
+  tlsRuleId?: string;
   state: 'PENDING' | 'CONFIGURED' | 'READY' | 'ERROR';
   checkedAt?: string;
   auditedAt?: string;
@@ -21,7 +23,7 @@ export function originRoute(value: unknown): OriginRoute {
     || !isFQDN(r.domain) || !/^[a-z0-9.-]+$/.test(r.domain) || r.domain.length > 253
     || !Number.isInteger(r.port) || r.port < 1024 || r.port > 65535
     || !['PENDING', 'CONFIGURED', 'READY', 'ERROR'].includes(r.state)
-    || [r.rulesetId, r.ruleId].some(id => id !== undefined && !/^[a-zA-Z0-9_-]{1,128}$/.test(id))) {
+    || [r.rulesetId, r.ruleId, r.tlsRulesetId, r.tlsRuleId].some(id => id !== undefined && !/^[a-zA-Z0-9_-]{1,128}$/.test(id))) {
     throw new Error('Invalid Cloudflare origin route; manual review required');
   }
   return r;
@@ -44,4 +46,9 @@ export function originReady(node: { listenPort: number; publicPort?: number | nu
 export function originRuleSpec(r: OriginRoute) {
   return { ref: r.ref, description: r.ref, expression: `(http.host eq "${r.domain}")`,
     action: 'route', enabled: true, action_parameters: { origin: { port: r.port } } };
+}
+
+export function originTlsRuleSpec(r: Pick<OriginRoute, 'ref' | 'domain'>) {
+  return { ref: `${r.ref}_tls`, description: `${r.ref}_tls`, expression: `(http.host eq "${r.domain}")`,
+    action: 'set_config', enabled: true, action_parameters: { ssl: 'strict' } };
 }

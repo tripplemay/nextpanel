@@ -1,9 +1,11 @@
 import { CfOriginApi } from './cf-origin-api';
-import { originReady, originRoute, originRuleSpec, publicPort, type OriginRoute } from './cf-origin.util';
+import { originReady, originRoute, originRuleSpec, originTlsRuleSpec, publicPort, type OriginRoute } from './cf-origin.util';
 import { originFirewall, installOriginFirewall, verifyOriginFirewall, removeOriginFirewall } from './cf-origin-firewall';
 import { isCfManagedNode } from '../subscriptions/cf-access.util';
 import { nodeFingerprint } from '../subscriptions/cf-optimization.service';
 import { CfOriginService } from './cf-origin.service';
+import * as dependencies from './cf-origin-dependencies';
+import * as core from '../nodes/protocols/cf-xhttp-core';
 
 jest.mock('../common/database/advisory-lock', () => ({ withPostgresAdvisoryLocks: (_: string[], fn: () => unknown) => fn() }));
 
@@ -113,6 +115,101 @@ describe('Cloudflare origin API isolation', () => {
     await expect(new CfOriginApi('private-fixture', 'zone').prerequisites('dns', route.domain)).rejects.toThrow('Full (strict)');
     expect(writes).toEqual([]);
   });
+  it.each(['settings/ssl', 'rulesets/phases/http_config_settings/entrypoint', 'rulesets/phases/http_request_origin/entrypoint'])(
+    'preflight rejects %s access before any write and reports the specific operation', async path => {
+      fetcher.mockImplementation(async input => String(input).endsWith(path)
+        ? response({ secret: 'private-fixture' }, 403)
+        : String(input).endsWith('/settings/ssl') ? response({ value: 'strict' }) : response({ id: 'set', rules: [] }));
+      const error = await new CfOriginApi('private-fixture', 'zone').preflight(route).catch(e => e) as Error;
+      expect(error.message).toContain('HTTP 403');
+      expect(error.message).toContain(path === 'settings/ssl' ? 'Zone Settings Read'
+        : path.includes('http_config_settings') ? 'Config Settings Read/Write' : 'Origin Read/Write');
+      expect(error.message).not.toContain('private-fixture');
+      expect(fetcher.mock.calls.every(c => c[1]?.method === 'GET')).toBe(true);
+    });
+});
+
+describe('hostname-only strict TLS lifecycle', () => {
+  let fetcher: jest.SpyInstance;
+  let rules: any[];
+  let writes: any[];
+  let present: boolean;
+  let ssl: string;
+  beforeEach(() => {
+    rules = [{ id: 'website', ref: 'website', expression: '(http.host eq "www.example.com")',
+      action: 'set_config', enabled: true, action_parameters: { ssl: 'full' } }];
+    writes = []; present = true; ssl = 'full';
+    fetcher = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input); const method = init?.method ?? 'GET';
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      if (method !== 'GET') writes.push({ method, url, body });
+      if (url.endsWith('/settings/ssl')) return response({ value: ssl });
+      if (url.includes('/dns_records/')) return response({ name: route.domain, proxied: true, comment: route.ref });
+      if (url.includes('http_request_origin')) return response(null, 404);
+      if (url.includes('http_config_settings') && !present) return response(null, 404);
+      if (method === 'POST' && url.endsWith('/rulesets')) { present = true; rules = body.rules.map((rule: any) => ({ ...rule, id: 'tls' })); }
+      else if (method === 'POST') rules.push({ ...body, id: 'tls' });
+      if (method === 'DELETE') rules = rules.filter(rule => rule.id !== 'tls');
+      return response({ id: 'config', rules });
+    });
+  });
+  afterEach(() => fetcher.mockRestore());
+  it('keeps global Full and existing website rules while making only the new hostname strict', async () => {
+    const website = structuredClone(rules[0]);
+    const api = new CfOriginApi('fixture', 'zone');
+    const configured = await api.ensureTls(route);
+    expect(configured).toMatchObject({ tlsRuleId: 'tls', tlsRulesetId: 'config' });
+    expect(writes).toEqual([{ method: 'POST', url: 'https://api.cloudflare.com/client/v4/zones/zone/rulesets/config/rules', body: originTlsRuleSpec(route) }]);
+    await api.prerequisites('dns', route.domain, undefined, route.ref);
+    await api.ensureTls(route); // Lost metadata is recovered by the stable ref.
+    expect(writes).toHaveLength(1);
+    expect(rules[0]).toEqual(website);
+    await api.remove(configured); await api.remove(configured);
+    expect(rules).toEqual([website]);
+    expect(writes).toHaveLength(2);
+    expect(writes.every(write => !['PATCH', 'PUT'].includes(write.method))).toBe(true);
+  });
+  it('refuses overlapping TLS rules before any write', async () => {
+    rules[0].expression = 'true';
+    await expect(new CfOriginApi('fixture', 'zone').ensureTls(route)).rejects.toThrow('overlap');
+    expect(writes).toEqual([]);
+  });
+  it('neither repairs nor deletes modified owned TLS rules', async () => {
+    rules.push({ ...originTlsRuleSpec(route), id: 'tls', action_parameters: { ssl: 'flexible' } });
+    const api = new CfOriginApi('fixture', 'zone');
+    await expect(api.ensureTls(route)).rejects.toThrow('drift');
+    await expect(api.remove(route)).rejects.toThrow('drift');
+    expect(writes).toEqual([]);
+  });
+  it('does not accept Full without an owned strict hostname rule', async () => {
+    await expect(new CfOriginApi('fixture', 'zone').prerequisites('dns', route.domain, undefined, route.ref)).rejects.toThrow('missing');
+    expect(writes).toEqual([]);
+  });
+  it('creates a missing configuration entrypoint and recovers response loss by ownership ref', async () => {
+    present = false; rules = [];
+    const api = new CfOriginApi('fixture', 'zone');
+    const configured = await api.ensureTls(route);
+    expect(writes[0].body).toMatchObject({ kind: 'zone', phase: 'http_config_settings', rules: [originTlsRuleSpec(route)] });
+    expect(await api.ensureTls(route)).toEqual(configured);
+    expect(writes).toHaveLength(1);
+  });
+  it('rejects overlapping per-host TLS downgrades even if the global mode is strict', async () => {
+    ssl = 'strict'; rules[0].expression = 'true';
+    await expect(new CfOriginApi('fixture', 'zone').prerequisites('dns', route.domain, undefined, route.ref)).rejects.toThrow('overlap');
+    expect(writes).toEqual([]);
+  });
+  it('fails closed when the provider returns malformed rules', async () => {
+    rules = [null];
+    await expect(new CfOriginApi('fixture', 'zone').ensureTls(route)).rejects.toThrow('response invalid');
+    expect(writes).toEqual([]);
+  });
+  it('retains cleanup failure for retry instead of claiming deletion', async () => {
+    const api = new CfOriginApi('fixture', 'zone');
+    const configured = await api.ensureTls(route);
+    fetcher.mockImplementation(async () => response({ id: 'config', rules }));
+    await expect(api.remove(configured)).rejects.toThrow('cleanup not confirmed');
+    expect(rules.some(rule => rule.id === 'tls')).toBe(true);
+  });
 });
 
 describe('scoped origin firewall', () => {
@@ -168,13 +265,41 @@ describe('durable DNS ownership', () => {
 });
 
 describe('durable origin provisioning', () => {
+  beforeEach(() => {
+    jest.spyOn(CfOriginApi.prototype, 'preflight').mockResolvedValue();
+    jest.spyOn(CfOriginApi.prototype, 'ensureTls').mockImplementation(async r => r);
+    jest.spyOn(dependencies, 'ensureOriginNftables').mockResolvedValue();
+    jest.spyOn(dependencies, 'preflightOriginHost').mockResolvedValue();
+    jest.spyOn(core, 'ensureCfXhttpCore').mockResolvedValue('/usr/local/bin/xray');
+  });
+  afterEach(() => jest.restoreAllMocks());
   it('requires source firewall support before persisting intent or creating cloud resources', async () => {
-    const update = jest.fn(); const token = jest.fn();
+    const update = jest.fn(); const token = jest.fn().mockResolvedValue({ apiToken: 'fixture', zoneId: 'zone', domain: 'example.com' });
     const ssh = { execCommand: jest.fn().mockResolvedValue({ code: 1 }), dispose: jest.fn() };
-    const service = new CfOriginService({ node: { findUniqueOrThrow: async () => node, update } } as any,
-      { getDecryptedToken: token } as any, { connect: async () => ssh } as any);
+    const service = new CfOriginService({ node: { findUniqueOrThrow: async () => node, update, updateMany: jest.fn() } } as any,
+      { getDecryptedToken: token } as any, { connect: async () => ssh, instanceId: async () => 'panel', assertDeploymentOwner: jest.fn() } as any);
+    (dependencies.ensureOriginNftables as jest.Mock).mockRejectedValue(new Error('nftables unavailable'));
+    const dns = jest.spyOn(CfOriginApi.prototype, 'ensureDns');
     await expect(service.prepare('pilot')).rejects.toThrow('nftables');
-    expect(ssh.dispose).toHaveBeenCalled(); expect(update).not.toHaveBeenCalled(); expect(token).not.toHaveBeenCalled();
+    expect(ssh.dispose).toHaveBeenCalled(); expect(update).not.toHaveBeenCalled(); expect(dns).not.toHaveBeenCalled();
+  });
+  it('refuses cloud authorization before modifying a host or DNS, including retries', async () => {
+    const connect = jest.fn(); const update = jest.fn();
+    const service = new CfOriginService({ node: { findUniqueOrThrow: async () => ({ ...node, cfOriginRoute: route }), update, updateMany: jest.fn() } } as any,
+      { getDecryptedToken: async () => ({ apiToken: 'fixture' }) } as any, { connect } as any);
+    (CfOriginApi.prototype.preflight as jest.Mock).mockRejectedValue(new Error('Zone Settings Read: HTTP 403'));
+    await expect(service.prepare('pilot')).rejects.toThrow('Zone Settings Read');
+    expect(connect).not.toHaveBeenCalled(); expect(update).not.toHaveBeenCalled();
+  });
+  it('rechecks dependencies on a retained origin intent', async () => {
+    const ssh = { dispose: jest.fn() };
+    const service = new CfOriginService({ node: { findUniqueOrThrow: async () => ({ ...node, cfOriginRoute: route }), update: jest.fn(), updateMany: jest.fn() } } as any,
+      { getDecryptedToken: async () => ({ apiToken: 'fixture' }) } as any,
+      { connect: async () => ssh, assertDeploymentOwner: jest.fn() } as any);
+    (dependencies.ensureOriginNftables as jest.Mock).mockRejectedValue(new Error('nftables unavailable'));
+    await expect(service.prepare('pilot')).rejects.toThrow('nftables');
+    expect(dependencies.ensureOriginNftables).toHaveBeenCalledWith(ssh, 'pilot', 8443, route.ref);
+    expect(ssh.dispose).toHaveBeenCalled();
   });
   it.each([true, false])('audit preserves acceptance only while remote ownership is valid=%s', async valid => {
     const candidate = { ...node, cfOriginRoute: ready, status: 'RUNNING', enabled: true };
@@ -219,7 +344,7 @@ describe('durable origin provisioning', () => {
     const db = { node: { findUniqueOrThrow: jest.fn().mockResolvedValue(node),
       update: jest.fn(async x => updates.push(x)), updateMany: jest.fn(async x => updates.push(x)) } };
     const service = new CfOriginService(db as any, { getDecryptedToken: async () => ({ apiToken: 'private', zoneId: 'zone' }) } as any,
-      { instanceId: async () => 'panel-instance', connect: async () => ({
+      { instanceId: async () => 'panel-instance', assertDeploymentOwner: jest.fn(), connect: async () => ({
         execCommand: async () => ({ code: 0 }), dispose: jest.fn(),
       }) } as any);
     const prereq = jest.spyOn(CfOriginApi.prototype, 'prerequisites').mockResolvedValue();

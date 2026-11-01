@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { CloudflareService, type CfVerifyResult } from './cloudflare.service';
 import { UpsertCloudflareSettingDto } from './dto/upsert-cloudflare-setting.dto';
+import { CfOriginApi } from './cf-origin-api';
 
 @Injectable()
 export class CloudflareSettingsService {
@@ -42,7 +43,15 @@ export class CloudflareSettingsService {
     if (!creds) {
       return { valid: false, message: '未配置 Cloudflare 设置' };
     }
-    return this.cfService.verifyZoneAccess(creds.apiToken, creds.zoneId);
+    const result = await this.cfService.verifyZoneAccess(creds.apiToken, creds.zoneId);
+    if (!result.valid) return result;
+    try {
+      await new CfOriginApi(creds.apiToken, creds.zoneId).preflight();
+      result.origin = { readable: true, message: 'XHTTP 回源只读预检通过；DNS/Origin/Config Settings 写权限及端到端连通性将在部署时验证。' };
+    } catch (error) {
+      result.origin = { readable: false, message: error instanceof Error ? error.message : 'XHTTP 回源预检失败' };
+    }
+    return result;
   }
 
   /** Decrypt and return the raw API token — used internally by other services */

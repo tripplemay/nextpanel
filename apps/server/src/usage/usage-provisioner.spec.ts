@@ -4,6 +4,7 @@ import { generateXrayConfig } from '../nodes/config/xray-config';
 import { usageConfig } from './usage-config';
 import { uploadText } from '../nodes/ssh/ssh.util';
 import { remoteExec } from '../resources/remote-exec';
+import { CF_XHTTP_CORE_BIN } from '../nodes/protocols/cf-xhttp-core';
 
 jest.mock('../common/database/advisory-lock', () => ({ withPostgresAdvisoryLocks: (_keys: string[], work: () => unknown) => work() }));
 jest.mock('../nodes/ssh/ssh.util', () => ({ uploadText: jest.fn() }));
@@ -13,11 +14,12 @@ const fixtureNode = { id: 'n', userId: 'owner', serverId: 's', protocol: 'VLESS'
   cfDnsRecordId: 'record', domain: 'cdn.example.com', statsPort: 20443, listenPort: 443, enabled: true, status: 'RUNNING',
   server: { id: 's', retiredAt: null, status: 'ONLINE' }, usageState: { preparedAt: new Date() } };
 
-function fixture(prepared = true) {
-  const node = { ...fixtureNode, usageState: { preparedAt: prepared ? new Date() : null } };
-  const original = generateXrayConfig(node, { uuid: 'legacy' });
+function fixture(prepared = true, xhttp = false) {
+  const node = { ...fixtureNode, ...(xhttp ? { transport: 'XHTTP' } : {}), usageState: { preparedAt: prepared ? new Date() : null } };
+  const legacyId = xhttp ? '11111111-1111-4111-8111-111111111111' : 'legacy';
+  const original = generateXrayConfig(node, { uuid: legacyId, path: '/fixture' });
   const config = prepared ? usageConfig(original, 'n', 20443, []).config : original;
-  const runtime = new Map([['np-legacy', 'legacy']]);
+  const runtime = new Map([['np-legacy', legacyId]]);
   const calls: string[] = [];
   const files = new Map<string, string>();
   let failAdd = false; let failRestart = false;
@@ -40,6 +42,7 @@ function fixture(prepared = true) {
   (uploadText as jest.Mock).mockImplementation((_ssh, content, path) => files.set(path, content));
   (remoteExec as jest.Mock).mockImplementation(async (_ssh, command: string) => {
     calls.push(command);
+    if (command.startsWith('systemctl show ')) return { code: 0, stdout: `{ path=${CF_XHTTP_CORE_BIN} ; argv[]=${CF_XHTTP_CORE_BIN} run ; }` };
     if (command.startsWith('head ')) return { code: 0, stdout: config };
     if (command.includes('inbounduser')) return { code: 0, stdout: JSON.stringify({ users: [...runtime].map(([email, id]) => ({ email, account: { id } })) }) };
     if (command.includes(' api adu ') && !failAdd) runtime.set('np-usage-fixture', 'new');
@@ -88,6 +91,13 @@ describe('usage provisioner publication gate', () => {
     await expect(f.service.sync('n', 'owner', false)).rejects.toThrow('VERIFICATION_FAILED');
     expect(f.prisma.usageCredential.updateMany).not.toHaveBeenCalled();
     expect(f.prisma.usageNode.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ error: 'VERIFICATION_FAILED' }) }));
+  });
+  it('uses the isolated XHTTP service binary for config validation and runtime user updates', async () => {
+    const f = fixture(true, true);
+    await expect(f.service.sync('n', 'owner', false)).resolves.toMatchObject({ installed: 1, restarted: false });
+    expect(f.calls.some(command => command.startsWith(`${CF_XHTTP_CORE_BIN} run -test`))).toBe(true);
+    expect(f.calls.some(command => command.startsWith(`${CF_XHTTP_CORE_BIN} api adu`))).toBe(true);
+    expect(f.calls.some(command => command.startsWith('/usr/local/bin/xray'))).toBe(false);
   });
   it('refuses mismatched identities and configuration drift before any writes', async () => {
     const f = fixture(); f.runtime.set('np-usage-fixture', 'foreign');

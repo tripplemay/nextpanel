@@ -116,6 +116,11 @@ export class NodesService {
         preset.implementation,
         presetKey === 'VLESS_XHTTP_TLS',
       );
+      if (presetKey === 'VLESS_XHTTP_TLS') {
+        if (!this.cfOrigin) throw new Error('Origin mapping service unavailable');
+        try { await this.cfOrigin.preflight(userId, dto.serverId, listenPort !== 443); }
+        catch (error) { throw new BadRequestException(error instanceof Error ? error.message : 'Origin preflight failed'); }
+      }
       return this.prisma.node.create({
         data: {
           serverId: dto.serverId,
@@ -137,19 +142,14 @@ export class NodesService {
 
     // Auto-create Cloudflare DNS A records for CDN/TLS nodes. Modern TLS
     // protocols require DNS-only records and roll back creation on failure.
-    if (CLOUDFLARE_PRESETS.has(presetKey)) {
+    // Mapped origins are prepared by the streamed deploy, not the creation
+    // request: package downloads can exceed the CDN's ordinary request limit.
+    if (CLOUDFLARE_PRESETS.has(presetKey) && node.publicPort !== 443) {
       const strict = STRICT_DNS_PRESETS.has(presetKey) || presetKey === 'VLESS_XHTTP_TLS';
       const proxied = presetKey === 'VLESS_WS_TLS' || presetKey === 'VLESS_XHTTP_TLS';
       try {
-        if (node.publicPort === 443) {
-          if (!this.cfOrigin) throw new Error('Origin mapping service unavailable');
-          await this.withDatabaseLocks([nodeOperationLock(node.id)], () => this.cfOrigin!.prepare(node.id));
-        } else await this.provisionCloudflareDns(userId, node.id, dto.serverId, proxied, strict);
+        await this.provisionCloudflareDns(userId, node.id, dto.serverId, proxied, strict);
       } catch (err) {
-        if (node.publicPort === 443) {
-          await this.prisma.node.update({ where: { id: node.id }, data: { status: 'ERROR' } });
-          throw new BadRequestException(`节点 ${node.id} 配置未完成，已保留记录供重试或清理：${err instanceof Error ? err.message : 'Origin mapping failed'}`);
-        }
         await this.rollbackCreatedNode(node.id);
         throw err;
       }
@@ -597,6 +597,11 @@ export class NodesService {
         preset.implementation,
         presetKey === 'VLESS_XHTTP_TLS',
       );
+      if (presetKey === 'VLESS_XHTTP_TLS') {
+        if (!this.cfOrigin) throw new Error('Origin mapping service unavailable');
+        try { await this.cfOrigin.preflight(userId, dto.entryServerId, listenPort !== 443); }
+        catch (error) { throw new BadRequestException(error instanceof Error ? error.message : 'Origin preflight failed'); }
+      }
       const exitPort = managedExitServerId
         ? await this.pickChainExitPort(managedExitServerId)
         : null;
@@ -625,17 +630,10 @@ export class NodesService {
       });
     });
 
-    if (STRICT_DNS_PRESETS.has(presetKey) || presetKey === 'VLESS_XHTTP_TLS') {
+    if ((STRICT_DNS_PRESETS.has(presetKey) || presetKey === 'VLESS_XHTTP_TLS') && node.publicPort !== 443) {
       try {
-        if (node.publicPort === 443) {
-          if (!this.cfOrigin) throw new Error('Origin mapping service unavailable');
-          await this.withDatabaseLocks([nodeOperationLock(node.id)], () => this.cfOrigin!.prepare(node.id));
-        } else await this.provisionCloudflareDns(userId, node.id, dto.entryServerId, presetKey === 'VLESS_XHTTP_TLS', true);
+        await this.provisionCloudflareDns(userId, node.id, dto.entryServerId, presetKey === 'VLESS_XHTTP_TLS', true);
       } catch (err) {
-        if (node.publicPort === 443) {
-          await this.prisma.node.update({ where: { id: node.id }, data: { status: 'ERROR' } });
-          throw new BadRequestException(`节点 ${node.id} 配置未完成，已保留记录供重试或清理：${err instanceof Error ? err.message : 'Origin mapping failed'}`);
-        }
         await this.rollbackCreatedNode(node.id);
         throw err;
       }

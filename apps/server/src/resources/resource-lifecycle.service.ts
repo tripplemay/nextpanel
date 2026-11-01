@@ -61,10 +61,10 @@ export class ResourceLifecycleService {
     return row.instanceId;
   }
 
-  async connect(server: Server): Promise<NodeSSH> {
+  async connect(server: Server, commandTimeoutMs = 30000): Promise<NodeSSH> {
     if (!server.sshAuthEnc) throw new CleanupBlockedError('SSH credentials are unavailable; restore credentials before retrying');
     return boundConnection(await connectSsh({ host: server.ip, port: server.sshPort, username: server.sshUser,
-      authType: server.sshAuthType, auth: this.crypto.decrypt(server.sshAuthEnc), readyTimeout: 10000 }));
+      authType: server.sshAuthType, auth: this.crypto.decrypt(server.sshAuthEnc), readyTimeout: 10000 }), commandTimeoutMs);
   }
 
   async remoteHost(ssh: NodeSSH, expected?: string | null): Promise<string | null> {

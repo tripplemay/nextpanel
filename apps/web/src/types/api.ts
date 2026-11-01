@@ -230,6 +230,7 @@ export interface Node {
   cfOriginRoute?: {
     domain: string; port: number; state: 'PENDING' | 'CONFIGURED' | 'READY' | 'ERROR';
     checkedAt?: string; error?: string | null; ruleId?: string; rulesetId?: string;
+    tlsRuleId?: string; tlsRulesetId?: string;
   } | null;
   domain: string | null;
   cfDnsRecordId?: string | null;

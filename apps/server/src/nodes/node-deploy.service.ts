@@ -10,7 +10,8 @@ import { OperationLogService } from '../operation-log/operation-log.service';
 import { CertService, type RemoteCertUpdate } from '../common/cert/cert.service';
 import { CloudflareService } from '../cloudflare/cloudflare.service';
 import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.service';
-import { CF_XHTTP_XRAY_VERSION, isCfXhttp } from './protocols/cf-xhttp';
+import { isCfXhttp } from './protocols/cf-xhttp';
+import { ensureCfXhttpCore } from './protocols/cf-xhttp-core';
 import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
 import { generateConfig, generateChainExitConfig, getBinaryCommand, NodeInfo } from './config/config-generator';
 import { connectSsh, uploadText, binaryExists, whichBinary, detectPackageManager } from './ssh/ssh.util';
@@ -69,18 +70,21 @@ export class NodeDeployService {
   /** Stream deploy logs as SSE events */
   deployStream(nodeId: string, actorId?: string, correlationId?: string): Observable<MessageEvent> {
     return new Observable((subscriber) => {
+      const keepalive = setInterval(() => subscriber.next({ data: { keepalive: true } } as MessageEvent), 15000);
       const onLog = (line: string) => {
         subscriber.next({ data: { log: line } } as MessageEvent);
       };
 
       this.deploy(nodeId, onLog, actorId, correlationId)
         .then((result) => {
+          clearInterval(keepalive);
           subscriber.next({
             data: { done: true, success: result.success },
           } as MessageEvent);
           subscriber.complete();
         })
         .catch((err: unknown) => {
+          clearInterval(keepalive);
           const msg = err instanceof Error ? err.message : String(err);
           this.logger.error(`deployStream error for node ${nodeId}: ${msg}`);
           subscriber.next({
@@ -88,6 +92,7 @@ export class NodeDeployService {
           } as MessageEvent);
           subscriber.complete();
         });
+      return () => clearInterval(keepalive);
     });
   }
 
@@ -146,6 +151,7 @@ export class NodeDeployService {
     let mappedOrigin: OriginRoute | null = null;
     if (node.publicPort != null) {
       try {
+        log('Checking Cloudflare permissions, isolated origin dependencies and reviewed Xray core...');
         if (!this.cfOrigin) throw new Error('Origin mapping service unavailable');
         mappedOrigin = await this.cfOrigin.prepare(node.id);
         // A retained failed creation may not have a domain yet. Generate from
@@ -269,17 +275,12 @@ export class NodeDeployService {
       log(`SSH connected to ${server.ip}:${server.sshPort}`);
       await assertRemotePorts(ssh, [node.listenPort, ...(statsPort ? [statsPort] : [])], serviceName);
       await this.resources.assertDeploymentOwner(ssh, server, node.id, 'ENTRY');
+      if (isCfXhttp(node)) bin = await ensureCfXhttpCore(ssh, log);
       if (mappedOrigin) firewallGuard = await installOriginFirewall(ssh, node.id, node.listenPort, mappedOrigin.ref);
 
       // ── 4. Check binary, auto-install if missing ──────────────────────────
       log(`Checking binary: ${bin}`);
       const present = await binaryExists(ssh, bin);
-      if (isCfXhttp(node)) {
-        const version = present ? await ssh.execCommand(`${bin} version 2>&1`) : null;
-        if (!version || version.code !== 0 || extractStableCoreVersion('XRAY', version.stdout) !== CF_XHTTP_XRAY_VERSION) {
-          throw new Error(`CDN XHTTP pilot requires reviewed Xray ${CF_XHTTP_XRAY_VERSION}; no shared core will be automatically replaced`);
-        }
-      }
       if (!present) {
         log(`Binary not found: ${bin}. Starting auto-install...`);
         const impl = (node.implementation ?? 'XRAY').toUpperCase();

@@ -9,7 +9,8 @@ import { CloudflareSettingsService } from './cloudflare-settings.service';
 import { CfOriginApi } from './cf-origin-api';
 import { originRoute, type OriginRoute } from './cf-origin.util';
 import { verifyOriginFirewall } from './cf-origin-firewall';
-import { remoteExec } from '../resources/remote-exec';
+import { ensureOriginNftables, preflightOriginHost } from './cf-origin-dependencies';
+import { ensureCfXhttpCore, preflightCfXhttpCore } from '../nodes/protocols/cf-xhttp-core';
 
 export const ORIGIN_AUDIT_BATCH = Prisma.sql`
   SELECT id FROM "Node"
@@ -31,6 +32,19 @@ export class CfOriginService {
     return new CfOriginApi(cf.apiToken, zoneId);
   }
 
+  async preflight(ownerId: string, serverId: string, mapped: boolean) {
+    const cf = await this.settings.getDecryptedToken(ownerId);
+    if (!cf) throw new Error('Cloudflare credentials unavailable');
+    if (mapped) await new CfOriginApi(cf.apiToken, cf.zoneId).preflight();
+    const server = await this.prisma.server.findFirstOrThrow({ where: { id: serverId, userId: ownerId } });
+    const ssh = await this.resources.connect(server);
+    try {
+      await this.resources.remoteHost(ssh, server.remoteHostId);
+      await preflightCfXhttpCore(ssh);
+      if (mapped) await preflightOriginHost(ssh);
+    } finally { ssh.dispose(); }
+  }
+
   async prepare(nodeId: string): Promise<OriginRoute> {
     const node = await this.prisma.node.findUniqueOrThrow({ where: { id: nodeId }, include: { server: true } });
     if (node.publicPort !== 443 || node.transport !== 'XHTTP' || node.tls !== 'TLS') {
@@ -39,27 +53,33 @@ export class CfOriginService {
     let r: OriginRoute;
     if (node.cfOriginRoute) r = originRoute(node.cfOriginRoute);
     else {
-      // Avoid creating cloud resources on a host that cannot enforce CF-only ingress.
-      const ssh = await this.resources.connect(node.server);
-      try {
-        const check = await remoteExec(ssh, 'command -v nft >/dev/null && nft list tables >/dev/null');
-        if (check.code !== 0) throw new Error('Origin mapping requires usable nftables; no website firewall or cloud resources were changed');
-      } finally { ssh.dispose(); }
       const cf = await this.settings.getDecryptedToken(node.userId);
       if (!cf) throw new Error('Cloudflare credentials unavailable');
       const instance = await this.resources.instanceId();
       r = { version: 1, zoneId: cf.zoneId, ref: `np_origin_${createHash('sha256').update(`${instance}:${node.id}`).digest('hex').slice(0, 32)}`,
         domain: node.domain ?? `np-${node.id}.${cf.domain}`.toLowerCase(), port: node.listenPort, state: 'PENDING' };
       originRoute(r);
-      // Persist intent before the first external write, including timeout/response-loss cases.
-      await this.prisma.node.update({ where: { id: nodeId }, data: { domain: r.domain, cfOriginRoute: { ...r } } });
     }
     if (r.port !== node.listenPort || (node.domain && r.domain !== node.domain)) throw new Error('Origin mapping identity changed');
     return withPostgresAdvisoryLocks([`nextpanel:cf-origin:${r.zoneId}`], async () => {
       try {
         const api = await this.api(node.userId, r.zoneId);
+        await api.preflight(r);
+        // Repeat host checks on retained intents too; a failed earlier attempt
+        // is not proof that dependencies, ownership or the kernel still work.
+        const ssh = await this.resources.connect(node.server, 300000);
+        try {
+          await this.resources.assertDeploymentOwner(ssh, node.server, node.id, 'ENTRY');
+          await preflightOriginHost(ssh);
+          await ensureOriginNftables(ssh, node.id, node.listenPort, r.ref);
+          await ensureCfXhttpCore(ssh);
+        } finally { ssh.dispose(); }
+        // Persist intent before the first cloud write, including response loss.
+        await this.prisma.node.update({ where: { id: nodeId }, data: { domain: r.domain, cfOriginRoute: { ...r } } });
         const recordId = await api.ensureDns(r, node.server.ip);
         await this.prisma.node.update({ where: { id: nodeId }, data: { cfDnsRecordId: recordId } });
+        r = await api.ensureTls(r);
+        await this.prisma.node.update({ where: { id: nodeId }, data: { cfOriginRoute: { ...r } } });
         await api.prerequisites(recordId, r.domain, node.server.ip, r.ref);
         const configured = { ...await api.ensure(r), state: 'CONFIGURED' as const, error: undefined };
         await this.prisma.node.update({ where: { id: nodeId }, data: { cfOriginRoute: configured } });

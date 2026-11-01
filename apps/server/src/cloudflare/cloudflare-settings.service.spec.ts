@@ -3,6 +3,7 @@ import { CloudflareSettingsService } from './cloudflare-settings.service';
 import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { CloudflareService } from './cloudflare.service';
+import { CfOriginApi } from './cf-origin-api';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -40,8 +41,11 @@ describe('CloudflareSettingsService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(CfOriginApi.prototype, 'preflight').mockResolvedValue();
     svc = new CloudflareSettingsService(mockPrisma, mockCrypto, mockCfService);
   });
+
+  afterEach(() => jest.restoreAllMocks());
 
   // ── upsert ──────────────────────────────────────────────────────────────────
 
@@ -148,5 +152,28 @@ describe('CloudflareSettingsService', () => {
       expect(mockCrypto.decrypt).toHaveBeenCalledWith('enc:my-token');
       expect(result).toEqual({ apiToken: 'my-token', domain: 'example.com', zoneId: 'zone-abc' });
     });
+  });
+});
+
+describe('Cloudflare capability verification', () => {
+  afterEach(() => jest.restoreAllMocks());
+  const fixture = () => {
+    const service = new CloudflareSettingsService({} as any, {} as any,
+      { verifyZoneAccess: jest.fn().mockResolvedValue({ valid: true, zoneStatus: 'active', message: 'DNS access verified' }) } as any);
+    jest.spyOn(service, 'getDecryptedToken').mockResolvedValue({ apiToken: 'fixture', zoneId: 'zone', domain: 'example.com' });
+    return service;
+  };
+  it('does not mislabel DNS access as full XHTTP readiness', async () => {
+    jest.spyOn(CfOriginApi.prototype, 'preflight').mockRejectedValue(new Error('Zone Settings Read: HTTP 403'));
+    const result = await fixture().verify('owner');
+    expect(result.valid).toBe(true);
+    expect(result.origin).toEqual({ readable: false, message: 'Zone Settings Read: HTTP 403' });
+  });
+  it('explicitly distinguishes read-only checks from write and end-to-end acceptance', async () => {
+    jest.spyOn(CfOriginApi.prototype, 'preflight').mockResolvedValue();
+    const result = await fixture().verify('owner');
+    expect(result.origin?.readable).toBe(true);
+    expect(result.origin?.message).toContain('只读');
+    expect(result.origin?.message).toContain('端到端');
   });
 });
