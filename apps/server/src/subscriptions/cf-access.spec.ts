@@ -37,9 +37,12 @@ describe('CF endpoint variants native config checks (no network probes)', () => 
   singboxIt.each([['sing-box', buildFullSingboxConfig], ['HomeProxy', buildHomeProxyConfig]] as const)('%s validates full CF config', (_label, builder) => {
     nativeCheck('sing-box', builder(variants), (_directory, config) => ['check', '-c', config]);
   });
-  const xrayIt = spawnSync('xray', ['version']).status === 0 ? it : it.skip;
+  const xray = process.env.XRAY_BINARY ?? 'xray';
+  const xrayAvailable = spawnSync(xray, ['version']).status === 0;
+  if (process.env.XRAY_BINARY && !xrayAvailable) throw new Error('Configured Xray binary is unavailable');
+  const xrayIt = xrayAvailable ? it : it.skip;
   xrayIt('Xray validates the exact CF test/export identity', () => {
-    nativeCheck('xray', buildXrayClientConfig(variants[1], 1080), (_directory, config) => ['run', '-test', '-c', config]);
+    nativeCheck(xray, buildXrayClientConfig(variants[1], 1080), (_directory, config) => ['run', '-test', '-c', config]);
   });
   const mihomo = process.env.MIHOMO_BINARY ?? (process.platform === 'darwin' ? '/Applications/Clash Verge.app/Contents/MacOS/verge-mihomo' : 'mihomo');
   const mihomoIt = spawnSync(mihomo, ['-v']).status === 0 ? it : it.skip;
