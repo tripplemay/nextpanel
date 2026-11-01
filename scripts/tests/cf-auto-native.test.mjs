@@ -62,7 +62,7 @@ test('compact provider filters and empty-provider rejection pass native Mihomo p
 });
 test('running Mihomo rejects empty providers for every CF group without COMPATIBLE/DIRECT', { skip: !process.env.MIHOMO_BINARY, timeout: 15000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'np-cf-native-'));
-  let child;
+  let child; let output = ''; let startupError; let latest;
   try {
     const socket = net.createServer(); socket.listen(0, '127.0.0.1'); await once(socket, 'listening');
     const port = socket.address().port; await new Promise(resolve => socket.close(resolve));
@@ -73,21 +73,31 @@ test('running Mihomo rejects empty providers for every CF group without COMPATIB
       .replaceAll('https://www.gstatic.com/generate_204', `http://127.0.0.1:${port}/version`).replaceAll('lazy: false', 'lazy: true');
     const config = `mode: rule\nexternal-controller: 127.0.0.1:${port}\nsecret: fixture\nproxies: []\nproxy-providers:\n  cf-fixture:\n    type: file\n    path: ${JSON.stringify(provider)}\n${groups}\nrules:\n  - MATCH,REJECT\n`;
     const file = join(dir, 'config.yaml'); writeFileSync(file, config);
-    child = spawn(process.env.MIHOMO_BINARY, ['-d', dir, '-f', file], { stdio: 'ignore' });
+    child = spawn(process.env.MIHOMO_BINARY, ['-d', dir, '-f', file], { stdio: ['ignore', 'pipe', 'pipe'] });
+    child.stdout.on('data', chunk => { output = (output + chunk).slice(-12000); });
+    child.stderr.on('data', chunk => { output = (output + chunk).slice(-12000); });
+    child.once('error', error => { startupError = error; });
     let result;
     for (let i = 0; i < 60; i++) {
+      if (startupError) throw startupError;
+      assert.equal(child.exitCode, null, `isolated Mihomo exited before configuration readiness\n${output}`);
+      assert.equal(child.signalCode, null, `isolated Mihomo was terminated before configuration readiness\n${output}`);
       try {
         const response = await fetch(`http://127.0.0.1:${port}/proxies`, { headers: { Authorization: 'Bearer fixture' }, signal: AbortSignal.timeout(500) });
-        if (response.ok) { result = await response.json(); break; }
+        if (response.ok) {
+          latest = await response.json();
+          // The controller can listen before its configured proxy map is installed.
+          if (Object.hasOwn(latest.proxies ?? {}, 'fixture [CF fixture]')) { result = latest; break; }
+        }
       } catch { /* The isolated controller may still be starting. */ }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    assert.ok(result, 'isolated Mihomo controller did not start');
+    assert.ok(result, `isolated Mihomo configuration did not load: ${JSON.stringify(latest)}\n${output}`);
     const cfGroups = Object.entries(result.proxies).filter(([name]) => name.startsWith('fixture [CF fixture]'));
     assert.equal(cfGroups.length, 1);
     for (const [, group] of cfGroups) { assert.deepEqual(group.all, ['REJECT']); assert.equal(group.now, 'REJECT'); }
   } finally {
-    if (child && child.exitCode === null) { const closed = once(child, 'close'); child.kill('SIGKILL'); await closed; }
+    if (child?.pid && child.exitCode === null && child.signalCode === null) { const closed = once(child, 'close'); child.kill('SIGKILL'); await closed; }
     rmSync(dir, { recursive: true, force: true });
   }
 });
