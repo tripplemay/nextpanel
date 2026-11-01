@@ -138,21 +138,53 @@ export function rankCandidates(observations: CfObservation[], incumbent: CfObser
       if (improvement && compare(candidate, worst) < 0) retained[retained.length - 1] = candidate;
     }
   }
-  return retained.sort(compare).slice(0, 3);
+  const ranked = retained.sort((a, b) => a.failed - b.failed || compare(a, b)).slice(0, 3);
+  const primary = ranked.find(o => o.ip === incumbent[0]?.ip && !o.failed);
+  const best = ranked[0];
+  // A compact export has one regional slot. Keep its healthy incumbent when
+  // the gain is marginal, rather than rotating the dialed IP every probe round.
+  if (primary && best && !(bandwidthReady ? best.bytesPerSecond! > primary.bytesPerSecond! * 1.2 : best.latency < primary.latency * 0.8)) {
+    return [primary, ...ranked.filter(o => o.ip !== primary.ip)];
+  }
+  return ranked;
 }
 
 export function automaticVariants(node: NodeExportInfo, nodeId: string, profiles: { region?: CfRegion; ips: string[] }[], defaultIp: string | null, regions: CfRegion[] = profiles.flatMap(p => p.region ? [p.region] : [])): NodeExportInfo[] {
   const base = `${node.name} [CF ${nodeId}]`;
-  const endpoints: { ip: string; profile: string; label: string; region?: CfRegion }[] = profiles.flatMap(p => [...new Set(p.ips)].slice(0, 3).map((ip, i) => ({ ip,
-    profile: p.region ? `REGION:${p.region.key}` : 'GENERIC', region: p.region,
-    label: `${p.region ? `${p.region.label}云测优选` : '通用候选'} ${i + 1}` })));
-  if (defaultIp) endpoints.push({ ip: defaultIp, profile: 'DNS', label: '默认 CDN' });
+  const covered = new Set(profiles.filter(p => p.region && p.ips.length).map(p => p.region!.key));
+  const needsGeneric = !covered.size || regions.some(r => !covered.has(r.key));
+  type Endpoint = { ip: string; profile: string; region?: CfRegion };
+  const endpoints = new Map<string, Endpoint>();
+  const selected = new Set<string>();
+  // Keep the measured pool for future promotion, not as a user-facing menu.
+  for (const p of profiles) {
+    const ip = p.ips[0];
+    const profile = p.region ? `REGION:${p.region.key}` : 'GENERIC';
+    if (!ip || selected.has(profile) || (!p.region && !needsGeneric)) continue;
+    selected.add(profile);
+    const endpoint: Endpoint = { ip, profile, region: p.region };
+    const existing = endpoints.get(ip);
+    // A shared IP is one connection path. GENERIC keeps cached regional filters
+    // working without falsely attributing the shared path to just one region.
+    endpoints.set(ip, existing && existing.profile !== endpoint.profile
+      ? { ip, profile: 'GENERIC' } : endpoint);
+  }
+  if (defaultIp) {
+    endpoints.delete(defaultIp);
+    endpoints.set(defaultIp, { ip: defaultIp, profile: 'DNS' });
+  }
   // Keep the old terminal GENERIC/DNS marker so cached carrier-era provider filters
   // continue to receive safe CDN endpoints until a full subscription refresh.
-  return endpoints.map(e => ({ ...node, host: e.ip, name: `${base} ${e.label} [CF-REGION:${e.region?.key ?? e.profile}] [CF:${e.profile === 'DNS' ? 'DNS' : 'GENERIC'}]`,
-    cfGroup: base, cfAuto: true, cfNodeId: nodeId, cfProfile: e.profile, cfRegion: e.region, cfRegions: regions,
-    credentials: { ...node.credentials, transportHost: node.domain! },
-  }));
+  const positions = new Map<string, number>();
+  return [...endpoints.values()].map(e => {
+    const position = (positions.get(e.profile) ?? 0) + 1;
+    positions.set(e.profile, position);
+    const label = e.profile === 'DNS' ? '默认 CDN' : `${e.region ? `${e.region.label}云测优选` : '通用候选'} ${position}`;
+    return { ...node, host: e.ip, name: `${base} ${label} [CF-REGION:${e.region?.key ?? e.profile}] [CF:${e.profile === 'DNS' ? 'DNS' : 'GENERIC'}]`,
+      cfGroup: base, cfAuto: true, cfNodeId: nodeId, cfProfile: e.profile, cfRegion: e.region, cfRegions: regions,
+      credentials: { ...node.credentials, transportHost: node.domain! },
+    };
+  });
 }
 
 export function regionalCandidates(profiles: { region?: CfRegion; observations: CfObservation[] }[], regions: CfRegion[]) {

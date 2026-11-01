@@ -52,11 +52,14 @@ measure CF/VLESS availability or represent three mainland carriers.
   hours, plus current candidates and validated default DNS. This is bounded
   sampling, **not** an exhaustive scan or proof of globally fastest IP. No IPv6
   brute force; only existing/default IPv6 candidates can be checked.
-- At most eight candidates/batch and three published endpoints/probe/node.
+- At most eight candidates/batch and three qualified pool endpoints/probe/node.
   Two recent consecutive successes promote; two failures remove an incumbent
   and cool it down six hours. Small changes do not churn a full pool: a challenger
   must improve by over 20%. Latency is used unless comparable recent throughput
   samples are available for all candidates; then throughput ranks first.
+  The healthy first candidate is also retained until an alternative improves by
+  over 20%; a failed primary yields to a healthy candidate. This prevents compact
+  exports rotating their only regional slot for negligible measurement noise.
 - Each probe has a durable UTC-day ceiling of 5,000 candidate tests and 100 MiB
   of **download payload reservations**, shared by all its nodes. Optional 1 MiB
   samples are refreshed no more than once/six hours/candidate. Download budget
@@ -177,19 +180,35 @@ relabeled as local. The all-region group lets each client test all candidates.
 
 ## Subscription updates
 
-- Up to three aliases per measured region and three generic fallback aliases,
-  plus one validated default CF address; at most 31 endpoints for nine regions
-  per original node. SNI, WS Host/path and CDN protection stay unchanged.
-  Partial coverage never removes safe generic candidates from missing regions.
-- One subscription includes all measured regions. Clash/Mihomo provides a
-  per-node all-region URLTest group and configured-region subgroups, including
-  pending regions. These groups do not infer the user's region or ISP.
-  Names include `[CF-REGION:ap-chengdu]`. The old terminal `[CF:GENERIC]`/`[CF:DNS]`
-  marker is retained so cached carrier-era filters keep receiving safe candidates.
-  New regional filters also accept the exact pre-regional generic/default-CDN
-  name suffixes, so a rollback to the previous auto-CF build can still supply
-  safe fallback without immediately refreshing every client. They do not match
-  another new region merely because its terminal marker says GENERIC.
+- The background candidate pool still retains up to three qualified IPs per
+  probe/node. Exports take only the highest-ranked IP from each measured region,
+  plus one validated default CF address. When regions are missing, retain at most
+  one generic fallback; omit that extra fallback when all regions are covered.
+  With Guangzhou and Chengdu this is **at most three distinct endpoints per
+  original node**, not seven or more. Nine regions need at most ten endpoints.
+  This reduces client choices/probes, not the cloud probe cadence or quota.
+  SNI, WS Host/path and CDN protection stay unchanged.
+- Duplicate preferred IPs are one path, not multiple nodes. If several regional
+  profiles select the same IP, export it once as GENERIC so cached regional groups
+  can all use it without false single-region attribution. If it matches default
+  CDN, keep only the existing DNS profile. De-duplication stays within the same
+  managed node; different protocols, chains and independently managed nodes are
+  never merged just because they share a server/exit address.
+- Clash/Mihomo, Sing-box and HomeProxy expose **one all-region automatic group per
+  managed node** in their main and service selectors. No regional subgroups are
+  generated. Preferred paths and default CDN remain internal group members; the
+  client chooses locally with a 50 ms tolerance, without asking users to choose
+  among near-equivalent region/candidate entries. The original base group tag is
+  unchanged to preserve existing selections. Raw provider/advanced/debug views
+  may still show the underlying paths; Base64 cannot encode automatic groups and
+  exposes only the bounded compact endpoints instead.
+- Endpoint names keep `[CF-REGION:ap-chengdu]` and the terminal
+  `[CF:GENERIC]`/`[CF:DNS]` compatibility marker. Cached carrier-era and regional
+  groups still receive their safe region/generic/DNS paths after provider-only
+  updates. The single new group also accepts pre-regional generic/default names
+  on rollback, never the unavailable sentinel. Compaction is structural rather
+  than relying on `hidden`, which requires client UI support
+  ([Mihomo documentation](https://wiki.metacubex.one/en/config/proxy-groups/#hidden)).
   A **full subscription refresh** is required to replace the old group topology;
   refreshing only the HTTP provider cannot rename downloaded groups.
 - Clash/Mihomo refreshes one scoped HTTP proxy-provider per node every 15 minutes
@@ -222,6 +241,15 @@ this rename. Historical carrier profiles are shown as unclassified historical
 candidates, never retroactively labeled as regional evidence. Deprecated API
 `carrier=GENERIC` and `missingCarriers=[]` remain temporarily for loaded old admin
 pages; new UI/code uses `profile`, `regions` and `missingRegions`.
+
+The compact-export change also requires no migration or worker/Agent update.
+It does not edit stored candidate pools or revoke old usage UUIDs. Retained
+region/GENERIC/DNS endpoints keep their identity keys. When duplicate regional
+paths merge into GENERIC, the normal observation reconciliation can create a new
+GENERIC identity; until installation, the still-valid legacy CDN UUID is used.
+Cached old identities remain valid. Deploy server and explanatory UI together,
+then request a full client subscription refresh. A rollback to the regional
+version restores the larger lists without changing node deployments or tokens.
 
 1. Backup and record release; apply additive migration and matching generated
    Prisma/server/web code through the existing release pipeline. Leave scheduling
@@ -268,7 +296,9 @@ Tests include mixed owner/share exports, retained ordinary proxies, scope drift,
 automatic-mode disable, provider isolation, mock probe-to-publication flows, actual isolated PostgreSQL defaults,
 ownership/share/rotation/rollback, worker loopback HTTP, native config validation
 and desktop/mobile browser fixtures. Mihomo tests also start an isolated core and
-assert all four CF groups select REJECT after a populated loopback HTTP provider
-is replaced with a reject sentinel. Other fixtures use file providers and exclude
+assert the single CF group selects REJECT after a populated loopback HTTP provider
+is replaced with a reject sentinel. Frozen cached regional/carrier filters are
+also tested through partial coverage, same-IP compaction, old-name rollback and
+empty-provider replacement. Other fixtures use file providers and exclude
 external rule downloads; they do not prove a live SCF
 gateway, remote provider refresh timing or real ISP performance.

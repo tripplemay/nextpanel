@@ -1,7 +1,7 @@
 import { CfAccessService } from './cf-access.service';
 import { SubscriptionsService } from './subscriptions.service';
 import { automaticVariants } from './cf-optimization.util';
-import { buildCfUnavailableProvider } from './uri-builder';
+import { buildCfUnavailableProvider, type NodeExportInfo } from './uri-builder';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { sealExternalSecrets } from '../external-nodes/external-credentials';
 
@@ -80,6 +80,40 @@ describe('mixed subscriptions with per-node CDN protection', () => {
     expect(mainGroups).toContain('Ordinary node'); expect(mainGroups).toContain('External node');
     const cfGroups = yaml.slice(yaml.indexOf('proxy-groups:'), yaml.indexOf('  - name: 🚀'));
     expect(cfGroups).not.toContain('Ordinary node'); expect(cfGroups).not.toContain('External node'); expect(cfGroups).not.toContain('DIRECT');
+  });
+  it('bounds a four-CF-node mixed subscription to nine business choices for owners and shares', async () => {
+    const cfNodes = Array.from({ length: 4 }, (_, i) => ({ ...cfNode, id: `cf-${i}`, name: `CF ${i}` }));
+    sub.nodes = [...cfNodes, ...Array.from({ length: 3 }, (_, i) => ({ ...ordinary, id: `plain-${i}`, name: `Plain ${i}` }))]
+      .map(node => ({ nodeId: node.id, node }));
+    sub.cfProtectedNodeIds = cfNodes.map(n => n.id);
+    sub.externalNodes.push({ externalNodeId: 'external-2', externalNode: { ...external, id: 'external-2', name: 'External 2' } });
+    optimizer.variants.mockImplementation(async (exported: NodeExportInfo, node: { id: string }, ip: string | null) => automaticVariants(exported, node.id, [
+      { region: { key: 'ap-guangzhou', label: '广州' }, ips: ['104.16.0.1', '104.16.0.3', '104.16.0.4'] },
+      { region: { key: 'ap-chengdu', label: '成都' }, ips: ['104.17.0.1', '104.17.0.3', '104.17.0.4'] },
+    ], ip));
+    for (const method of ['generateContent', 'generateContentByShareToken'] as const) {
+      const lines = Buffer.from(await service[method]('token'), 'base64').toString().split('\n');
+      expect(lines).toHaveLength(17);
+      expect(lines.filter(line => line.startsWith('vless://'))).toHaveLength(12);
+    }
+    for (const method of ['generateClashContent', 'generateClashContentByShareToken'] as const) {
+      const config = (await service[method]('token')).content;
+      const main = config.slice(config.indexOf('  - name: 🚀 节点选择'), config.indexOf('  - name: ⚡ 自动选择'));
+      expect(main.match(/^ {6}- /gm)).toHaveLength(10); // Nine business choices plus global automatic selection.
+      expect(main).not.toMatch(/云测优选|默认 CDN/);
+      expect(config.match(/ {4}use: \[cf-/g)).toHaveLength(4);
+    }
+    for (const method of ['generateSingboxContent', 'generateSingboxContentByShareToken', 'generateHomeProxyContent', 'generateHomeProxyContentByShareToken'] as const) {
+      const config = JSON.parse(await service[method]('token'));
+      const selector = config.outbounds.find((g: any) => g.tag === '🚀 节点选择');
+      expect(selector.outbounds).toHaveLength(10);
+      expect(selector.outbounds.join(' ')).not.toMatch(/云测优选|默认 CDN/);
+    }
+    for (const by of [{ token: 'token' }, { shareToken: 'token' }]) {
+      const provider = await service.generateCfProvider(by, 'cf-0');
+      expect(provider.match(/ {2}- name:/g)).toHaveLength(3);
+      expect(provider).not.toMatch(/Plain|External/);
+    }
   });
   it('scopes providers to a protected owned node and excludes every external/ordinary proxy', async () => {
     const owner = await service.generateCfProvider({ token: 'owner-token' }, 'cf');
