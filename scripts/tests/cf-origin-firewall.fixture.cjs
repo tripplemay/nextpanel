@@ -59,7 +59,10 @@ if (process.argv[2] !== 'isolated') {
       await removeOriginFirewall(ssh, 'fixture', 8443, ref);
       assert.equal(await request(443, '127.0.0.1'), '443');
       assert.equal(await request(8443, '127.0.0.1'), '8443');
-      execFileSync('nft', ['-f', '-'], { input: `add table inet ${f.table} { comment "foreign-owner"; }\n` });
+      const foreignConfig = '/etc/fixture-foreign.nft';
+      fs.writeFileSync(foreignConfig, `add table inet ${f.table} { comment "foreign-owner"; }\n`, { mode: 0o600, flag: 'wx' });
+      execFileSync('nft', ['-f', foreignConfig]);
+      fs.unlinkSync(foreignConfig);
       const foreignState = tableState();
       await assert.rejects(installOriginFirewall(ssh, 'fixture', 8443, ref));
       assert.equal(tableState(), foreignState, 'Install must not take over a foreign table');
