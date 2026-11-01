@@ -13,6 +13,7 @@ import { CfOptimizationService } from './cf-optimization.service';
 import { UsageService, UsageGrant } from '../usage/usage.service';
 import { isCfXhttp } from '../nodes/protocols/cf-xhttp';
 import type { ClientProfile } from './client-profile';
+import { publicPort } from '../cloudflare/cf-origin.util';
 
 type CfOptions = { cfOnly?: boolean; cfPreferredIps?: string[]; cfAuto?: boolean };
 
@@ -26,6 +27,8 @@ type SubscriptionNode = {
     transport: string | null;
     tls: string;
     listenPort: number;
+    publicPort?: number | null;
+    cfOriginRoute?: unknown;
     domain: string | null;
     cfDnsRecordId?: string | null;
     enabled: boolean;
@@ -421,7 +424,7 @@ export class SubscriptionsService {
         name: node.name,
         protocol: node.protocol,
         host: node.tls === 'REALITY' ? node.server.ip : (node.domain ?? node.server.ip),
-        port: node.listenPort,
+        port: publicPort(node),
         transport: node.transport,
         tls: node.tls,
         domain: node.domain,

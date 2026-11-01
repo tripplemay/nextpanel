@@ -38,15 +38,17 @@ Do not remove the compatibility entry or schedule automatic WS retirement.
 
 - `CF_XHTTP_PILOT_ENABLED=false` by default. Only the managed preset can create
   the pilot; the generic create/update API cannot convert a WS identity in place.
-- The target host must have a free 443 and stats port, with local database and
-  remote listener/ownership checks passing. An occupied port is an error, not
-  permission to stop WS, replace a reverse proxy, or share its systemd unit.
+- The target host must have a free listen/stats pair, with database reservations
+  and remote listener/ownership checks passing. Prefer 443; if occupied, the
+  [origin-port mapping extension](RUNBOOK-cf-origin-port.md) selects an isolated
+  port. Never stop WS, replace a reverse proxy, or share its systemd unit.
 - The entry host must already have reviewed Xray **26.2.6** at the managed path.
   Deployment refuses missing/other versions rather than replacing a shared core.
   Upgrade any shared core only under a separate host inventory, backup and
   all-node configuration-validation gate.
-- Active Cloudflare settings and a proxied DNS record are mandatory. DNS failure
-  rolls back node creation. Trusted certificate issuance/renewal is required;
+- Active Cloudflare settings and a proxied DNS record are mandatory. Legacy DNS
+  failure rolls back creation; mapped nodes retain an ERROR record and durable
+  ownership intent for cleanup/retry. Trusted certificate issuance/renewal is required;
   no self-signed fallback or disabled certificate verification.
 - Candidate export always binds CF IP + original domain Host/SNI. Even without
   subscription CF switches, managed XHTTP/TLS cannot export the origin address.
@@ -77,8 +79,9 @@ chain exit for the CDN-only pilot; do not silently waive `ENTRY_IS_EXIT`.
    is an infrastructure error, not a bad-IP measurement.
 5. Deploy the panel with the pilot gate **off**; validate public health, login,
    original owner/share links, two-region WS probes, Agents and representative
-   unrelated protocols. There is no schema migration in this phase.
-6. Only after production pilot approval, inventory a managed host with free 443,
+   unrelated protocols. The origin-port extension adds a nullable schema migration;
+   follow its runbook before enabling mapped nodes.
+6. Only after production pilot approval, inventory a managed host with a free listen/stats pair,
    review the core, source-hiding audit and rollback, then enable the creation
    gate and create **one** independent pilot identity. Do not mutate a WS node.
 7. Add that identity to an explicit pilot subscription, enable CF auto selection,
@@ -92,7 +95,8 @@ chain exit for the CDN-only pilot; do not silently waive `ENTRY_IS_EXIT`.
    the cloud regions with residential carriers or assume XHTTP is faster.
 9. Shadowrocket stays on WS until a separately recorded phone test succeeds.
    Keep WS at least 14 days after any later migration and until owners confirm.
-   Same-host 443 coexistence and stream-up A/B require a separate reviewed change.
+   Website coexistence uses the origin-port extension, never shared Nginx 443.
+   Stream-up A/B remains outside this scope.
 
 Budget remains Guangzhou + Chengdu, 15-minute cadence, CNY 30/month and the
 existing 25,000 global batch limit. Four baseline nodes nominally use 23,040

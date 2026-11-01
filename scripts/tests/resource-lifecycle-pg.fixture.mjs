@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 export async function verifyResourceLifecycle({ prisma, cipher, databaseUrl, require, root, sql }) {
   const { ResourceLifecycleService } = require(`${root}/apps/server/src/resources/resource-lifecycle.service.ts`);
   const { ResourceCleanupScheduler } = require(`${root}/apps/server/src/nodes/resource-cleanup.scheduler.ts`);
+  const { Prisma } = require('@prisma/client');
   const previous = process.env.DATABASE_URL;
   process.env.DATABASE_URL = databaseUrl;
   try {
@@ -83,6 +84,34 @@ export async function verifyResourceLifecycle({ prisma, cipher, databaseUrl, req
     await prisma.server.create({ data: server('life-incomplete') });
     await assert.rejects(prisma.node.create({ data: { id: 'life-incomplete-node', userId: 'life-owner', name: 'incomplete legacy chain', serverId: 'life-incomplete',
       protocol: 'VLESS', listenPort: 17001, credentialsEnc: cipher.encrypt('fixture'), exitServerId: 'life-exit', exitPort: 15001 } }), /Node_chain_exit_shape_check/);
+    await prisma.server.create({ data: server('life-mapped') });
+    const origin = { version: 1, zoneId: 'original-zone', ref: `np_origin_${'a'.repeat(32)}`,
+      domain: 'mapped.fixture.test', port: 8443, state: 'PENDING' };
+    await assert.rejects(prisma.node.create({ data: { id: 'life-invalid-port', userId: 'life-owner', serverId: 'life-mapped',
+      name: 'invalid port', protocol: 'VLESS', listenPort: 8443, publicPort: 443, credentialsEnc: cipher.encrypt('fixture') } }), /Node_publicPort_check/);
+    await prisma.node.create({ data: { id: 'life-mapped-node', userId: 'life-owner', serverId: 'life-mapped', name: 'mapped',
+      protocol: 'VLESS', transport: 'XHTTP', tls: 'TLS', listenPort: 8443, publicPort: 443,
+      cfOriginRoute: origin, domain: origin.domain, credentialsEnc: cipher.encrypt('fixture') } });
+    await prisma.cloudflareSetting.update({ where: { userId: 'life-owner' }, data: { zoneId: 'changed-zone' } });
+    const acceptedMappings = () => prisma.node.findMany({ where: { publicPort: 443,
+      cfOriginRoute: { path: ['checkedAt'], not: Prisma.AnyNull } }, select: { id: true } });
+    assert.equal((await acceptedMappings()).length, 0, 'Never-accepted intent must not occupy audit slots');
+    await prisma.node.update({ where: { id: 'life-mapped-node' }, data: { cfOriginRoute: { ...origin, checkedAt: new Date().toISOString() } } });
+    assert.equal((await acceptedMappings()).length, 1);
+    await prisma.node.update({ where: { id: 'life-mapped-node' }, data: { cfOriginRoute: { ...origin, checkedAt: null } } });
+    assert.equal((await acceptedMappings()).length, 0, 'Withdrawn mapping must not be reactivated by audit');
+    await resources.queueServerDeletion('life-mapped', 'life-owner', true);
+    const mapped = await prisma.resourceCleanup.findMany({ where: { nodeId: 'life-mapped-node' } });
+    assert.deepEqual(mapped.map(x => x.role).sort(), ['CF_ORIGIN', 'ENTRY']);
+    assert.equal(mapped.find(x => x.role === 'CF_ORIGIN').payload.cfOriginRoute.zoneId, 'original-zone');
+    assert.equal(mapped.find(x => x.role === 'ENTRY').payload.port, 8443);
+    const done = [];
+    await new ResourceCleanupScheduler(prisma, resources, { cleanupDetachedResource: async job => {
+      if (job.role === 'ENTRY') throw new Error('fixture offline mapped host');
+      done.push(job.role);
+    } }).tick();
+    assert.ok(done.includes('CF_ORIGIN'), 'Cloud cleanup must proceed even while SSH is offline');
+    assert.equal(await prisma.resourceCleanup.count({ where: { nodeId: 'life-mapped-node', role: 'ENTRY', state: 'PENDING' } }), 1);
     process.stdout.write('Resource lifecycle: atomic intent/cascade, duplicate deletion, two workers, independent exits, restart recovery PASS\n');
   } finally {
     if (previous === undefined) delete process.env.DATABASE_URL;

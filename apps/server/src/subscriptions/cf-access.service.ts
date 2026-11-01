@@ -5,6 +5,7 @@ import { NodesService } from '../nodes/nodes.service';
 import { XrayTestService } from '../nodes/xray-test/xray-test.service';
 import { assertCfManagedNode, isCfManagedNode, isCloudflareIp, normalizeCfPreferredIps } from './cf-access.util';
 import { cfXhttpCredentials, isCfXhttp } from '../nodes/protocols/cf-xhttp';
+import { publicPort } from '../cloudflare/cf-origin.util';
 
 @Injectable()
 export class CfAccessService {
@@ -109,7 +110,7 @@ export class CfAccessService {
       const credentials = await this.nodes.getCredentials(node.id, ownerId);
       const result = await this.xray.testWithParams({
         protocol: node.protocol, transport: node.transport, tls: node.tls,
-        host, port: node.listenPort, domain: node.domain,
+        host, port: publicPort(node), domain: node.domain,
         credentials: isCfXhttp(node) ? cfXhttpCredentials(credentials, node.domain!) : { ...credentials, transportHost: node.domain! },
         secureProbe: true,
         requireUdp: node.exitType === 'SOCKS5',

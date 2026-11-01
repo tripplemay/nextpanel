@@ -1,6 +1,6 @@
 import * as crypto from 'crypto';
 import { isIP } from 'net';
-import { Injectable, Logger, MessageEvent, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, MessageEvent, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { NodeSSH } from 'node-ssh';
 import type { ResourceCleanup, Server } from '@prisma/client';
@@ -24,6 +24,9 @@ import {
 import { CleanupBlockedError, cleanupPayload, resourceProtocols, ResourceLifecycleService } from '../resources/resource-lifecycle.service';
 import { assertRemotePorts, ListenerNotReadyError, resourcePaths } from '../resources/remote-inventory';
 import { usageEmail, usageEligible } from '../usage/usage.util';
+import { CfOriginService } from '../cloudflare/cf-origin.service';
+import { originRoute, type OriginRoute } from '../cloudflare/cf-origin.util';
+import { installOriginFirewall, removeOriginFirewall, verifyOriginFirewall } from '../cloudflare/cf-origin-firewall';
 
 export interface DeployResult {
   success: boolean;
@@ -60,6 +63,7 @@ export class NodeDeployService {
     private xrayTest: XrayTestService,
     private socksExitResolver: SocksExitResolverService,
     private resources: ResourceLifecycleService,
+    @Optional() private cfOrigin?: CfOriginService,
   ) {}
 
   /** Stream deploy logs as SSE events */
@@ -231,8 +235,14 @@ export class NodeDeployService {
     let firewallChanges: FirewallChange[] = [];
     let rollbackFailed = false;
     let ownershipUpdate: { rollback(): Promise<void> } | null = null;
+    let mappedOrigin: OriginRoute | null = null;
+    let firewallGuard: string | undefined;
 
     try {
+      if (node.publicPort != null) {
+        if (!this.cfOrigin) throw new Error('Origin mapping service unavailable');
+        mappedOrigin = await this.cfOrigin.prepare(node.id);
+      }
       log(`Connecting via SSH...`);
       ssh = await connectSsh({
         host: server.ip,
@@ -245,6 +255,7 @@ export class NodeDeployService {
       log(`SSH connected to ${server.ip}:${server.sshPort}`);
       await assertRemotePorts(ssh, [node.listenPort, ...(statsPort ? [statsPort] : [])], serviceName);
       await this.resources.assertDeploymentOwner(ssh, server, node.id, 'ENTRY');
+      if (mappedOrigin) firewallGuard = await installOriginFirewall(ssh, node.id, node.listenPort, mappedOrigin.ref);
 
       // ── 4. Check binary, auto-install if missing ──────────────────────────
       log(`Checking binary: ${bin}`);
@@ -384,7 +395,7 @@ export class NodeDeployService {
         await this.prepareChainFirewall(chainExitDeployment, log);
       }
 
-      const unitContent = buildSystemdUnit(node.name, bin, args);
+      const unitContent = buildSystemdUnit(node.name, bin, args, firewallGuard);
       const unitPath = `/etc/systemd/system/${serviceName}.service`;
       deploymentRollback = await this.prepareDeploymentRollback(
         ssh, configPath, unitPath, serviceName, log,
@@ -475,6 +486,13 @@ export class NodeDeployService {
           log(`Chain acceptance ${attempt + 1}/3: ${result.message}`);
           if (!result.reachable) { isActive = false; break; }
         }
+      }
+      if (isActive && mappedOrigin) {
+        await verifyOriginFirewall(ssh, node.id, node.listenPort, mappedOrigin.ref);
+        const connectivity = await this.xrayTest.testNode(node.id);
+        log(`CDN origin mapping acceptance: ${connectivity.message}`);
+        isActive = connectivity.reachable;
+        if (isActive) await this.cfOrigin!.ready(node.id);
       }
       if (isActive) ownershipUpdate = await this.resources.registerDeployment(ssh, server, node.id, 'ENTRY', configJson);
 
@@ -850,6 +868,10 @@ export class NodeDeployService {
     });
     if (!node) throw new NotFoundException(`节点 ${nodeId} 不存在`);
 
+    if (node.cfOriginRoute) {
+      if (!this.cfOrigin) throw new Error('Origin cleanup unavailable');
+      await this.cfOrigin.withdraw(node.id, node.cfOriginRoute);
+    }
     if (!node.server.sshAuthEnc) {
       throw new BadRequestException('SSH 凭证已销毁，请先在服务器详情页恢复凭证');
     }
@@ -889,6 +911,9 @@ export class NodeDeployService {
         );
       }
       trackLog('服务器清理完成');
+      if (node.cfOriginRoute) {
+        await removeOriginFirewall(ssh, node.id, node.listenPort, originRoute(node.cfOriginRoute).ref);
+      }
     } catch (err: unknown) {
       ssh?.dispose();
       const msg = err instanceof Error ? err.message : String(err);
@@ -957,7 +982,11 @@ export class NodeDeployService {
     }
 
     // ── Step 2: Cloudflare DNS cleanup (non-fatal) ────────────────────────────
-    if (node.cfDnsRecordId && node.userId) {
+    if (node.cfOriginRoute) {
+      if (!this.cfOrigin) throw new Error('Origin cleanup unavailable');
+      await this.cfOrigin.remove(node.userId, node.cfOriginRoute);
+    }
+    if (node.cfDnsRecordId && node.userId && !node.cfOriginRoute) {
       trackLog('正在清理 Cloudflare DNS 记录...');
       const cfSetting = await this.cfSettings.getDecryptedToken(node.userId);
       if (cfSetting) {
@@ -1005,6 +1034,10 @@ export class NodeDeployService {
     });
     if (!node) return;
 
+    if (node.cfOriginRoute) {
+      if (!this.cfOrigin) throw new Error('Origin cleanup unavailable');
+      await this.cfOrigin.withdraw(node.id, node.cfOriginRoute);
+    }
     if (!node.server.sshAuthEnc) {
       throw new BadRequestException('SSH 凭证已销毁，请先在服务器详情页恢复凭证');
     }
@@ -1029,6 +1062,9 @@ export class NodeDeployService {
           node.server.ip,
           true,
         );
+      }
+      if (node.cfOriginRoute) {
+        await removeOriginFirewall(ssh, node.id, node.listenPort, originRoute(node.cfOriginRoute).ref);
       }
       ssh.dispose();
 
@@ -2498,6 +2534,11 @@ export class NodeDeployService {
   /** Called only with a durable deletion intent and the node/host locks held. */
   async cleanupDetachedResource(job: ResourceCleanup): Promise<void> {
     const payload = cleanupPayload(job.payload);
+    if (job.role === 'CF_ORIGIN') {
+      if (!payload.cfOriginRoute || !this.cfOrigin) throw new CleanupBlockedError('Original origin mapping metadata unavailable');
+      await this.cfOrigin.remove(job.ownerId, payload.cfOriginRoute);
+      return;
+    }
     if (job.role === 'DNS') {
       if (!payload.cfRecordId || !payload.cfZoneId) throw new CleanupBlockedError('DNS cleanup record or original zone is missing; ownership review required');
       const settings = await this.cfSettings.getDecryptedToken(job.ownerId);
@@ -2525,6 +2566,7 @@ export class NodeDeployService {
       } else {
         if (!payload.port || !payload.protocols?.length) throw new CleanupBlockedError('Missing entry firewall target');
         for (const protocol of payload.protocols) await this.closeFirewallPort(ssh, payload.port, protocol, undefined, server.ip, true);
+        if (payload.cfOriginRoute) await removeOriginFirewall(ssh, job.nodeId, payload.port, originRoute(payload.cfOriginRoute).ref);
       }
       const artifacts = await ssh.execCommand(`set -eu; rm -f -- ${shellQuote(paths.manifest)}` +
         (job.role === 'ENTRY' ? ` ${shellQuote(`/etc/nextpanel/certs/${job.nodeId}.crt`)} ${shellQuote(`/etc/nextpanel/certs/${job.nodeId}.key`)}` : ''));
@@ -2807,7 +2849,7 @@ function compareSemanticVersions(left: string, right: string): number {
   return 0;
 }
 
-function buildSystemdUnit(name: string, bin: string, args: string): string {
+function buildSystemdUnit(name: string, bin: string, args: string, firewallGuard?: string): string {
   const safeName = Array.from(name, (character) => {
     const codePoint = character.codePointAt(0) ?? 0;
     return codePoint < 32 || codePoint === 127 ? ' ' : character;
@@ -2815,10 +2857,11 @@ function buildSystemdUnit(name: string, bin: string, args: string): string {
   return [
     '[Unit]',
     `Description=NextPanel Node: ${safeName}`,
-    'After=network.target',
+    `After=network.target${firewallGuard ? ' nftables.service ufw.service firewalld.service' : ''}`,
     '',
     '[Service]',
     'Type=simple',
+    ...(firewallGuard ? [`ExecStartPre=${firewallGuard}`] : []),
     `ExecStart=${bin} ${args}`,
     'Restart=always',
     'RestartSec=3',

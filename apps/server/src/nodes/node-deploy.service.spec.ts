@@ -6,6 +6,7 @@ import { NotFoundException } from '@nestjs/common';
 import { NodeSSH } from 'node-ssh';
 import { generateConfig, generateChainExitConfig } from './config/config-generator';
 import { CleanupBlockedError } from '../resources/resource-lifecycle.service';
+import * as originFirewall from '../cloudflare/cf-origin-firewall';
 
 jest.mock('../common/database/advisory-lock', () => ({
   withPostgresAdvisoryLocks: (_keys: string[], work: () => Promise<unknown>) => work(),
@@ -129,6 +130,7 @@ const mockSocksExitResolver = {
 } as unknown as import('./socks-exit-resolver.service').SocksExitResolverService;
 
 const mockOwnershipRollback = jest.fn().mockResolvedValue(undefined);
+const mockOrigin = { prepare: jest.fn(), ready: jest.fn(), withdraw: jest.fn(), remove: jest.fn() };
 const mockResources = {
   connect: jest.fn(),
   prepareCleanup: jest.fn(),
@@ -152,6 +154,7 @@ const svc = new NodeDeployService(
   mockXrayTest,
   mockSocksExitResolver,
   mockResources as any,
+  mockOrigin as any,
 );
 
 interface InternalDeployService {
@@ -1954,6 +1957,49 @@ describe('NodeDeployService', () => {
   });
 
   describe('deploy — XHTTP, TUIC, and AnyTLS', () => {
+    it.each([true, false])('publishes a mapped node only after CDN acceptance=%s without touching 443', async reachable => {
+      const r = { version: 1, zoneId: 'zone', ref: `np_origin_${'a'.repeat(32)}`, domain: 'cdn.example.com', port: 8443, state: 'CONFIGURED' };
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ ...fakeNode,
+        protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'TLS', domain: r.domain,
+        listenPort: 8443, publicPort: 443, cfOriginRoute: r });
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.configSnapshot.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.configSnapshot.create as jest.Mock).mockResolvedValue({});
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({ apiToken: 'fixture', domain: 'example.com' });
+      (mockXrayTest.testNode as jest.Mock).mockResolvedValue({ reachable, message: 'fixture CDN' });
+      mockOrigin.prepare.mockResolvedValue(r);
+      mockOrigin.ready.mockResolvedValue(undefined);
+      const install = jest.spyOn(originFirewall, 'installOriginFirewall').mockResolvedValue('/bin/sh /etc/nextpanel/nodes/node-1.cf.sh');
+      const verify = jest.spyOn(originFirewall, 'verifyOriginFirewall').mockResolvedValue(undefined);
+      mockConnectSsh.mockResolvedValue(mockSsh);
+      mockExecCommand.mockReset().mockImplementation(async (command: string) => {
+        if (command.endsWith(' version 2>&1')) return { code: 0, stdout: 'Xray 26.2.6', stderr: '' };
+        if (command.includes('systemctl is-active')) return { code: 0, stdout: 'active', stderr: '' };
+        return { code: 0, stdout: '', stderr: '' };
+      });
+      jest.spyOn(internalSvc, 'stageAndValidateConfig').mockResolvedValue('/etc/nextpanel/nodes/node-1.json.next-tested');
+      jest.spyOn(internalSvc, 'activateStagedConfig').mockResolvedValue(undefined);
+      const pending = svc.deploy('node-1');
+      await jest.runAllTimersAsync();
+      expect((await pending).success).toBe(reachable);
+      expect(install).toHaveBeenCalledWith(mockSsh, 'node-1', 8443, r.ref);
+      expect(verify).toHaveBeenCalled();
+      expect(mockOrigin.ready).toHaveBeenCalledTimes(reachable ? 1 : 0);
+      expect(mockXrayTest.testNode).toHaveBeenCalledWith('node-1');
+      if (reachable) expect(mockOrigin.ready.mock.invocationCallOrder[0]).toBeGreaterThan((mockXrayTest.testNode as jest.Mock).mock.invocationCallOrder[0]);
+      const commands = mockExecCommand.mock.calls.map(c => c[0]).join('\n');
+      expect(commands).not.toMatch(/ufw (?:allow|delete allow) 443\b|--dport 443\b|systemctl.*nginx/);
+      expect(mockUploadText.mock.calls.some(c => String(c[1]).includes('ExecStartPre=/bin/sh /etc/nextpanel/nodes/node-1.cf.sh'))).toBe(true);
+    });
+
+    it('withdraws mapped acceptance even when SSH prevents deletion', async () => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ ...fakeNode, cfOriginRoute: { state: 'READY' },
+        server: { ...fakeServer, sshAuthEnc: null } });
+      await expect(svc.undeploy('node-1')).rejects.toThrow('SSH');
+      expect(mockOrigin.withdraw).toHaveBeenCalledWith('node-1', { state: 'READY' });
+      expect(mockPrisma.node.delete).not.toHaveBeenCalled();
+    });
+
     it.each([null, '25.3.6', '26.2.7'])('rejects unreviewed CDN pilot core %s without replacing a shared binary', async version => {
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ ...fakeNode,
         protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'TLS', domain: 'cdn.example.com' });

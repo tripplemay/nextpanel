@@ -11,8 +11,12 @@ import type { NodeExportInfo } from './uri-builder';
 import { cfXhttpCredentials, isCfXhttp } from '../nodes/protocols/cf-xhttp';
 
 export function nodeFingerprint(node: Record<string, unknown>): string {
-  return fingerprint(['userId', 'serverId', 'cfDnsRecordId', 'domain', 'listenPort', 'protocol', 'transport', 'tls', 'credentialsEnc', 'exitType',
-    'exitServerId', 'exitPort', 'chainCredEnc', 'socksExitEnc'].map(key => node[key] ?? null));
+  const legacy = ['userId', 'serverId', 'cfDnsRecordId', 'domain', 'listenPort', 'protocol', 'transport', 'tls', 'credentialsEnc', 'exitType',
+    'exitServerId', 'exitPort', 'chainCredEnc', 'socksExitEnc'].map(key => node[key] ?? null);
+  if (node.publicPort == null) return fingerprint(legacy);
+  const route = node.cfOriginRoute as Record<string, unknown> | null;
+  return fingerprint([...legacy, node.publicPort,
+    ...['zoneId', 'ref', 'rulesetId', 'ruleId', 'domain', 'port'].map(key => route?.[key] ?? null)]);
 }
 
 export async function boundedText(response: Response, limit: number): Promise<string> {

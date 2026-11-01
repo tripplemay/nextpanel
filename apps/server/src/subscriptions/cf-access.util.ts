@@ -3,6 +3,7 @@ import { BlockList, isIP } from 'net';
 import { isFQDN } from 'class-validator';
 import type { NodeExportInfo } from './uri-builder';
 import { cfXhttpCredentials } from '../nodes/protocols/cf-xhttp';
+import { originReady } from '../cloudflare/cf-origin.util';
 
 // Reviewed 2026-10-31: https://www.cloudflare.com/ips-v4 and /ips-v6.
 // Never replace this allowlist with a user-supplied range or third-party feed.
@@ -46,17 +47,19 @@ export function normalizeCfPreferredIps(value: unknown): string[] {
 type CfManagedNode = {
   protocol: string; transport: string | null; tls: string; domain: string | null;
   listenPort: number; cfDnsRecordId?: string | null;
+  publicPort?: number | null; cfOriginRoute?: unknown;
 };
 
 export function isCfManagedNode(node: CfManagedNode): boolean {
   return node.protocol === 'VLESS' && ['WS', 'XHTTP'].includes(node.transport ?? '') && node.tls === 'TLS'
-    && node.listenPort === 443 && !!node.cfDnsRecordId && !!node.domain
+    && (node.publicPort == null || node.transport === 'XHTTP')
+    && originReady(node) && !!node.cfDnsRecordId && !!node.domain
     && node.domain.length <= 253 && isFQDN(node.domain);
 }
 
 export function assertCfManagedNode(node: CfManagedNode): void {
   if (!isCfManagedNode(node)) {
-    throw new BadRequestException('CF-only requires managed VLESS+WS/XHTTP+TLS nodes on port 443 with a Cloudflare domain');
+    throw new BadRequestException('CF-only requires verified managed VLESS+WS/XHTTP+TLS nodes with a Cloudflare 443 endpoint');
   }
 }
 

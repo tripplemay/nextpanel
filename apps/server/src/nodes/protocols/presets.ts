@@ -130,7 +130,7 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
   },
   VLESS_XHTTP_TLS: {
     label: 'VLESS + XHTTP + TLS (CDN 试点)',
-    description: '经 Cloudflare CDN，独立试点；需要空闲 443，不替换现有 WS。客户端须明确启用 XHTTP 导出。',
+    description: '经 Cloudflare CDN，独立试点；443 占用时自动选择回源端口，不替换网站或 WS。客户端须明确启用 XHTTP 导出。',
     tags: [
       { text: 'CDN 试点', color: 'cyan' },
       { text: '新版 Mihomo', color: 'blue' },

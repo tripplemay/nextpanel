@@ -226,6 +226,11 @@ export interface Node {
   transport: string | null;
   tls: string;
   listenPort: number;
+  publicPort?: number | null;
+  cfOriginRoute?: {
+    domain: string; port: number; state: 'PENDING' | 'CONFIGURED' | 'READY' | 'ERROR';
+    checkedAt?: string; error?: string | null; ruleId?: string; rulesetId?: string;
+  } | null;
   domain: string | null;
   cfDnsRecordId?: string | null;
   egressIpPolicy: 'AUTO' | 'IPV4_ONLY';

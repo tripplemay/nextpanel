@@ -83,6 +83,7 @@ export interface NodeDto {
   transport: Transport | null;
   tls: TlsMode;
   listenPort: number;
+  publicPort?: number | null;
   domain: string | null;
   status: NodeStatus;
   enabled: boolean;
