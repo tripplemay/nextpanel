@@ -21,17 +21,21 @@ const node = { name: 'fixture', host: 'cdn.example.com', port: 443, domain: 'cdn
 const regions = [{ key: 'ap-guangzhou', label: '广州' }, { key: 'ap-chengdu', label: '成都' }, { key: 'ap-beijing', label: '北京' }];
 const variants = automaticVariants(node, 'fixture', regions.map((region, i) =>
   ({ region, ips: [`104.16.0.${i + 1}`] })), '104.16.0.4');
+const sharedVariants = automaticVariants(node, 'fixture', [
+  { region: regions[0], ips: ['104.16.0.1'] }, { region: regions[1], ips: ['104.16.0.1'] },
+  { region: regions[2], ips: ['104.16.0.2'] }, { region: { key: 'ap-shanghai', label: '上海' }, ips: ['104.16.0.2'] },
+], '104.16.0.4');
 
 function check(binary, args) {
   const result = spawnSync(binary, args, { encoding: 'utf8', timeout: 15000, env: { ...process.env, NO_COLOR: '1' } });
   assert.equal(result.status, 0, `${binary}: ${result.error ?? ''}\n${result.stdout}\n${result.stderr}`);
 }
 test('worker and panel enforce identical reviewed CF networks', () => assert.deepEqual(CF_RANGES, CF_IP_RANGES));
-test('automatic regional groups pass native sing-box checks', { skip: !process.env.REQUIRE_SING_BOX }, () => {
+test('compact automatic groups pass native sing-box checks', { skip: !process.env.REQUIRE_SING_BOX }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'np-cf-native-'));
   try {
-    for (const [name, build] of [['singbox', buildFullSingboxConfig], ['homeproxy', buildHomeProxyConfig]]) {
-      const file = join(dir, `${name}.json`); writeFileSync(file, build(variants)); check('sing-box', ['check', '-c', file]);
+    for (const members of [variants, sharedVariants]) for (const [name, build] of [['singbox', buildFullSingboxConfig], ['homeproxy', buildHomeProxyConfig]]) {
+      const file = join(dir, `${name}.json`); writeFileSync(file, build(members)); check('sing-box', ['check', '-c', file]);
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -43,7 +47,7 @@ test('v2 worker config passes native Xray syntax check without opening a proxy',
     check(process.env.XRAY_BINARY, ['run', '-test', '-c', file]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
-test('dynamic regional provider filters and empty-provider rejection pass native Mihomo parser', { skip: !process.env.MIHOMO_BINARY }, () => {
+test('compact provider filters and empty-provider rejection pass native Mihomo parser', { skip: !process.env.MIHOMO_BINARY }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'np-cf-native-'));
   try {
     const config = buildClashSubscription(variants, 'https://panel.example.com', 'https://panel.example.com/provider');
@@ -51,7 +55,7 @@ test('dynamic regional provider filters and empty-provider rejection pass native
     const groups = config.slice(config.indexOf('proxy-groups:'), config.indexOf('\nrules:'));
     const scoped = `mode: rule\nproxies: []\nproxy-providers:\n  cf-fixture:\n    type: file\n    path: ${JSON.stringify(provider)}\n${groups}\nrules:\n  - MATCH,REJECT\n`;
     const file = join(dir, 'config.yaml'); writeFileSync(file, scoped);
-    for (const payload of [['proxies:', ...variants.map(buildClashProxy)].join('\n'), 'proxies: []']) {
+    for (const payload of [variants, sharedVariants].map(members => ['proxies:', ...members.map(buildClashProxy)].join('\n')).concat('proxies: []')) {
       writeFileSync(provider, payload); check(process.env.MIHOMO_BINARY, ['-t', '-d', dir, '-f', file]);
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -80,7 +84,7 @@ test('running Mihomo rejects empty providers for every CF group without COMPATIB
     }
     assert.ok(result, 'isolated Mihomo controller did not start');
     const cfGroups = Object.entries(result.proxies).filter(([name]) => name.startsWith('fixture [CF fixture]'));
-    assert.equal(cfGroups.length, 4);
+    assert.equal(cfGroups.length, 1);
     for (const [, group] of cfGroups) { assert.deepEqual(group.all, ['REJECT']); assert.equal(group.now, 'REJECT'); }
   } finally {
     if (child && child.exitCode === null) { const closed = once(child, 'close'); child.kill('SIGKILL'); await closed; }
@@ -99,9 +103,14 @@ test('running mixed Mihomo keeps ordinary proxies selectable and clears CF HTTP 
     const port = socket.address().port; await new Promise(resolve => socket.close(resolve));
     const ordinary = { name: 'ordinary fixture', protocol: 'SOCKS5', host: '127.0.0.1', port: 9, tls: 'NONE', credentials: {} };
     const exported = buildClashSubscription([...variants, ordinary], 'https://panel.example.com', 'https://panel.example.com/provider');
+    // Frozen pre-compaction filters model clients that only refreshed their provider.
+    const legacyRegions = regions.map(region => [
+      `  - name: legacy-region-${region.key}`, '    type: select', '    use: [cf-fixture]', '    proxies: [REJECT]',
+      `    filter: ${JSON.stringify(`(?:\\[CF-REGION:(${region.key}|GENERIC|DNS)\\] \\[CF:(GENERIC|DNS)\\]|通用候选 [1-3] \\[CF:GENERIC\\]|默认 CDN \\[CF:DNS\\])$`)}`,
+    ].join('\n')).join('\n');
     const groups = exported.slice(exported.indexOf('proxy-groups:'), exported.indexOf('\nrules:'))
       .replaceAll('https://www.gstatic.com/generate_204', `http://127.0.0.1:${port}/version`).replaceAll('lazy: false', 'lazy: true')
-      + `\n  - name: legacy-carrier-cache\n    type: select\n    use: [cf-fixture]\n    proxies: [REJECT]\n    filter: ${JSON.stringify('\\[CF:(TELECOM|GENERIC|DNS)\\]$')}\n`;
+      + `\n  - name: legacy-carrier-cache\n    type: select\n    use: [cf-fixture]\n    proxies: [REJECT]\n    filter: ${JSON.stringify('\\[CF:(TELECOM|GENERIC|DNS)\\]$')}\n${legacyRegions}\n`;
     const config = `mode: rule\nexternal-controller: 127.0.0.1:${port}\nsecret: fixture\nproxies:\n${buildClashProxy(ordinary)}\nproxy-providers:\n  cf-fixture:\n    type: http\n    url: http://127.0.0.1:${source.address().port}/provider\n    proxy: DIRECT\n    path: ./provider.yaml\n    interval: 900\n    health-check:\n      enable: false\n${groups}\nrules:\n  - MATCH,REJECT\n`;
     const file = join(dir, 'config.yaml'); writeFileSync(file, config);
     child = spawn(process.env.MIHOMO_BINARY, ['-d', dir, '-f', file], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -124,13 +133,22 @@ test('running mixed Mihomo keeps ordinary proxies selectable and clears CF HTTP 
     payload = ['proxies:', ...mixed.map(buildClashProxy)].join('\n');
     assert.ok((await fetch(`http://127.0.0.1:${port}/providers/proxies/cf-fixture`, { method: 'PUT', headers })).ok);
     const partial = await (await fetch(`http://127.0.0.1:${port}/proxies`, { headers })).json();
-    assert.ok(partial.proxies['fixture [CF fixture] 广州云测优选'].all.includes(mixed[0].name));
+    assert.ok(partial.proxies['fixture [CF fixture]'].all.includes(mixed[0].name));
+    assert.ok(partial.proxies['legacy-region-ap-guangzhou'].all.includes(mixed[0].name));
     assert.ok(partial.proxies['legacy-carrier-cache'].all.includes(mixed[0].name));
     assert.ok(partial.proxies['legacy-carrier-cache'].all.includes(mixed[1].name));
-    for (const label of ['成都云测优选', '北京云测优选']) {
-      assert.ok(partial.proxies[`fixture [CF fixture] ${label}`].all.includes(mixed[1].name));
-      assert.ok(!partial.proxies[`fixture [CF fixture] ${label}`].all.includes(mixed[0].name));
+    for (const region of regions.slice(1)) {
+      assert.ok(partial.proxies[`legacy-region-${region.key}`].all.includes(mixed[1].name));
+      assert.ok(!partial.proxies[`legacy-region-${region.key}`].all.includes(mixed[0].name));
     }
+    assert.deepEqual(partial.proxies['🚀 节点选择'].all, ['⚡ 自动选择', 'fixture [CF fixture]', ordinary.name]);
+    assert.deepEqual(partial.proxies['⚡ 自动选择'].all, ['fixture [CF fixture]', ordinary.name]);
+    const shared = automaticVariants(node, 'fixture', regions.map(region => ({ region, ips: ['104.16.0.1', '104.16.0.2'] })), null);
+    assert.equal(shared.length, 1);
+    payload = ['proxies:', ...shared.map(buildClashProxy)].join('\n');
+    assert.ok((await fetch(`http://127.0.0.1:${port}/providers/proxies/cf-fixture`, { method: 'PUT', headers })).ok);
+    const deduplicated = await (await fetch(`http://127.0.0.1:${port}/proxies`, { headers })).json();
+    for (const region of regions) assert.ok(deduplicated.proxies[`legacy-region-${region.key}`].all.includes(shared[0].name));
     const legacy = [mixed[1], variants.at(-1)].map(n => ({ ...n, name: n.name.replace(/ \[CF-REGION:(GENERIC|DNS)\]/, '') }));
     payload = ['proxies:', ...legacy.map(buildClashProxy)].join('\n');
     assert.ok((await fetch(`http://127.0.0.1:${port}/providers/proxies/cf-fixture`, { method: 'PUT', headers })).ok);
@@ -138,6 +156,7 @@ test('running mixed Mihomo keeps ordinary proxies selectable and clears CF HTTP 
     for (const [name, group] of Object.entries(rollback.proxies).filter(([name]) => name.startsWith('fixture [CF fixture]'))) {
       for (const candidate of legacy) assert.ok(group.all.includes(candidate.name), `${name} must accept safe pre-regional rollback endpoints`);
     }
+    for (const region of regions) for (const candidate of legacy) assert.ok(rollback.proxies[`legacy-region-${region.key}`].all.includes(candidate.name));
     payload = buildCfUnavailableProvider('fixture');
     const updated = await fetch(`http://127.0.0.1:${port}/providers/proxies/cf-fixture`, { method: 'PUT', headers });
     assert.ok(updated.ok, `Fail-closed HTTP update rejected: ${await updated.text()}`);
@@ -146,8 +165,9 @@ test('running mixed Mihomo keeps ordinary proxies selectable and clears CF HTTP 
     assert.ok(result.proxies['⚡ 自动选择'].all.includes(ordinary.name));
     assert.deepEqual(result.proxies['legacy-carrier-cache'].all, ['REJECT']);
     const cfGroups = Object.entries(result.proxies).filter(([name]) => name.startsWith('fixture [CF fixture]'));
-    assert.equal(cfGroups.length, 4);
+    assert.equal(cfGroups.length, 1);
     for (const [, group] of cfGroups) { assert.deepEqual(group.all, ['REJECT']); assert.equal(group.now, 'REJECT'); }
+    for (const region of regions) assert.deepEqual(result.proxies[`legacy-region-${region.key}`].all, ['REJECT']);
   } finally {
     if (child && child.exitCode === null) { const closed = once(child, 'close'); child.kill('SIGKILL'); await closed; }
     source.closeAllConnections(); await new Promise(resolve => source.close(resolve));

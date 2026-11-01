@@ -30,7 +30,7 @@ export default function CfUsageStatus({ nodes, subscriptions }: { nodes: UsageNo
       <Typography.Text type="secondary">自动优选与使用观测是独立开关。修改下发设置请前往 <a href="/subscriptions">订阅管理</a>。</Typography.Text>
     </div>
     <div><Typography.Title level={5} style={{ marginTop: 0 }}>优选运行状态</Typography.Title>
-      <Typography.Paragraph type="secondary">按云测点部署地区维护候选，客户端本地择优。查看本页不触发测速；地区不代表用户所在地、运营商或 CF 实际接入机房。</Typography.Paragraph>
+      <Typography.Paragraph type="secondary">按云测点部署地区维护候选池，自动订阅每地区只取首选 IP，并保留默认 CDN。Clash/Mihomo、Sing-box/HomeProxy 主列表每个托管节点仅一个自动入口，由客户端本地择优。查看本页不触发测速；地区不代表用户所在地、运营商或 CF 实际接入机房。</Typography.Paragraph>
       <Select aria-label="查看优选状态的节点" value={node.id} onChange={setSelectedId} style={{ width: '100%', maxWidth: 420 }} options={eligible.map(n => ({ value: n.id, label: n.name }))} />
     </div>
     {query.isLoading && <Skeleton active paragraph={{ rows: 5 }} />}
@@ -59,13 +59,13 @@ export default function CfUsageStatus({ nodes, subscriptions }: { nodes: UsageNo
         </Space>
         <Typography.Paragraph type="secondary" style={{ marginTop: 8, overflowWrap: 'anywhere' }}>{profile.probeId} · {profile.regionKey ?? '未登记地区身份'}<br />最近成功检测：{timestamp(profile.checkedAt)} · 候选版本 {profile.revision}</Typography.Paragraph>
         {profile.error && <Alert type="warning" showIcon message="测点上次检查未完成；已有记录不代表此刻可用。" style={{ marginBottom: 12 }} />}
-        <Table size="small" rowKey="ip" pagination={false} dataSource={profile.candidates} locale={{ emptyText: '此测点暂无已发布记录' }} scroll={{ x: 480 }} columns={[
-          { title: '已发布候选记录', dataIndex: 'ip', render: (ip: string) => <span style={{ fontFamily: 'monospace' }}>{ip}</span> },
+        <Table size="small" rowKey="ip" pagination={false} dataSource={profile.candidates} locale={{ emptyText: '此测点暂无候选池记录' }} scroll={{ x: 480 }} columns={[
+          { title: '候选池（非全部下发）', dataIndex: 'ip', render: (ip: string) => <span style={{ fontFamily: 'monospace' }}>{ip}</span> },
           { title: '测点延迟', dataIndex: 'latency', align: 'right', render: (ms: number) => `${ms} ms` },
           { title: '复查', dataIndex: 'failed', render: (failed: number) => failed ? <Tag color="orange">失败 {failed} 次</Tag> : '无连续失败' },
         ]} />
       </section>)}
-      <Typography.Text type="secondary">“地区优选”表示该地区腾讯云测点的测量结果，不承诺同地区所有用户最快。已发布记录不等于当前有效下发清单；地区或分组变化后需刷新客户端完整订阅。</Typography.Text>
+      <Typography.Text type="secondary">候选池保留多条备选，不会全部展开为订阅节点。自动订阅每地区最多下发 1 个首选，缺测时保留通用候选，并加入默认 CDN、合并重复 IP。测点结果不承诺所有用户最快；地区或分组变化后需刷新客户端完整订阅。</Typography.Text>
     </>}
   </Space>;
 }

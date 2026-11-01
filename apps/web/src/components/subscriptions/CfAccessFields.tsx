@@ -108,8 +108,8 @@ export default function CfAccessFields({ form, nodes, locked, protectedIds, load
         description={`当前 ${eligible.length} 个兼容 CF 节点，其他 ${selectedIds.length - eligible.length} 个托管节点和 ${externalIds.length} 个外部节点保持原样。CF 节点无安全地址时省略，不回退源站。关闭自动优选后，已保护节点仍使用默认 CDN；请刷新客户端完整订阅。非 CF 节点不具备 CDN 隐藏保证。`} />}
       {!!unavailableProtected.length && <Alert type="warning" showIcon title="部分已保护节点配置发生变化"
         description={`这些节点将停止导出，而不会转为直连：${unavailableProtected.map(n => n.name).join('、')}。`} />}
-      {automatic && <Alert type="info" showIcon title="同一订阅包含各地区云测候选，客户端本地择优"
-        description="按已登记且校验通过的云函数地区自动分组；缺测地区使用通用/默认 CDN。地区指测点部署地，不是用户所在地或运营商。Clash/Mihomo 刷新完整订阅后每 15 分钟获取候选、每 5 分钟探测；其他客户端需启用订阅更新。" />}
+      {automatic && <Alert type="info" showIcon title="每个节点一个自动入口，无需手选优选 IP"
+        description="Clash/Mihomo、Sing-box/HomeProxy 主选择列表每个托管节点只保留一个自动入口。内部每地区最多 1 个首选 IP，加默认 CDN；相同 IP 合并，缺测时保留通用兜底。地区是测点部署地，不是用户所在地或运营商。请刷新完整订阅；Mihomo 随后每 15 分钟更新候选、每 5 分钟测速。普通 Base64 仅支持精简后的线路列表，其他客户端需启用订阅更新。" />}
       {enabled && !automatic && <Form.Item name="cfPreferredIps" label="优选 CF IP（按优先顺序，最多 3 个）" style={{ marginTop: 16 }}
         extra="只接受 CF 公网 IPv4/IPv6，不接受域名、端口或 URL。SNI、WS Host 保留原业务域名。留空仅使用默认 CF 线路。"
         rules={[{ type: 'array', max: 3, message: '最多填写 3 个 CF IP' }]}>

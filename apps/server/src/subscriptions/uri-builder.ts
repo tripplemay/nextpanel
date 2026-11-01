@@ -711,20 +711,14 @@ function yamlQuotedString(value: string): string {
 
 // ─── Full Sing-box subscription JSON ─────────────────────────────────────────
 
-function cfGroups(nodes: NodeExportInfo[], dynamic = false) {
+function cfGroups(nodes: NodeExportInfo[]) {
   const groups = new Map<string, NodeExportInfo[]>();
   for (const node of nodes) {
     if (node.cfGroup) groups.set(node.cfGroup, [...(groups.get(node.cfGroup) ?? []), node]);
   }
-  return [...groups].flatMap(([tag, members]) => {
+  return [...groups].map(([tag, members]) => {
     const auto = members.some(n => n.cfAuto);
-    const base = { tag, outbounds: members.map(n => n.name), auto, nodeId: members[0].cfNodeId, region: 'ALL' };
-    if (!auto) return [base];
-    const regions = [...new Map(members.flatMap(n => n.cfRegions ?? (n.cfRegion ? [n.cfRegion] : [])).map(r => [r.key, r])).values()];
-    return [base, ...regions.flatMap(region => {
-      const outbounds = members.filter(n => n.cfRegion?.key === region.key || n.cfProfile === 'GENERIC' || n.cfProfile === 'DNS').map(n => n.name);
-      return outbounds.length || dynamic ? [{ ...base, tag: `${tag} ${region.label}云测优选`, region: region.key, outbounds }] : [];
-    })];
+    return { tag, outbounds: members.map(n => n.name), auto, nodeId: members[0].cfNodeId };
   });
 }
 
@@ -735,11 +729,10 @@ function cfSingboxGroups(nodes: NodeExportInfo[]) {
   }));
 }
 
-function cfRegionFilter(region: string): string {
-  const key = region === 'ALL' ? '[a-z0-9-]+' : region;
-  // A rollback can serve the old safe generic/DNS names. Do not broadly match
-  // terminal GENERIC: new candidates from other regions also carry that marker.
-  return `(?:\\[CF-REGION:(${key}|GENERIC|DNS)\\] \\[CF:(GENERIC|DNS)\\]|通用候选 [1-3] \\[CF:GENERIC\\]|默认 CDN \\[CF:DNS\\])$`;
+function cfCandidateFilter(): string {
+  // Accept regional candidates and safe pre-regional rollback names, but not
+  // the unavailable-provider sentinel. One group chooses locally across regions.
+  return '(?:\\[CF-REGION:([a-z0-9-]+|GENERIC|DNS)\\] \\[CF:(GENERIC|DNS)\\]|通用候选 [1-3] \\[CF:GENERIC\\]|默认 CDN \\[CF:DNS\\])$';
 }
 
 function selectableTags(nodes: NodeExportInfo[], exportedTags: string[]): string[] {
@@ -1107,7 +1100,7 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
 
   const dynamic = !!cfProviderBase && nodes.some(n => n.cfAuto);
   if (dynamic && new URL(cfProviderBase!).protocol !== 'https:') throw new Error('CF providers require an HTTPS panel URL');
-  const nodeNames = dynamic ? [...cfGroups(nodes, true).map(g => g.tag),
+  const nodeNames = dynamic ? [...cfGroups(nodes).map(g => g.tag),
     ...proxyEntries.filter(e => !e.grouped).map(e => e.name)]
     : selectableTags(nodes, proxyEntries.map((e) => e.name));
   // url-test 至少需要 1 个 proxy；无可用节点时回退到 DIRECT，避免 YAML 解析失败
@@ -1145,7 +1138,7 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
   }
 
   const groups: string[] = [
-    ...cfGroups(nodes, dynamic).map((group) => [
+    ...cfGroups(nodes).map((group) => [
       `  - name: ${yamlScalar(group.tag)}`,
       group.auto ? '    type: url-test' : '    type: fallback',
       '    url: https://www.gstatic.com/generate_204',
@@ -1154,7 +1147,7 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
       ...(group.auto ? ['    tolerance: 50'] : []),
       ...(dynamic && group.auto ? [
         `    use: [cf-${group.nodeId}]`,
-        `    filter: ${yamlScalar(cfRegionFilter(group.region))}`,
+        `    filter: ${yamlScalar(cfCandidateFilter())}`,
         '    empty-fallback: REJECT',
         // Empty/failed provider groups must never inherit a DIRECT fallback.
         '    proxies: [REJECT]',

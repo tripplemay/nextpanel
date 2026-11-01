@@ -6,6 +6,7 @@ import { buildClashSubscription, buildFullSingboxConfig, buildHomeProxyConfig } 
 import { validate } from 'class-validator';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
+import { candidateKey } from '../usage/usage.util';
 
 jest.mock('../common/database/advisory-lock', () => ({ withPostgresAdvisoryLocks: jest.fn(async (_keys, work) => work()) }));
 
@@ -82,6 +83,18 @@ describe('candidate promotion, expiry and failover', () => {
     expect(rankCandidates([slow, fast], [], now)[0].ip).toBe(fast.ip);
     expect(rankCandidates([slow, { ...fast, bandwidthAt: now - 7 * 3600_000 }], [], now)[0].ip).toBe(slow.ip);
   });
+  it('keeps the healthy regional primary for small latency gains but switches for clear gains or failures', () => {
+    const old = [observation('104.16.0.1', 100), observation('104.16.0.2', 105)];
+    expect(rankCandidates([old[0], observation(old[1].ip, 90)], old, now)[0].ip).toBe(old[0].ip);
+    expect(rankCandidates([old[0], observation(old[1].ip, 70)], old, now)[0].ip).toBe(old[1].ip);
+    expect(rankCandidates([{ ...old[0], failed: 1, passed: 0 }, old[1]], old, now)[0].ip).toBe(old[1].ip);
+  });
+  it('applies primary hysteresis to comparable throughput without changing the pool bound', () => {
+    const primary = { ...observation('104.16.0.1'), bytesPerSecond: 1000, bandwidthAt: now };
+    const backup = { ...observation('104.16.0.2'), bytesPerSecond: 1100, bandwidthAt: now };
+    expect(rankCandidates([primary, backup], [primary, backup], now)[0].ip).toBe(primary.ip);
+    expect(rankCandidates([primary, { ...backup, bytesPerSecond: 1300 }], [primary, backup], now)[0].ip).toBe(backup.ip);
+  });
   it('retains newly checked incumbents when the observation queue reaches its bound', () => {
     const old = Array.from({ length: 64 }, (_, i) => ({ ...observation(`104.16.0.${i + 1}`), checkedAt: now - 300_000 }));
     const updated = updateObservations(old, [{ ip: old[0].ip, ok: true, latency: 80 }, { ip: '104.17.0.1', ok: true, latency: 50 }], now);
@@ -90,7 +103,7 @@ describe('candidate promotion, expiry and failover', () => {
   });
 });
 
-describe('one subscription, regional groups and dynamic providers', () => {
+describe('compact regional candidates and one automatic group per managed node', () => {
   const variants = automaticVariants(exported, node.id, [
     { region: guangzhou, ips: ['104.16.0.1'] }, { region: chengdu, ips: ['104.17.0.1'] }, { region: beijing, ips: ['104.18.0.1'] },
   ], '104.16.0.2');
@@ -102,12 +115,17 @@ describe('one subscription, regional groups and dynamic providers', () => {
     }
     expect(JSON.stringify(variants.map(({ server: _server, ...v }: any) => v))).not.toContain('192.0.2.1');
   });
-  it('exports regional aliases and automatic selection instead of ordered fallback', () => {
+  it('exposes one automatic group rather than a choice for every region', () => {
     const config = buildClashSubscription(variants, 'https://panel.example.com');
     expect(config).toContain('广州云测优选'); expect(config).toContain('成都云测优选'); expect(config).toContain('北京云测优选');
     expect(config).not.toMatch(/电信优选|联通优选|移动优选/);
     expect(config).not.toContain('type: fallback'); expect(config).toContain('tolerance: 50');
-    expect(config.slice(config.indexOf('proxy-groups:'), config.indexOf('  - name: 🚀'))).not.toContain('DIRECT');
+    const cfGroups = config.slice(config.indexOf('proxy-groups:'), config.indexOf('  - name: 🚀'));
+    expect(cfGroups).not.toContain('DIRECT');
+    expect(cfGroups.match(/ {2}- name:/g)).toHaveLength(1);
+    const selectors = config.slice(config.indexOf('  - name: 🚀'), config.indexOf('\nrules:'));
+    expect(selectors).toContain(variants[0].cfGroup);
+    expect(selectors).not.toMatch(/云测优选|通用候选|默认 CDN/);
   });
   it('uses scoped provider URLs, periodic refresh and a fail-closed empty group', () => {
     const config = buildClashSubscription(variants, 'https://panel.example.com', 'https://panel.example.com/api/subscriptions/share/shared-token/cf-provider');
@@ -116,11 +134,13 @@ describe('one subscription, regional groups and dynamic providers', () => {
     expect(config).toContain('proxies: []'); expect(config).toContain('use: [cf-node]');
     expect(() => buildClashSubscription(variants, 'http://panel.example.com', 'http://panel.example.com/provider')).toThrow('HTTPS');
   });
-  it.each([buildFullSingboxConfig, buildHomeProxyConfig])('exports all regions without direct selector fallback', builder => {
+  it.each([buildFullSingboxConfig, buildHomeProxyConfig])('keeps region paths internal to one automatic group without direct fallback', builder => {
     const config = JSON.parse(builder(variants));
     const groups = config.outbounds.filter((o: any) => o.type === 'urltest' || o.type === 'selector');
     expect(groups.every((g: any) => !g.outbounds.includes('direct'))).toBe(true);
-    expect(groups.some((g: any) => g.tag.includes('广州云测优选'))).toBe(true);
+    expect(groups.filter((g: any) => g.tag.startsWith(variants[0].cfGroup))).toHaveLength(1);
+    expect(groups.find((g: any) => g.tag === variants[0].cfGroup).outbounds).toEqual(variants.map(n => n.name));
+    expect(groups.find((g: any) => g.tag === '🚀 节点选择').outbounds).toEqual(['⚡ 自动选择', variants[0].cfGroup]);
   });
   it('never invents measured carrier aliases from a generic cloud probe', () => {
     const generic = automaticVariants(exported, 'node', [{ ips: ['104.16.0.1'] }], '104.16.0.2');
@@ -135,7 +155,69 @@ describe('one subscription, regional groups and dynamic providers', () => {
     const config = buildClashSubscription(mixed, 'https://panel.example.com');
     expect(config).toContain(mixed[1].name);
     const singbox = JSON.parse(buildFullSingboxConfig(mixed));
-    expect(singbox.outbounds.find((g: any) => g.tag.endsWith('成都云测优选')).outbounds).toEqual([mixed[1].name]);
+    expect(singbox.outbounds.find((g: any) => g.tag === mixed[0].cfGroup).outbounds).toEqual(mixed.map(n => n.name));
+    expect(singbox.outbounds.some((g: any) => g.tag.endsWith('成都云测优选'))).toBe(false);
+  });
+  it('exports one preferred address per region plus DNS without trimming the measured pool', () => {
+    const profiles = [
+      { region: guangzhou, ips: ['104.16.0.1', '104.16.0.2', '104.16.0.3'] },
+      { region: chengdu, ips: ['104.17.0.1', '104.17.0.2', '104.17.0.3'] },
+      { ips: ['104.18.0.1', '104.18.0.2', '104.18.0.3'] },
+    ];
+    const before = JSON.stringify(profiles);
+    const compact = automaticVariants(exported, node.id, profiles, '104.19.0.1', [guangzhou, chengdu]);
+    expect(compact.map(n => n.host)).toEqual(['104.16.0.1', '104.17.0.1', '104.19.0.1']);
+    expect(compact.map(n => n.cfProfile)).toEqual(['REGION:ap-guangzhou', 'REGION:ap-chengdu', 'DNS']);
+    expect(JSON.stringify(profiles)).toBe(before);
+    expect(automaticVariants(exported, node.id, [profiles[0], profiles[2]], '104.19.0.1', [guangzhou, chengdu])
+      .map(n => n.cfProfile)).toEqual(['REGION:ap-guangzhou', 'GENERIC', 'DNS']);
+  });
+  it('deduplicates a shared regional address into one safe generic path for cached filters', () => {
+    const compact = automaticVariants(exported, node.id, [
+      { region: guangzhou, ips: ['104.16.0.1', '104.16.0.2'] },
+      { region: chengdu, ips: ['104.16.0.1', '104.17.0.1'] },
+    ], '104.16.0.2');
+    expect(compact.map(n => n.host)).toEqual(['104.16.0.1', '104.16.0.2']);
+    expect(compact.map(n => n.cfProfile)).toEqual(['GENERIC', 'DNS']);
+    expect(compact[0].cfRegion).toBeUndefined();
+    for (const region of [guangzhou, chengdu]) {
+      expect(compact.every(n => new RegExp(`\\[CF-REGION:(${region.key}|GENERIC|DNS)\\] \\[CF:(GENERIC|DNS)\\]$`).test(n.name))).toBe(true);
+    }
+  });
+  it('keeps only the stable DNS identity when preferred and DNS addresses coincide', () => {
+    const compact = automaticVariants(exported, node.id, [
+      { region: guangzhou, ips: ['104.16.0.1'] }, { region: chengdu, ips: ['104.16.0.1'] },
+    ], '104.16.0.1');
+    const dns = automaticVariants(exported, node.id, [], '104.16.0.1')[0];
+    expect(compact).toEqual([expect.objectContaining({ host: '104.16.0.1', cfProfile: 'DNS' })]);
+    expect(candidateKey(compact[0])).toBe(candidateKey(dns));
+  });
+  it('gives distinct shared paths unique names when several region pairs overlap', () => {
+    const compact = automaticVariants(exported, node.id, [
+      { region: guangzhou, ips: ['104.16.0.1'] }, { region: chengdu, ips: ['104.16.0.1'] },
+      { region: beijing, ips: ['104.17.0.1'] }, { region: { key: 'ap-shanghai', label: '上海' }, ips: ['104.17.0.1'] },
+    ], '104.18.0.1');
+    expect(compact.map(n => n.cfProfile)).toEqual(['GENERIC', 'GENERIC', 'DNS']);
+    expect(new Set(compact.map(n => n.name)).size).toBe(compact.length);
+    expect(compact[0].name).toContain('通用候选 1'); expect(compact[1].name).toContain('通用候选 2');
+  });
+  it('preserves usage identity for retained non-overlapping region and generic candidates', () => {
+    for (const region of [guangzhou, undefined]) {
+      const compact = automaticVariants(exported, node.id, [{ region, ips: ['104.16.0.1', '104.16.0.2'] }], null);
+      const retained = { ...exported, host: '104.16.0.1', cfProfile: region ? `REGION:${region.key}` : 'GENERIC',
+        credentials: { ...exported.credentials, transportHost: node.domain } };
+      expect(compact).toHaveLength(1); expect(candidateKey(compact[0])).toBe(candidateKey(retained));
+    }
+  });
+  it('never grows choices from duplicate profiles or collapses distinct managed nodes', () => {
+    const first = automaticVariants(exported, 'first', [
+      { region: guangzhou, ips: ['104.16.0.1'] }, { region: guangzhou, ips: ['104.16.0.2'] },
+    ], null);
+    const second = automaticVariants(exported, 'second', [{ region: guangzhou, ips: ['104.16.0.1'] }], null);
+    expect(first).toHaveLength(1);
+    const config = JSON.parse(buildFullSingboxConfig([...first, ...second]));
+    expect(config.outbounds.find((g: any) => g.tag === '🚀 节点选择').outbounds).toEqual(['⚡ 自动选择', first[0].cfGroup, second[0].cfGroup]);
+    expect(automaticVariants(exported, node.id, [], null)).toEqual([]);
   });
   it('keeps old cached carrier-era filters working until full subscription refresh', () => {
     for (const carrier of ['TELECOM', 'UNICOM', 'MOBILE']) {
