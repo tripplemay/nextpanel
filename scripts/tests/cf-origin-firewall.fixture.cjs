@@ -28,6 +28,7 @@ if (process.argv[2] !== 'isolated') {
   } };
   const ref = `np_origin_${'a'.repeat(32)}`;
   const f = originFirewall('fixture', 8443, ref);
+  const tableState = () => execFileSync('nft', ['-s', 'list', 'table', 'inet', f.table], { encoding: 'utf8' });
   const servers = [];
   const request = async (port, source, family = 4) => (await run('curl', ['--noproxy', '*', `-${family}`, '--max-time', '2', '--silent', '--show-error',
     '--interface', source, `http://${family === 4 ? '127.0.0.1' : '[::1]'}:${port}/`], { timeout: 4000 })).stdout;
@@ -40,6 +41,7 @@ if (process.argv[2] !== 'isolated') {
       }
       assert.equal(await request(443, '127.0.0.1'), '443');
       await installOriginFirewall(ssh, 'fixture', 8443, ref);
+      assert.ok(tableState().includes(`comment "${f.marker}"`), 'Ownership must be set on initial creation');
       await verifyOriginFirewall(ssh, 'fixture', 8443, ref);
       assert.equal(await request(443, '127.0.0.1'), '443', 'Existing website must remain reachable');
       assert.equal(await request(8443, '104.16.0.1'), '8443');
@@ -48,15 +50,24 @@ if (process.argv[2] !== 'isolated') {
       await assert.rejects(request(8443, '::1', 6));
       execFileSync('nft', ['delete', 'table', 'inet', f.table]);
       await assert.rejects(verifyOriginFirewall(ssh, 'fixture', 8443, ref));
-      execFileSync('/bin/sh', [f.base + '.sh']);
-      execFileSync('/bin/sh', [f.base + '.sh']);
+      execFileSync('/bin/sh', [f.base + '.sh'], { stdio: 'inherit' });
+      execFileSync('/bin/sh', [f.base + '.sh'], { stdio: 'inherit' });
+      assert.ok(tableState().includes(`comment "${f.marker}"`), 'Ownership must survive repeated restoration');
       await verifyOriginFirewall(ssh, 'fixture', 8443, ref);
       await assert.rejects(request(8443, '127.0.0.1'));
       await removeOriginFirewall(ssh, 'fixture', 8443, ref);
       await removeOriginFirewall(ssh, 'fixture', 8443, ref);
       assert.equal(await request(443, '127.0.0.1'), '443');
       assert.equal(await request(8443, '127.0.0.1'), '8443');
-      console.log('PASS isolated nftables: website coexistence, IPv4/IPv6 CF-only ingress, restart, drift and idempotent cleanup');
+      execFileSync('nft', ['-f', '-'], { input: `add table inet ${f.table} { comment "foreign-owner"; }\n` });
+      const foreignState = tableState();
+      await assert.rejects(installOriginFirewall(ssh, 'fixture', 8443, ref));
+      assert.equal(tableState(), foreignState, 'Install must not take over a foreign table');
+      await assert.rejects(removeOriginFirewall(ssh, 'fixture', 8443, ref));
+      assert.equal(tableState(), foreignState, 'Cleanup must not delete a foreign table');
+      assert.equal(await request(443, '127.0.0.1'), '443');
+      execFileSync('nft', ['delete', 'table', 'inet', f.table]);
+      console.log('PASS isolated nftables: website coexistence, IPv4/IPv6 CF-only ingress, restart, drift, idempotent cleanup and foreign ownership refusal');
     } finally { await Promise.all(servers.map(server => new Promise(resolve => server.close(resolve)))); }
   })().catch(e => { console.error(e); process.exitCode = 1; });
 }

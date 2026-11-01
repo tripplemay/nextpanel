@@ -118,10 +118,12 @@ describe('Cloudflare origin API isolation', () => {
 describe('scoped origin firewall', () => {
   it('restricts both IP families on the new TCP port only and restores before each start', () => {
     const f = originFirewall('pilot', 8443, route.ref);
+    expect(f.config.split('\n')[0]).toBe(`add table inet ${f.table} { comment "${f.marker}"; }`);
     expect(f.config).toContain('tcp dport 8443 ip saddr !=');
     expect(f.config).toContain('tcp dport 8443 ip6 saddr !=');
     expect(f.config).not.toMatch(/dport 443\b|flush ruleset|policy drop/);
     expect(f.guard).toContain('nft -c -f'); expect(f.guard).toContain('ownership mismatch');
+    expect(f.guard.indexOf('ownership marker missing after apply')).toBeGreaterThan(f.guard.indexOf('nft -f'));
   });
   it('fails closed when nftables is unavailable and never replaces a website firewall', async () => {
     const ssh = { execCommand: jest.fn().mockResolvedValue({ code: 1, stdout: '', stderr: '' }) };

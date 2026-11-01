@@ -10,8 +10,7 @@ export function originFirewall(nodeId: string, port: number, ref: string) {
   const table = `np_cf_${createHash('sha256').update(nodeId).digest('hex').slice(0, 16)}`;
   const base = `/etc/nextpanel/nodes/${nodeId}.cf`;
   const marker = `nextpanel:${ref}`;
-  const config = `add table inet ${table}\nflush table inet ${table}\ntable inet ${table} {
- comment "${marker}"
+  const config = `add table inet ${table} { comment "${marker}"; }\nflush table inet ${table}\ntable inet ${table} {
  chain ingress {
   type filter hook input priority -10; policy accept;
   tcp dport ${port} ip saddr != { ${CF_IP_RANGES.filter(x => !x.includes(':')).join(', ')} } drop
@@ -28,6 +27,7 @@ fi
 nft -c -f ${base}.nft
 nft -f ${base}.nft
 actual="$(nft -s list table inet ${table})"
+printf '%s' "$actual" | grep -Fq 'comment "${marker}"' || { echo 'Origin firewall ownership marker missing after apply'; exit 1; }
 printf '%s' "$actual" | sha256sum | cut -d ' ' -f 1 > ${base}.sha256
 `;
   return { table, base, marker, config, guard };
