@@ -3,6 +3,7 @@ import { useAuthStore } from '@/store/auth';
 import type {
   Server,
   Node,
+  NodePreset,
   ExternalNode,
   ExternalNodeCredentials,
   WxWorkSetting,
@@ -123,7 +124,7 @@ export const serversApi = {
 
 // ── Nodes ─────────────────────────────────────────────
 export const nodesApi = {
-  listPresets: () => api.get<{ value: string; label: string; description: string; disabled?: boolean; tags: { text: string; color: string }[] }[]>('/nodes/presets'),
+  listPresets: () => api.get<NodePreset[]>('/nodes/presets'),
   list: (serverId?: string) =>
     api.get<Node[]>('/nodes', { params: serverId ? { serverId } : {} }),
   get: (id: string) => api.get<Node>(`/nodes/${id}`),

@@ -30,6 +30,14 @@ describe('NodesController SSE ownership checks', () => {
     (nodesService.findOne as jest.Mock).mockResolvedValue({ id: 'node-1' });
   });
 
+  it('includes explicit ingress metadata in the preset API', () => {
+    const presets = controller.listPresets();
+    expect(presets.find((preset) => preset.value === 'ANYTLS')).toMatchObject({ accessMode: 'DIRECT' });
+    expect(presets.find((preset) => preset.value === 'TUIC_V5')).toMatchObject({ accessMode: 'DIRECT' });
+    expect(presets.filter((preset) => preset.accessMode === 'CDN').map((preset) => preset.value))
+      .toEqual(['VLESS_XHTTP_TLS', 'VLESS_WS_TLS']);
+  });
+
   it('checks ownership before opening a deploy stream', async () => {
     const stream = await controller.deployStream('node-1', { id: 'user-1' });
 

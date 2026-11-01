@@ -48,6 +48,8 @@ export interface ProtocolPreset {
   label: string;
   /** Brief description shown in UI */
   description: string;
+  /** Intended client ingress, not proof that deployment or origin protection is complete. */
+  accessMode: 'DIRECT' | 'CDN';
   /** Colored tags for speed / security / config cost */
   tags: PresetTag[];
   /** Prisma Protocol enum value */
@@ -85,6 +87,7 @@ export interface ProtocolPreset {
 export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
   VLESS_REALITY: {
     label: 'VLESS + REALITY',
+    accessMode: 'DIRECT',
     description: '裸 IP 直连，抗识别能力最强，首选方案',
     tags: [
       { text: '极速', color: 'green' },
@@ -100,6 +103,7 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
   },
   VLESS_XHTTP_REALITY: {
     label: 'VLESS + XHTTP + REALITY',
+    accessMode: 'DIRECT',
     description: '基于 XHTTP 的新一代抗封锁传输，固定使用推荐的 443 端口',
     tags: [
       { text: '极速', color: 'green' },
@@ -115,11 +119,12 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
   },
   VLESS_WS_TLS: {
     label: 'VLESS + WS + TLS',
+    accessMode: 'CDN',
     description: '经 Cloudflare CDN 中转，IP 被封时的保底方案',
     tags: [
       { text: '中速', color: 'orange' },
       { text: '高安全', color: 'volcano' },
-      { text: '需要 CF + 域名', color: 'gold' },
+      { text: '需要 CF CDN + 域名', color: 'gold' },
     ],
     protocol: 'VLESS',
     implementation: 'XRAY',
@@ -130,6 +135,7 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
   },
   VLESS_XHTTP_TLS: {
     label: 'VLESS + XHTTP + TLS (CDN 试点)',
+    accessMode: 'CDN',
     description: '经 Cloudflare CDN，独立试点；443 占用时自动选择回源端口，不替换网站或 WS。客户端须明确启用 XHTTP 导出。',
     tags: [
       { text: 'CDN 试点', color: 'cyan' },
@@ -141,6 +147,7 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
   },
   VLESS_TCP_TLS: {
     label: 'VLESS + TCP + TLS',
+    accessMode: 'DIRECT',
     description: '直连，真实 TLS 证书，兼容不支持 REALITY 的客户端（Quantumult X 等）',
     tags: [
       { text: '快', color: 'green' },
@@ -156,6 +163,7 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
   },
   HYSTERIA2: {
     label: 'Hysteria2',
+    accessMode: 'DIRECT',
     description: '基于 QUIC/UDP，速度极快',
     tags: [
       { text: '极速', color: 'green' },
@@ -171,11 +179,12 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
   },
   TUIC_V5: {
     label: 'TUIC v5',
-    description: '基于 QUIC/UDP 的低延迟协议，适合高丢包和移动网络',
+    accessMode: 'DIRECT',
+    description: 'QUIC/UDP 直连；Cloudflare 仅用于 DNS 解析和证书验证，不经过 CDN。',
     tags: [
       { text: '极速', color: 'green' },
       { text: '低延迟', color: 'cyan' },
-      { text: '需要 CF + 域名', color: 'gold' },
+      { text: 'CF DNS / 证书', color: 'gold' },
     ],
     protocol: 'TUIC',
     implementation: 'SING_BOX',
@@ -186,11 +195,12 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
   },
   ANYTLS: {
     label: 'AnyTLS',
-    description: '基于 TLS/TCP 的轻量协议，在受限网络中提供稳定连接',
+    accessMode: 'DIRECT',
+    description: 'TLS/TCP 直连；Cloudflare 仅用于 DNS 解析和证书验证，不经过 CDN。',
     tags: [
       { text: '稳定', color: 'green' },
       { text: '高安全', color: 'volcano' },
-      { text: '需要 CF + 域名', color: 'gold' },
+      { text: 'CF DNS / 证书', color: 'gold' },
     ],
     protocol: 'ANYTLS',
     implementation: 'SING_BOX',
@@ -201,6 +211,7 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
   },
   VMESS_TCP: {
     label: 'VMess + TCP',
+    accessMode: 'DIRECT',
     description: '兼容性最广的兜底方案，无需域名或证书，适合老旧客户端',
     tags: [
       { text: '快', color: 'green' },
