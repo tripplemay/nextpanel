@@ -105,6 +105,20 @@ describe('CDN pilot export isolation', () => {
       expect(await service.generateCfProvider(by, 'pilot', 'xhttp')).toContain('network: xhttp');
     }
   });
+  it('exports mapped nodes on CF 443 only and withdraws stale mappings', async () => {
+    const mapping = { version: 1, zoneId: 'zone', ref: `np_origin_${'a'.repeat(32)}`, domain: node.domain, port: 8443,
+      state: 'READY', rulesetId: 'set', ruleId: 'rule', checkedAt: new Date().toISOString() };
+    sub.nodes[0] = { node: { ...node, listenPort: 8443, publicPort: 443, cfOriginRoute: mapping } };
+    const content = Buffer.from(await service.generateContent('token', 'xhttp'), 'base64').toString();
+    expect(content).toContain(':443?'); expect(content).not.toContain(':8443');
+    const provider = await service.generateCfProvider({ token: 'token' }, 'pilot', 'xhttp');
+    expect(provider).toContain('port: 443'); expect(provider).not.toContain('8443');
+    mapping.checkedAt = new Date(Date.now() - 21 * 60_000).toISOString();
+    const empty = await service.generateCfProvider({ token: 'token' }, 'pilot', 'xhttp');
+    expect(empty).not.toContain('network: xhttp'); expect(empty).not.toContain(node.server.ip);
+    const ws = Buffer.from(await service.generateContent('token'), 'base64').toString();
+    expect(ws).toContain('type=ws'); expect(ws).not.toContain('type=xhttp');
+  });
   it('does not resolve an excluded pilot domain on compatibility downloads', async () => {
     sub.nodes[0] = { node: { ...node, domain: 'pilot.example.com' } };
     await service.generateContent('token');

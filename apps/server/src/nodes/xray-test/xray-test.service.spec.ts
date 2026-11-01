@@ -3,10 +3,12 @@ import { XrayTestService } from './xray-test.service';
 import { PrismaService } from '../../prisma.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { SingboxTestService } from '../singbox-test/singbox-test.service';
+import { Resolver } from 'dns/promises';
 
 // Mock core modules so their properties are configurable
 jest.mock('fs');
-jest.mock('net');
+jest.mock('net', () => ({ ...jest.createMockFromModule<typeof import('net')>('net'),
+  BlockList: jest.requireActual('net').BlockList, isIP: jest.requireActual('net').isIP }));
 jest.mock('./config-builder', () => ({ buildXrayClientConfig: jest.fn().mockReturnValue('{"config":true}') }));
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -60,6 +62,26 @@ describe('XrayTestService', () => {
     it('throws NotFoundException when node does not exist', async () => {
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(null);
       await expect(svc.testNode('missing')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('mapped CDN endpoint', () => {
+    afterEach(() => jest.restoreAllMocks());
+    it.each([['104.16.0.1'], ['104.16.0.1', '192.0.2.1'], []])('pins only CF addresses: %j', async (...addresses: string[]) => {
+      jest.spyOn(Resolver.prototype, 'resolve4').mockResolvedValue(addresses as any);
+      jest.spyOn(Resolver.prototype, 'resolve6').mockResolvedValue([]);
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(makeNode({ protocol: 'VLESS', transport: 'XHTTP', tls: 'TLS',
+        domain: 'cdn.example.com', cfDnsRecordId: 'dns', publicPort: 443, listenPort: 8443,
+        credentialsEnc: JSON.stringify({ uuid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', path: '/fixture' }) }));
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
+      const run = jest.spyOn(svc as any, 'runTest').mockResolvedValue(fakeResult);
+      if (addresses.length === 1) {
+        await svc.testNode('node-1');
+        expect(run).toHaveBeenCalledWith(expect.objectContaining({ host: '104.16.0.1', port: 443, domain: 'cdn.example.com', secureProbe: true }));
+      } else {
+        await expect(svc.testNode('node-1')).rejects.toThrow('fallback forbidden');
+        expect(run).not.toHaveBeenCalled();
+      }
     });
   });
 

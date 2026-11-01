@@ -192,6 +192,10 @@ model Node {
   transport        Transport?
   tls              TlsMode         @default(NONE)
   listenPort       Int
+  /// Client-facing CDN port; null preserves legacy listenPort semantics.
+  publicPort       Int?
+  /// Durable, non-secret Cloudflare origin-rule intent and verification state.
+  cfOriginRoute    Json?
   domain           String?
   egressIpPolicy   EgressIpPolicy  @default(AUTO)
   /// AES-GCM encrypted JSON credentials

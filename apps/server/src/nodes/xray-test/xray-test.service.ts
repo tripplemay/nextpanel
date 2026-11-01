@@ -9,6 +9,10 @@ import { CryptoService } from '../../common/crypto/crypto.service';
 import { SingboxTestService } from '../singbox-test/singbox-test.service';
 import { probeSocks5Udp } from '../socks5-udp-probe';
 import { buildXrayClientConfig } from './config-builder';
+import { Resolver } from 'dns/promises';
+import { publicPort } from '../../cloudflare/cf-origin.util';
+import { isCfXhttp, cfXhttpCredentials } from '../protocols/cf-xhttp';
+import { isCloudflareIp } from '../../subscriptions/cf-access.util';
 
 export interface TestResult {
   reachable: boolean;
@@ -48,12 +52,22 @@ export class XrayTestService {
     });
     if (!node) throw new NotFoundException(`Node ${nodeId} not found`);
 
-    const credentials = JSON.parse(
+    let credentials = JSON.parse(
       this.crypto.decrypt(node.credentialsEnc),
     ) as Record<string, string>;
-    const connectionHost = node.tls === 'REALITY'
+    let connectionHost = node.tls === 'REALITY'
       ? node.server.ip
       : (node.domain ?? node.server.ip);
+    if (isCfXhttp(node)) {
+      if (!node.domain || !node.cfDnsRecordId) throw new Error('Managed CDN identity missing; origin fallback forbidden');
+      const resolver = new Resolver({ timeout: 2000, tries: 1 });
+      const addresses = [...await resolver.resolve4(node.domain).catch(() => []), ...await resolver.resolve6(node.domain).catch(() => [])];
+      if (!addresses.length || addresses.some(ip => !isCloudflareIp(ip) || ip === node.server.ip)) {
+        throw new Error('No exclusively Cloudflare endpoint; origin fallback forbidden');
+      }
+      connectionHost = addresses[0];
+      credentials = cfXhttpCredentials(credentials, node.domain);
+    }
 
     let result: TestResult;
 
@@ -62,7 +76,7 @@ export class XrayTestService {
       result = await this.withSemaphore(() =>
         this.singboxTest.testNode(node.protocol, {
           host: connectionHost,
-          port: node.listenPort,
+          port: publicPort(node),
           domain: node.domain,
           credentials,
           requireUdp: node.exitType === 'SOCKS5',
@@ -75,10 +89,11 @@ export class XrayTestService {
           transport: node.transport,
           tls: node.tls,
           host: connectionHost,
-          port: node.listenPort,
+          port: publicPort(node),
           domain: node.domain,
           credentials,
           requireUdp: node.exitType === 'SOCKS5',
+          secureProbe: isCfXhttp(node),
         }),
       );
     }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Alert, App, Modal, Form, Input, Select, Tag, Space, Radio, Segmented } from 'antd';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { nodesApi, serversApi } from '@/lib/api';
 import type { CreateChainNodeDto, Node } from '@/types/api';
 import type { AxiosError } from 'axios';
@@ -40,6 +40,7 @@ export default function NodePresetModal({
   lockEntryServerId = false,
 }: Props) {
   const { message } = App.useApp();
+  const queryClient = useQueryClient();
   const [form] = Form.useForm();
   const selectedPreset = Form.useWatch('preset', form);
   const [deployMode, setDeployMode] = useState<DeployMode>('direct');
@@ -141,6 +142,9 @@ export default function NodePresetModal({
   });
 
   const isPending = directMutation.isPending || chainMutation.isPending;
+  useEffect(() => {
+    if (directMutation.isError || chainMutation.isError) void queryClient.invalidateQueries({ queryKey: ['nodes'] });
+  }, [directMutation.isError, chainMutation.isError, queryClient]);
 
   function handleFinish(values: Record<string, unknown>) {
     if (deployMode === 'chain') {
@@ -272,7 +276,7 @@ export default function NodePresetModal({
 
         {selectedPreset === 'VLESS_XHTTP_TLS' && <Alert style={{ marginBottom: 16 }} type="warning" showIcon
           message="独立 CDN 试点，不替换 WS"
-          description="需要空闲的 443 端口和有效 CF 域名；已占用时会拒绝创建。OpenClash 需新版 Meta/Mihomo 并使用 XHTTP 试点链接。Shadowrocket 在实测确认前继续使用原 WS 链接。" />}
+          description="自动检测端口；443 被网站或 WS 占用时，保留原服务，使用空闲回源端口，客户端仍连接 Cloudflare 443。映射回源需有效 CF 域名、Origin Rules 权限、Full (strict) TLS 及 nftables；不自动修改网站或全局安全设置。OpenClash 使用 XHTTP 试点链接，Shadowrocket 在实测确认前继续使用原 WS 链接。" />}
 
         <Form.Item
           name="name"

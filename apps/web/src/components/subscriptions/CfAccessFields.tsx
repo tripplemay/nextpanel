@@ -5,6 +5,7 @@ import { Alert, App, Button, Form, Select, Space, Switch, Typography } from 'ant
 import { useQuery } from '@tanstack/react-query';
 import type { FormInstance } from 'antd';
 import { subscriptionsApi } from '@/lib/api';
+import { cfEndpointReady } from '@/lib/cf-origin';
 import type { CfAccessCheckResult, CreateSubscriptionDto, Node } from '@/types/api';
 
 const FINDINGS: Record<string, string> = {
@@ -43,7 +44,7 @@ export default function CfAccessFields({ form, nodes, locked, protectedIds, load
   const [check, setCheck] = useState<{ key: string; result: CfAccessCheckResult }>();
   const { message, modal } = App.useApp();
   const eligible = nodes.filter((n) => selectedIds.includes(n.id)
-    && n.protocol === 'VLESS' && ['WS', 'XHTTP'].includes(n.transport ?? '') && n.tls === 'TLS' && n.listenPort === 443 && n.domain && n.cfDnsRecordId);
+    && n.protocol === 'VLESS' && ['WS', 'XHTTP'].includes(n.transport ?? '') && n.tls === 'TLS' && cfEndpointReady(n) && n.domain && n.cfDnsRecordId);
   const incompatible = nodes.filter(n => selectedIds.includes(n.id) && !eligible.some(e => e.id === n.id));
   const protectedSelected = protectedIds.filter(id => selectedIds.includes(id));
   const unavailableProtected = incompatible.filter(n => protectedSelected.includes(n.id));

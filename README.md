@@ -24,7 +24,7 @@
 | VLESS + REALITY | Xray | TCP | REALITY | 裸 IP 直连，抗识别最强，首选方案 |
 | VLESS + XHTTP + REALITY | Xray | XHTTP | REALITY | 无需域名，固定使用推荐的 443 端口；同一服务器不能同时占用 443 的其他预设 |
 | VLESS + WS + TLS | Xray | WebSocket | TLS | 经 Cloudflare CDN 中转，IP 被封时的保底方案 |
-| VLESS + XHTTP + TLS | Xray | XHTTP packet-up | 可信 TLS | 独立 CDN 试点，默认关闭；要求空闲 443，不替换现有 WS |
+| VLESS + XHTTP + TLS | Xray | XHTTP packet-up | 可信 TLS | 独立 CDN 试点，默认关闭；443 被占用时自动映射空闲回源端口，不替换网站或 WS |
 | VLESS + TCP + TLS | Xray | TCP | TLS | 直连真实 TLS，兼容 Quantumult X 等客户端 |
 | Hysteria2 | sing-box | QUIC | TLS（自签） | 基于 UDP，速度极快 |
 | TUIC v5 | sing-box | QUIC | 可信 TLS | 基于 UDP 的低延迟传输，适合高丢包和移动网络 |
@@ -34,6 +34,8 @@
 TUIC 和 AnyTLS 创建时要求用户已配置状态为 `active` 的 Cloudflare Zone。面板为直连节点（链式节点则为入口服务器）创建 DNS-only A 记录，签发并自动续期受信任的 Let's Encrypt 通配符证书；DNS 或证书失败会中止部署，不降级为自签证书或跳过证书校验。XHTTP + REALITY 不依赖 Cloudflare 或域名。
 
 XHTTP + TLS CDN 试点要求受代理的 Cloudflare DNS、可信证书和已验收的 Xray 26.2.6；不会自动替换同机共享内核。原 OpenClash/Shadowrocket 链接继续使用既有节点，新增试点仅通过显式 `?profile=xhttp` 下发；sing-box/HomeProxy 不接收 XHTTP。部署顺序、客户端验收、源站保护和回退见 [CDN XHTTP 试点手册](docs/RUNBOOK-cf-xhttp.md)。
+
+443 共存采用独立域名的 Cloudflare Origin Rule：客户端仍访问 CDN 443，源站优先使用空闲 8443，再选择 18000–18999。映射模式需已有 Full (strict)、Origin Rules 权限及 nftables；不接管网站反向代理、不修改全局 TLS/WAF。状态异常或配置核验过期时不下发该节点。权限、清理和上线门禁见 [回源端口映射手册](docs/RUNBOOK-cf-origin-port.md)。
 
 新建链式节点的入口到出口链路使用独立的 VLESS + REALITY 凭据，并通过 XUDP 转发 UDP 流量；REALITY 私钥只部署到出口服务器。升级前创建的链式节点继续兼容原有凭据格式，如需启用链路加密需重新创建该链式节点。
 

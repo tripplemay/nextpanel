@@ -10,6 +10,7 @@ import { connectSsh } from '../nodes/ssh/ssh.util';
 import { generateChainExitConfig } from '../nodes/config/config-generator';
 import { listManagedServices, quote, resourcePaths, unavailablePorts } from './remote-inventory';
 import { boundConnection, remoteExec } from './remote-exec';
+import { originRoute } from '../cloudflare/cf-origin.util';
 
 const HOST_FILE = '/etc/nextpanel/host-id';
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
@@ -22,6 +23,7 @@ export interface CleanupPayload {
   entryIp?: string;
   cfRecordId?: string;
   cfZoneId?: string;
+  cfOriginRoute?: unknown;
 }
 
 export function cleanupPayload(value: Prisma.JsonValue): CleanupPayload {
@@ -34,6 +36,7 @@ export function cleanupPayload(value: Prisma.JsonValue): CleanupPayload {
   if (p.entryIp && !isIP(p.entryIp)) throw new CleanupBlockedError('Invalid cleanup source IP');
   if (p.cfRecordId && !/^[a-zA-Z0-9_-]{1,128}$/.test(p.cfRecordId)) throw new CleanupBlockedError('Invalid DNS record ID');
   if (p.cfZoneId && !/^[a-zA-Z0-9_-]{1,128}$/.test(p.cfZoneId)) throw new CleanupBlockedError('Invalid DNS zone ID');
+  if (p.cfOriginRoute) originRoute(p.cfOriginRoute);
   return p;
 }
 
@@ -261,7 +264,10 @@ export class ResourceLifecycleService {
         const snapshot = node.snapshots[0];
         tasks.push({ ...base, serverId: node.serverId, serverName: node.server.name, role: 'ENTRY', remoteHostId: node.server.remoteHostId,
           expectedConfigHashEnc: snapshot ? this.crypto.encrypt(hashConfig(this.crypto.decrypt(snapshot.content))) : null,
-          payload: { port: node.listenPort, protocols: resourceProtocols(node.protocol), ...(node.statsPort ? { statsPort: node.statsPort } : {}) } });
+          payload: { port: node.listenPort, protocols: resourceProtocols(node.protocol), ...(node.statsPort ? { statsPort: node.statsPort } : {}),
+            ...(node.cfOriginRoute ? { cfOriginRoute: node.cfOriginRoute } : {}) } });
+        if (node.cfOriginRoute) tasks.push({ ...base, serverId: node.serverId, serverName: node.server.name,
+          role: 'CF_ORIGIN', payload: { cfOriginRoute: node.cfOriginRoute } });
         if (node.exitServer) {
           let fingerprint: string | null = null;
           if (node.exitPort && node.chainCredEnc) {
@@ -275,7 +281,7 @@ export class ResourceLifecycleService {
           tasks.push({ ...base, serverId: node.exitServerId!, serverName: node.exitServer.name, role: 'EXIT', remoteHostId: node.exitServer.remoteHostId,
             expectedConfigHashEnc: fingerprint, payload: { ...(node.exitPort ? { port: node.exitPort } : {}), protocols: ['tcp'], entryIp: node.server.ip } });
         }
-        if (node.cfDnsRecordId) tasks.push({ ...base, serverId: node.serverId, serverName: node.server.name, role: 'DNS', payload: {
+        if (node.cfDnsRecordId && !node.cfOriginRoute) tasks.push({ ...base, serverId: node.serverId, serverName: node.server.name, role: 'DNS', payload: {
           cfRecordId: node.cfDnsRecordId,
           ...(cf && node.domain?.toLowerCase().endsWith(`.${cf.domain.toLowerCase()}`) ? { cfZoneId: cf.zoneId } : {}),
         } });

@@ -1,5 +1,5 @@
 import * as crypto from 'crypto';
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { NodeDeployService } from './node-deploy.service';
@@ -15,6 +15,7 @@ import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
 import { parseSocksUri, SocksUriParseError, type ParsedSocksUri } from './socks-uri';
 import { ResourceLifecycleService } from '../resources/resource-lifecycle.service';
 import { assertCfXhttpPilotEnabled, cfXhttpCredentials, isCfXhttp } from './protocols/cf-xhttp';
+import { CfOriginService } from '../cloudflare/cf-origin.service';
 
 const CLOUDFLARE_PRESETS = new Set<SupportedProtocol>([
   'VLESS_WS_TLS',
@@ -37,6 +38,7 @@ export class NodesService {
     private cfService: CloudflareService,
     private cfSettings: CloudflareSettingsService,
     private resources: ResourceLifecycleService,
+    @Optional() private cfOrigin?: CfOriginService,
   ) {}
 
   async create(dto: CreateNodeDto, userId: string) {
@@ -112,6 +114,7 @@ export class NodesService {
         preset.fixedPort,
         preset.portBase,
         preset.implementation,
+        presetKey === 'VLESS_XHTTP_TLS',
       );
       return this.prisma.node.create({
         data: {
@@ -123,6 +126,7 @@ export class NodesService {
           transport: preset.transport as any,
           tls: preset.tls as any,
           listenPort,
+          ...(presetKey === 'VLESS_XHTTP_TLS' && listenPort !== 443 ? { publicPort: 443 } : {}),
           domain: null,
           credentialsEnc,
           source: 'AUTO',
@@ -137,8 +141,15 @@ export class NodesService {
       const strict = STRICT_DNS_PRESETS.has(presetKey) || presetKey === 'VLESS_XHTTP_TLS';
       const proxied = presetKey === 'VLESS_WS_TLS' || presetKey === 'VLESS_XHTTP_TLS';
       try {
-        await this.provisionCloudflareDns(userId, node.id, dto.serverId, proxied, strict);
+        if (node.publicPort === 443) {
+          if (!this.cfOrigin) throw new Error('Origin mapping service unavailable');
+          await this.withDatabaseLocks([nodeOperationLock(node.id)], () => this.cfOrigin!.prepare(node.id));
+        } else await this.provisionCloudflareDns(userId, node.id, dto.serverId, proxied, strict);
       } catch (err) {
+        if (node.publicPort === 443) {
+          await this.prisma.node.update({ where: { id: node.id }, data: { status: 'ERROR' } });
+          throw new BadRequestException(`节点 ${node.id} 配置未完成，已保留记录供重试或清理：${err instanceof Error ? err.message : 'Origin mapping failed'}`);
+        }
         await this.rollbackCreatedNode(node.id);
         throw err;
       }
@@ -190,6 +201,7 @@ export class NodesService {
         transport: true,
         tls: true,
         listenPort: true,
+        publicPort: true,
         domain: true,
         egressIpPolicy: true,
         cfDnsRecordId: true,
@@ -229,7 +241,7 @@ export class NodesService {
     }
     const targetEgressIpPolicy = dto.egressIpPolicy ?? existing.egressIpPolicy;
     assertEgressIpPolicySupported(shape, targetEgressIpPolicy);
-    assertRecommendedPort(shape, targetListenPort);
+    if (!(isCfXhttp(existing) && existing.publicPort === 443)) assertRecommendedPort(shape, targetListenPort);
     await this.assertPortAvailable(
       existing.serverId,
       targetListenPort,
@@ -413,7 +425,7 @@ export class NodesService {
   private async removeExclusive(id: string, userId: string) {
     const node = await this.prisma.node.findFirst({
       where: { id, userId },
-      select: { id: true, userId: true, cfDnsRecordId: true },
+      select: { id: true, userId: true, cfDnsRecordId: true, cfOriginRoute: true },
     });
     if (!node) throw new NotFoundException(`Node ${id} not found`);
 
@@ -425,7 +437,11 @@ export class NodesService {
     });
 
     // Clean up Cloudflare DNS record if present
-    if (node.cfDnsRecordId && node.userId) {
+    if (node.cfOriginRoute) {
+      if (!this.cfOrigin) throw new Error('Origin cleanup unavailable');
+      await this.cfOrigin.remove(userId, node.cfOriginRoute);
+    }
+    if (node.cfDnsRecordId && node.userId && !node.cfOriginRoute) {
       await this.cleanupCloudflareDns(node.userId, node.cfDnsRecordId);
     }
 
@@ -579,6 +595,7 @@ export class NodesService {
         preset.fixedPort,
         preset.portBase,
         preset.implementation,
+        presetKey === 'VLESS_XHTTP_TLS',
       );
       const exitPort = managedExitServerId
         ? await this.pickChainExitPort(managedExitServerId)
@@ -593,6 +610,7 @@ export class NodesService {
           transport: preset.transport as any,
           tls: preset.tls as any,
           listenPort,
+          ...(presetKey === 'VLESS_XHTTP_TLS' && listenPort !== 443 ? { publicPort: 443 } : {}),
           domain: null,
           credentialsEnc,
           exitType: exitType as any,
@@ -609,8 +627,15 @@ export class NodesService {
 
     if (STRICT_DNS_PRESETS.has(presetKey) || presetKey === 'VLESS_XHTTP_TLS') {
       try {
-        await this.provisionCloudflareDns(userId, node.id, dto.entryServerId, presetKey === 'VLESS_XHTTP_TLS', true);
+        if (node.publicPort === 443) {
+          if (!this.cfOrigin) throw new Error('Origin mapping service unavailable');
+          await this.withDatabaseLocks([nodeOperationLock(node.id)], () => this.cfOrigin!.prepare(node.id));
+        } else await this.provisionCloudflareDns(userId, node.id, dto.entryServerId, presetKey === 'VLESS_XHTTP_TLS', true);
       } catch (err) {
+        if (node.publicPort === 443) {
+          await this.prisma.node.update({ where: { id: node.id }, data: { status: 'ERROR' } });
+          throw new BadRequestException(`节点 ${node.id} 配置未完成，已保留记录供重试或清理：${err instanceof Error ? err.message : 'Origin mapping failed'}`);
+        }
         await this.rollbackCreatedNode(node.id);
         throw err;
       }
@@ -646,6 +671,7 @@ export class NodesService {
     fixedPort: number | null,
     portBase: number | null,
     implementation: string | null,
+    allowOriginMapping = false,
   ): Promise<number> {
     if (fixedPort === null && portBase === null) {
       throw new BadRequestException('Preset misconfiguration: no fixedPort or portBase');
@@ -676,6 +702,13 @@ export class NodesService {
           ? derivedStats
           : null;
       if (conflictingPort !== null) {
+        if (allowOriginMapping) {
+          for (const candidate of [8443, ...Array.from({ length: 1000 }, (_, i) => 18000 + i)]) {
+            const stats = derivedStatsPort(candidate, implementation);
+            if (!usedPorts.has(candidate) && (stats === null || !usedPorts.has(stats))) return candidate;
+          }
+          throw new BadRequestException('CDN 回源端口池已用尽（8443、18000-18999），原 443 服务保持不变');
+        }
         throw new BadRequestException(
           `固定端口 ${fixedPort} 无法使用：服务器端口 ${conflictingPort} 已被其他节点占用`,
         );
@@ -853,6 +886,8 @@ export class NodesService {
       transport: true,
       tls: true,
       listenPort: true,
+      publicPort: true,
+      cfOriginRoute: true,
       domain: true,
       egressIpPolicy: true,
       cfDnsRecordId: true,

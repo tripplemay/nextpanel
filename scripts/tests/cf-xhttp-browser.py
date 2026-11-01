@@ -1,6 +1,7 @@
 """CDN XHTTP compatibility UI. Synthetic API only; no production traffic."""
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright, expect
@@ -24,6 +25,7 @@ with sync_playwright() as p:
         state = {'gate': False}
         node = {'id': 'pilot', 'name': 'CDN pilot', 'protocol': 'VLESS', 'transport': 'XHTTP', 'tls': 'TLS',
                 'listenPort': 443, 'domain': 'cdn.example.com', 'cfDnsRecordId': 'record', 'status': 'RUNNING', 'enabled': True,
+                'statsPort': None, 'trafficUpBytes': 0, 'trafficDownBytes': 0,
                 'server': {'id': 'server', 'name': 'Fixture', 'ip': '192.0.2.90', 'tags': [], 'autoTags': []}}
         page.on('pageerror', lambda error: errors.append(str(error)))
 
@@ -41,10 +43,16 @@ with sync_playwright() as p:
                                      'cfAuto': True, 'cfPreferredIps': [], 'nodes': [{'node': node}], 'externalNodes': []}])
             elif url.path == '/api/servers':
                 route.fulfill(json=[{'id': 'server', 'name': 'Fixture', 'ip': '192.0.2.90', 'status': 'ONLINE', 'tags': [], 'autoTags': []}])
+            elif url.path == '/api/nodes':
+                route.fulfill(json=[{**node, 'serverId': 'server', 'listenPort': 8443, 'publicPort': 443,
+                    'cfOriginRoute': {'state': 'READY', 'port': 8443, 'ruleId': 'fixture-rule', 'rulesetId': 'fixture-set',
+                        'checkedAt': datetime.now(timezone.utc).isoformat(), 'domain': node['domain']}}])
             elif url.path == '/api/nodes/presets':
                 route.fulfill(json=[{'value': 'VLESS_WS_TLS', 'label': 'VLESS + WS + TLS', 'description': 'Existing compatibility path'},
                                     {'value': 'VLESS_XHTTP_TLS', 'label': 'VLESS + XHTTP + TLS (CDN 试点)',
                                      'description': 'Isolated pilot', 'disabled': not state['gate']}])
+            elif url.path.startswith('/api/subscriptions/cf-access/optimization/'):
+                route.fulfill(json={'enabled': False, 'profiles': [], 'missingRegions': []})
             else:
                 route.fulfill(json=[])
 
@@ -79,12 +87,29 @@ with sync_playwright() as p:
         page.keyboard.press('Escape')
         expect(dialog).to_be_hidden()
 
+        if width == 1440:
+            page.get_by_role('button', name=re.compile('编辑$')).click()
+            expect(dialog).to_be_visible()
+            dialog.get_by_label('检查 CF 节点', exact=True).click()
+            page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter(has_text='CDN pilot').click()
+            expect(dialog.get_by_text(re.compile('不兼容严格 CF-only'))).to_have_count(0)
+            dialog.get_by_role('button', name='Close', exact=True).click()
+            expect(dialog).to_be_hidden()
+
         for gate in (False, True):
             state['gate'] = gate
             page.goto(base + '/nodes')
             page.reload()
             page.wait_for_load_state('networkidle')
-            page.get_by_role('button', name='新增节点', exact=True).first.click()
+            if errors:
+                page.screenshot(path=str(output / f'cf-origin-ui-error-{width}.png'), full_page=True)
+                raise AssertionError(errors)
+            try:
+                page.get_by_role('button', name=re.compile('新增节点$')).first.click(timeout=10000)
+            except Exception:
+                page.screenshot(path=str(output / f'cf-origin-ui-error-{width}.png'), full_page=True)
+                print(page.url, page.locator('body').inner_text(), errors)
+                raise
             expect(dialog).to_be_visible()
             page.get_by_label('协议预设', exact=True).click()
             option = page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter(has_text='VLESS + XHTTP + TLS (CDN 试点)')
@@ -92,13 +117,22 @@ with sync_playwright() as p:
                 option.click()
                 page.get_by_label('节点名称', exact=True).click()
                 expect(page.locator('.ant-select-dropdown:visible')).to_have_count(0)
-                expect(dialog.get_by_text(re.compile('空闲的 443'))).to_be_visible()
+                expect(dialog.get_by_text(re.compile('自动检测端口'))).to_be_visible()
                 page.screenshot(path=str(output / f'cf-xhttp-preset-{width}-{mode}.png'), full_page=True, animations='disabled')
             else:
                 expect(option).to_have_class(re.compile('ant-select-item-option-disabled'))
                 page.keyboard.press('Escape')
             dialog.get_by_role('button', name='Close', exact=True).click()
             expect(dialog).to_be_hidden()
+        page.get_by_role('button', name='查看 CDN pilot 回源端口映射', exact=True).click()
+        expect(page.get_by_text('Cloudflare 回源映射', exact=True)).to_be_visible()
+        expect(page.get_by_text('原 443 网站或 WS 服务保持不变。', exact=True)).to_be_visible()
+        expect(page.get_by_text('回源规则：已登记', exact=True)).to_be_visible()
+        popup = page.locator('.ant-popover').filter(has_text='Cloudflare 回源映射')
+        expect(popup).not_to_have_class(re.compile('zoom-big-.*(?:active|prepare)'))
+        expect(popup).to_have_css('opacity', '1')
+        assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1')
+        page.screenshot(path=str(output / f'cf-origin-status-{width}-{mode}.png'), full_page=True, animations='disabled')
         assert not mutations, mutations
         assert not errors, errors
         context.close()

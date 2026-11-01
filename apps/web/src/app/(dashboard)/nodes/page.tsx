@@ -8,6 +8,7 @@ import ServerTagList from '@/components/servers/ServerTagList';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { nodesApi, serversApi } from '@/lib/api';
 import NodePresetModal from '@/components/nodes/NodePresetModal';
+import NodePort from '@/components/nodes/NodePort';
 import PageHeader from '@/components/common/PageHeader';
 import StatusTag from '@/components/common/StatusTag';
 import AppCard from '@/components/common/AppCard';
@@ -96,6 +97,7 @@ export default function NodesPage() {
     queryKey: ['nodes'],
     queryFn: () => nodesApi.list().then((r) => r.data),
     staleTime: 2 * 60 * 1000,
+    refetchInterval: query => query.state.data?.some(node => node.publicPort != null) ? 30_000 : false,
   });
 
   const { data: servers, isLoading: serversLoading } = useQuery({
@@ -177,7 +179,7 @@ export default function NodesPage() {
         </Space>
       ),
     },
-    { title: '端口', dataIndex: 'listenPort', width: 80 },
+    { title: '连接 / 回源端口', key: 'port', width: 150, render: (_, node) => <NodePort node={node} /> },
     {
       title: '状态',
       width: 90,
@@ -517,7 +519,7 @@ export default function NodesPage() {
                 <Tag color="blue" style={{ margin: 0 }}>{node.protocol}</Tag>
                 {node.transport && <Tag style={{ margin: 0 }}>{node.transport}</Tag>}
                 {node.tls !== 'NONE' && <Tag color="green" style={{ margin: 0 }}>{node.tls}</Tag>}
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>:{node.listenPort}</Typography.Text>
+                <NodePort node={node} />
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Space size={8}>
