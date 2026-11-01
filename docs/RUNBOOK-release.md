@@ -34,6 +34,7 @@ python3 -m pip install -r scripts/tests/browser-requirements.txt
 python3 -m playwright install chromium
 PG_BIN=/path/to/postgresql/16/bin \
 XRAY_BINARY=/path/to/verified/xray \
+MIHOMO_BINARY=/path/to/verified/mihomo \
 GO_BINARY=/path/to/go bash scripts/ci/verify.sh
 ```
 
@@ -57,6 +58,11 @@ for Agent race tests, Linux amd64/arm64 builds, and loopback telemetry decoding.
 These fixtures do not contact production proxy nodes. See
 [server-side usage rollout](RUNBOOK-server-usage.md) before enabling its default-off
 switch or preparing any production node; first preparation can restart that node.
+
+CDN XHTTP validation pins Mihomo 1.19.29 and requires `MIHOMO_BINARY` for the
+TLS/H2 loopback transport gate. The existing WS path and explicit pilot profile
+are tested independently; native acceptance does not replace actual OpenClash
+router, Shadowrocket phone or Cloudflare regional acceptance.
 
 `Deploy` stages a full commit in an isolated directory, installs the frozen lockfile,
 generates Prisma and builds before stopping either production process. SSH host keys

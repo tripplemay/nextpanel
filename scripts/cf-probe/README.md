@@ -1,4 +1,4 @@
-# Isolated CF probe v2
+# Isolated CF probe (WS v2 / XHTTP v3)
 
 This HTTP worker is **not** a replacement for `gfw-check/index.handler`.
 The original TCP-only function remains unchanged. See
@@ -6,7 +6,8 @@ The original TCP-only function remains unchanged. See
 
 ## Runtime / packaging
 
-- Node.js 22+, curl, and a reviewed Xray-core binary supporting VLESS/WS/TLS.
+- Node.js 22+, curl, and reviewed Xray-core **26.2.6**. Other/missing Xray versions
+  fail runtime readiness rather than silently claiming transport support.
 - The worker starts on `0.0.0.0:9000`; a trusted HTTPS gateway must front it.
 - `CF_PROBE_ID`: stable lowercase ID, e.g. `guangzhou-cloud`.
 - Region identity comes from SCF's built-in `TENCENTCLOUD_REGION` (e.g.
@@ -65,17 +66,22 @@ numeric curl/HTTP diagnostics, never stderr or proxy credentials.
 
 Both endpoints require `Authorization: Bearer <secret>` and return `no-store`.
 
-- `GET /capabilities`: protocol 2, probe ID, current outbound IP, `regionKey`,
+- `GET /capabilities`: protocol 2, `protocols: [2,3]`, probe ID, current outbound IP, `regionKey`,
   `networkType=CLOUD` and supported features. Missing Xray/curl returns 503.
   Missing region returns null for legacy generic compatibility, never a guessed city.
 - `POST /probe`: `{ips, domain, uuid, path, downloadIps}`. At most eight literal
   CF addresses, fixed port 443, at most three downloads. No arbitrary test URL,
   command, upstream proxy, port or Xray configuration is accepted.
+- XHTTP adds exactly `protocol: 3, transport: 'XHTTP', mode: 'packet-up'` to that
+  request. Capabilities must include `vless-xhttp-tls-packet-up-h2`; results echo
+  protocol, transport and mode. Legacy WS payloads and v2 responses are unchanged.
+  See [CDN XHTTP release gates](../../docs/RUNBOOK-cf-xhttp.md).
 - Results repeat the regional identity and contain IP, success and E2E latency; successful download samples add
   byte count/duration. Errors and logs never include UUID/path/authorization.
 
 For each candidate, Xray dials its literal CF IP while retaining domain SNI and
-WS Host, certificate verification, UUID and WS path. curl is explicitly forced
+WS/XHTTP Host, certificate verification, UUID and transport path. XHTTP pins
+`packet-up` and H2 with no alternate download endpoint. curl is explicitly forced
 through that loopback proxy (`--noproxy ''`); there is no direct retry. Connectivity
 uses a fixed HTTPS 204 endpoint. The optional throughput sample uses a fixed
 1 MiB Cloudflare download URL. Only a complete 200 response counts as a sample.

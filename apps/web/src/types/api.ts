@@ -298,6 +298,9 @@ export interface CfAccessCheckResult extends ConnectivityResult {
 }
 
 export interface CfOptimizationStatus {
+  transport?: string | null;
+  tls?: string;
+  compatibility?: 'XHTTP_OPT_IN' | 'WS_COMPATIBLE';
   paused: boolean;
   budget?: { lowBudget: boolean; intervalMinutes: number | null; monthlyLimit: number | null; used: number | null; remaining: number | null;
     estimatedMonthlyBatchesPerNode: number; constrained: boolean; error: boolean };

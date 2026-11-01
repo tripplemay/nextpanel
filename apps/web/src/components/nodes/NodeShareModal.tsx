@@ -98,14 +98,15 @@ function HiddifyImportButton({ url }: { url: string }) {
 }
 
 export default function NodeShareModal({ node, onClose }: Props) {
+  const cdnPilot = node?.protocol === 'VLESS' && node.transport === 'XHTTP' && node.tls === 'TLS';
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['node-share', node?.id],
     queryFn: () => nodesApi.shareLink(node!.id).then((r) => r.data),
-    enabled: !!node,
+    enabled: !!node && !cdnPilot,
     retry: false,
   });
 
-  const uri = data?.uri ?? null;
+  const uri = cdnPilot ? null : data?.uri ?? null;
 
   return (
     <Modal
@@ -117,13 +118,16 @@ export default function NodeShareModal({ node, onClose }: Props) {
       width={560}
       style={{ maxWidth: '95vw' }}
     >
-      {isLoading && (
+      {cdnPilot && <Alert type="info" showIcon message="通过订阅分享 CDN 试点"
+        description="为保持源站隐藏和已验证的 CF 地址，此节点不生成直接域名分享链接。请在订阅管理中加入节点，并选择 XHTTP 试点导出；Shadowrocket 在确认兼容前继续使用原 WS 订阅。"
+        action={<Button href="/subscriptions" onClick={onClose}>订阅管理</Button>} />}
+      {!cdnPilot && isLoading && (
         <div style={{ textAlign: 'center', padding: '32px 0' }}>
           <Spin />
         </div>
       )}
 
-      {isError && (
+      {!cdnPilot && isError && (
         <Alert
           type="error"
           message="获取分享链接失败"
@@ -135,7 +139,7 @@ export default function NodeShareModal({ node, onClose }: Props) {
         />
       )}
 
-      {!isLoading && !isError && !uri && (
+      {!cdnPilot && !isLoading && !isError && !uri && (
         <Empty description="该协议暂不支持分享链接" />
       )}
 

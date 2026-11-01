@@ -40,6 +40,9 @@ export default function CfUsageStatus({ nodes, subscriptions }: { nodes: UsageNo
         message={data.paused ? '此节点自动维护已暂停' : data.enabled ? '后台自动维护已开启' : '后台自动维护未开启'}
         description="候选是否进入订阅，仍受订阅自动优选开关、有效期和 CF 网段校验约束。候选失效不会转为直连源站。" />
       <Descriptions size="small" column={1} items={[
+        { key: 'transport', label: '接入传输', children: data.compatibility === 'XHTTP_OPT_IN'
+          ? <Space wrap><Tag color="cyan">XHTTP + TLS · CDN 试点</Tag><Typography.Text>仅在 XHTTP 试点导出中下发；旧 WS 链接不变</Typography.Text></Space>
+          : `${data.transport ?? 'WS'} + ${data.tls ?? 'TLS'}` },
         { key: 'regions', label: '地区覆盖', children: regions.length ? <Space wrap>{regions.map(r => <Tag key={r.key} color={missingRegions.includes(r.key) ? 'gold' : 'green'}>{r.label} · {missingRegions.includes(r.key) ? '缺少新鲜候选' : '有新鲜候选'}</Tag>)}</Space> : '尚未登记已标注地区的测点' },
         { key: 'range', label: 'CF 网段最近更新', children: timestamp(data.rangeUpdatedAt) },
         { key: 'schedule', label: '探查节奏', children: data.budget?.lowBudget ? '低预算试点 · 每 8 小时复测两轮' : data.budget?.intervalMinutes ? `每 ${data.budget.intervalMinutes} 分钟（额度、失败退避与任务队列可能延后）` : '按后台任务策略调度' },

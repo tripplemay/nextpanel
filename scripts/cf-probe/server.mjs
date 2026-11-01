@@ -31,15 +31,22 @@ export function validateBatch(body) {
     || typeof body.path !== 'string' || !body.path.startsWith('/') || body.path.length > 2048 || /[\r\n\0]/.test(body.path)
     || !Array.isArray(body.downloadIps) || body.downloadIps.length > 3
     || new Set(body.downloadIps).size !== body.downloadIps.length || body.downloadIps.some(ip => !body.ips.includes(ip))
-    || Object.keys(body).some(k => !['ips', 'domain', 'uuid', 'path', 'downloadIps'].includes(k))) throw new Error('INVALID_BATCH');
+    || Object.keys(body).some(k => !['ips', 'domain', 'uuid', 'path', 'downloadIps', 'protocol', 'transport', 'mode'].includes(k))) throw new Error('INVALID_BATCH');
+  if (body.protocol !== undefined || body.transport !== undefined || body.mode !== undefined) {
+    if (body.protocol !== 3 || body.transport !== 'XHTTP' || body.mode !== 'packet-up'
+      || !/^\/[A-Za-z0-9_/-]{1,128}$/.test(body.path)) throw new Error('INVALID_BATCH');
+  }
   return body;
 }
 
 export function xrayConfig(body, ip, port) {
+  const xhttp = body.protocol === 3;
   return { log: { loglevel: 'none' }, inbounds: [{ listen: '127.0.0.1', port, protocol: 'http', settings: {} }],
     outbounds: [{ protocol: 'vless', settings: { vnext: [{ address: ip, port: 443, users: [{ id: body.uuid, encryption: 'none' }] }] },
-      streamSettings: { network: 'ws', security: 'tls', tlsSettings: { serverName: body.domain, allowInsecure: false },
-        wsSettings: { path: body.path, headers: { Host: body.domain } } } }] };
+      streamSettings: { network: xhttp ? 'xhttp' : 'ws', security: 'tls',
+        tlsSettings: { serverName: body.domain, allowInsecure: false, ...(xhttp ? { alpn: ['h2'] } : {}) },
+        ...(xhttp ? { xhttpSettings: { path: body.path, host: body.domain, mode: 'packet-up' } }
+          : { wsSettings: { path: body.path, headers: { Host: body.domain } } }) } }] };
 }
 
 async function freePort() {
@@ -116,11 +123,15 @@ async function runtimeAvailable() {
       const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000, killSignal: 'SIGKILL' });
       let output = '';
       child.stdout.on('data', chunk => { output += chunk; if (output.length > 8192) child.kill('SIGKILL'); });
+      let validVersion = false;
       child.once('close', () => {
         const match = output.match(binary === 'curl' ? /^curl ([\d.]+)/ : /^Xray ([\d.]+)/);
-        if (match) runtimeVersions[binary === 'curl' ? 'curl' : 'xray'] = match[1];
+        if (match) {
+          runtimeVersions[binary === 'curl' ? 'curl' : 'xray'] = match[1];
+          validVersion = binary === 'curl' || match[1] === '26.2.6';
+        }
       });
-      child.once('error', () => resolve(false)); child.once('close', code => resolve(code === 0));
+      child.once('error', () => resolve(false)); child.once('close', code => resolve(code === 0 && validVersion));
     });
     if (!ok) return false;
   }
@@ -191,7 +202,7 @@ export function createProbeServer({ token, id, regionKey = process.env.TENCENTCL
     if (++calls > 30) return send(429, { error: 'RATE_LIMIT' });
     if (!await checkRuntime()) return send(503, { error: 'PROBE_RUNTIME_UNAVAILABLE' });
     if (req.method === 'GET' && req.url === '/capabilities') return send(200, {
-      protocol: 2, probeId: id, egressIp: await lookupEgress(), features: ['vless-ws-tls', 'bounded-download'],
+      protocol: 2, protocols: [2, 3], probeId: id, egressIp: await lookupEgress(), features: ['vless-ws-tls', 'vless-xhttp-tls-packet-up-h2', 'bounded-download'],
       regionKey: regionKey ?? null, networkType: 'CLOUD', maxCandidates: 8, runtime: { ...runtimeVersions },
     });
     if (req.method !== 'POST' || req.url !== '/probe') return send(404, { error: 'NOT_FOUND' });
@@ -209,7 +220,8 @@ export function createProbeServer({ token, id, regionKey = process.env.TENCENTCL
           results.push(await test(body, ip, abort.signal)); }
       }));
       if (results.some(r => r.error)) return send(503, { error: 'PROBE_RUNTIME_UNAVAILABLE' });
-      send(200, { protocol: 2, probeId: id, regionKey: regionKey ?? null, networkType: 'CLOUD', egressIp: await lookupEgress(), results });
+      send(200, { protocol: body.protocol ?? 2, ...(body.protocol === 3 ? { transport: 'XHTTP', mode: 'packet-up' } : {}),
+        probeId: id, regionKey: regionKey ?? null, networkType: 'CLOUD', egressIp: await lookupEgress(), results });
     } catch { send(400, { error: 'INVALID_OR_ABORTED_BATCH' }); }
     finally { clearTimeout(timer); busy = false; }
   });

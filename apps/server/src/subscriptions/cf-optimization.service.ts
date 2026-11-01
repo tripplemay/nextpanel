@@ -8,6 +8,7 @@ import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
 import { allowedByRanges, automaticVariants, regionalCandidates, CfMeasurement, CfObservation, CfProbe,
   discoverCandidates, fingerprint, FRESH_MS, probeRegistry, rangeList, rankCandidates, STALE_MS, updateObservations } from './cf-optimization.util';
 import type { NodeExportInfo } from './uri-builder';
+import { cfXhttpCredentials, isCfXhttp } from '../nodes/protocols/cf-xhttp';
 
 export function nodeFingerprint(node: Record<string, unknown>): string {
   return fingerprint(['userId', 'serverId', 'cfDnsRecordId', 'domain', 'listenPort', 'protocol', 'transport', 'tls', 'credentialsEnc', 'exitType',
@@ -145,6 +146,8 @@ export class CfOptimizationService {
     const regions = [...new Map(probes.filter(p => p.regionKey).map(p => [p.regionKey!, { key: p.regionKey!, label: p.region }])).values()];
     return {
       enabled: process.env.CF_OPTIMIZATION_ENABLED === 'true', paused, registryError,
+      transport: node.transport, tls: node.tls,
+      compatibility: isCfXhttp(node) ? 'XHTTP_OPT_IN' : 'WS_COMPATIBLE',
       budget: { lowBudget, intervalMinutes, monthlyLimit, used: budgetError ? null : used,
         remaining: budgetError || monthlyLimit === null ? null : Math.max(0, monthlyLimit - used),
         estimatedMonthlyBatchesPerNode, constrained: monthlyLimit !== null && estimatedMonthlyBatchesPerNode > monthlyLimit, error: budgetError },
@@ -217,7 +220,7 @@ export class CfOptimizationService {
           include: { subscriptionNodes: { where: { subscription: { cfAuto: true } },
             select: { subscription: { select: { ownerId: true, cfOnly: true, cfProtectedNodeIds: true } } } } } });
         const nodes = selected.filter(node => isCfManagedNode(node) && node.subscriptionNodes.some(({ subscription }) =>
-          subscription.ownerId === node.userId && (subscription.cfOnly || subscription.cfProtectedNodeIds.includes(node.id))));
+          subscription.ownerId === node.userId && (subscription.cfOnly || subscription.cfProtectedNodeIds.includes(node.id) || isCfXhttp(node))));
         const previous = await this.prisma.cfOptimization.findMany({ where: { nodeId: { in: nodes.map(n => n.id) } } });
         const jobs = nodes.flatMap(node => probes.filter(p => !p.nodeIds || p.nodeIds.includes(node.id)).map(probe => ({ node, probe,
           last: previous.find(r => r.nodeId === node.id && r.probeId === probe.id)?.attemptedAt.getTime() ?? 0 })))
@@ -264,7 +267,10 @@ export class CfOptimizationService {
       const capabilities = JSON.parse(await boundedText(await fetch(`${probe.url.replace(/\/$/, '')}/capabilities`,
         { headers, redirect: 'error', signal: AbortSignal.timeout(10_000) }), 8192));
       phase = 'PROBE_IDENTITY_OR_CAPABILITY_MISMATCH';
-      if (capabilities.protocol !== 2 || capabilities.probeId !== probe.id || !capabilities.features?.includes('vless-ws-tls')
+      const xhttp = isCfXhttp(node);
+      if (capabilities.protocol !== 2 || capabilities.probeId !== probe.id
+        || !Array.isArray(capabilities.features) || !capabilities.features.includes(xhttp ? 'vless-xhttp-tls-packet-up-h2' : 'vless-ws-tls')
+        || (xhttp && (!Array.isArray(capabilities.protocols) || !capabilities.protocols.includes(3)))
         || (probe.regionKey && (capabilities.regionKey !== probe.regionKey || capabilities.networkType !== 'CLOUD'))
         || (probe.expectedEgressIp && capabilities.egressIp !== probe.expectedEgressIp)) throw new Error('Probe mismatch');
       const ranges = await this.ranges(); const dns = await this.cf.defaultIp(node.domain!);
@@ -289,12 +295,15 @@ export class CfOptimizationService {
       const value = { requests, bytes: downloadBytes };
       await this.prisma.cfOptimizationState.upsert({ where: { key }, create: { key, value }, update: { value } });
       const credentials = await this.nodes.getCredentials(node.id, node.userId);
+      if (xhttp) cfXhttpCredentials(credentials, node.domain!);
       phase = 'PROBE_UNAVAILABLE';
       const batch = JSON.parse(await boundedText(await fetch(`${probe.url.replace(/\/$/, '')}/probe`, { method: 'POST', headers,
         redirect: 'error', signal: AbortSignal.timeout(90_000), body: JSON.stringify({ ips, domain: node.domain,
-          uuid: credentials.uuid, path: credentials.path || '/', downloadIps }) }), 32768));
+          uuid: credentials.uuid, path: credentials.path || '/', downloadIps,
+          ...(xhttp ? { protocol: 3, transport: 'XHTTP', mode: 'packet-up' } : {}) }) }), 32768));
       phase = 'INVALID_PROBE_RESULT';
-      if (batch.protocol !== 2 || batch.probeId !== probe.id || (probe.regionKey && (batch.regionKey !== probe.regionKey || batch.networkType !== 'CLOUD'))
+      if (batch.protocol !== (xhttp ? 3 : 2) || (xhttp && (batch.transport !== 'XHTTP' || batch.mode !== 'packet-up'))
+        || batch.probeId !== probe.id || (probe.regionKey && (batch.regionKey !== probe.regionKey || batch.networkType !== 'CLOUD'))
         || (probe.expectedEgressIp && batch.egressIp !== probe.expectedEgressIp)
         || !Array.isArray(batch.results) || batch.results.length !== ips.length) throw new Error('Invalid batch');
       const results = batch.results as CfMeasurement[];

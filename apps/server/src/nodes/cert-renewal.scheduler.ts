@@ -37,6 +37,7 @@ export class CertRenewalScheduler {
         domain: { not: null },
         OR: [
           { transport: 'TCP' },
+          { protocol: 'VLESS', transport: 'XHTTP' },
           { protocol: { in: ['TUIC', 'ANYTLS'] } },
         ],
       },

@@ -181,6 +181,7 @@ export class XrayTestService {
         port: node.port,
         domain: node.domain,
         credentials: node.credentials,
+        secureProbe: node.secureProbe,
       },
       socksPort,
     );

@@ -17,6 +17,7 @@ import * as crypto from 'crypto';
 export type SupportedProtocol =
   | 'VLESS_REALITY'
   | 'VLESS_XHTTP_REALITY'
+  | 'VLESS_XHTTP_TLS'
   | 'VLESS_WS_TLS'
   | 'VLESS_TCP_TLS'
   | 'HYSTERIA2'
@@ -28,6 +29,7 @@ export type SupportedProtocol =
 export const SUPPORTED_PROTOCOLS: SupportedProtocol[] = [
   'VLESS_REALITY',
   'VLESS_XHTTP_REALITY',
+  'VLESS_XHTTP_TLS',
   'VLESS_WS_TLS',
   'VLESS_TCP_TLS',
   'HYSTERIA2',
@@ -69,6 +71,7 @@ export interface ProtocolPreset {
    * Port map:
    *   VLESS_REALITY  listen 10000–10999  stats 30000–30999
    *   VLESS_XHTTP_REALITY listen 443 (fixed)  stats 20443 (fixed)
+   *   VLESS_XHTTP_TLS listen 443 (fixed)  stats 20443 (fixed)
    *   VLESS_WS_TLS   listen 443 (fixed)  stats 20443 (fixed)
    *   VLESS_TCP_TLS  listen 12000–12999  stats 32000–32999
    *   HYSTERIA2      listen 13000–13999  (no stats — sing-box)
@@ -124,6 +127,17 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
     tls: 'TLS',
     fixedPort: 443,
     portBase: null,
+  },
+  VLESS_XHTTP_TLS: {
+    label: 'VLESS + XHTTP + TLS (CDN 试点)',
+    description: '经 Cloudflare CDN，独立试点；需要空闲 443，不替换现有 WS。客户端须明确启用 XHTTP 导出。',
+    tags: [
+      { text: 'CDN 试点', color: 'cyan' },
+      { text: '新版 Mihomo', color: 'blue' },
+      { text: '保留 WS', color: 'gold' },
+    ],
+    protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'TLS',
+    fixedPort: 443, portBase: null,
   },
   VLESS_TCP_TLS: {
     label: 'VLESS + TCP + TLS',
@@ -230,6 +244,11 @@ export const CREDENTIAL_GENERATORS: Record<
   },
   VLESS_WS_TLS: () => ({
     uuid: crypto.randomUUID(),
+  }),
+  VLESS_XHTTP_TLS: () => ({
+    uuid: crypto.randomUUID(),
+    path: `/${crypto.randomBytes(18).toString('base64url')}`,
+    xhttpMode: 'packet-up',
   }),
   VLESS_TCP_TLS: () => ({
     uuid: crypto.randomUUID(),

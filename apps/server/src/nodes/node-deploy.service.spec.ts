@@ -1954,7 +1954,30 @@ describe('NodeDeployService', () => {
   });
 
   describe('deploy — XHTTP, TUIC, and AnyTLS', () => {
+    it.each([null, '25.3.6', '26.2.7'])('rejects unreviewed CDN pilot core %s without replacing a shared binary', async version => {
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ ...fakeNode,
+        protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'TLS', domain: 'cdn.example.com' });
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.configSnapshot.create as jest.Mock).mockResolvedValue({});
+      mockConnectSsh.mockResolvedValue(mockSsh);
+      mockBinaryExists.mockResolvedValue(version !== null);
+      mockExecCommand.mockResolvedValue({ code: 0, stdout: `Xray ${version}`, stderr: '' });
+      const install = jest.spyOn(internalSvc, 'autoInstall');
+      const stage = jest.spyOn(internalSvc, 'stageAndValidateConfig');
+      const result = await svc.deploy('node-1');
+      expect(result.success).toBe(false);
+      expect(result.log).toContain('no shared core will be automatically replaced');
+      expect(install).not.toHaveBeenCalled(); expect(stage).not.toHaveBeenCalled();
+      expect(mockCertService.ensureWildcardCert).not.toHaveBeenCalled();
+    });
     const cases = [
+      {
+        label: 'XHTTP CDN',
+        node: { protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'TLS' },
+        version: 'Xray 26.2.6 (Xray, Penetrates Everything.)',
+        versionBin: '/usr/local/bin/xray',
+        socket: 'tcp',
+      },
       {
         label: 'XHTTP',
         node: { protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'REALITY' },
@@ -2220,12 +2243,12 @@ describe('NodeDeployService', () => {
       )).toBe(false);
     });
 
-    it.each(['TUIC', 'ANYTLS'])('fails closed when %s has no Cloudflare token', async (protocol) => {
+    it.each(['TUIC', 'ANYTLS', 'VLESS'])('fails closed when %s has no Cloudflare token', async (protocol) => {
       const modernNode = {
         ...fakeNode,
         protocol,
-        implementation: 'SING_BOX',
-        transport: null,
+        implementation: protocol === 'VLESS' ? 'XRAY' : 'SING_BOX',
+        transport: protocol === 'VLESS' ? 'XHTTP' : null,
         tls: 'TLS',
         source: 'MANUAL',
         domain: 'np-node-1.example.com',
@@ -2239,7 +2262,7 @@ describe('NodeDeployService', () => {
       (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue(null);
       mockExecCommand.mockReset().mockResolvedValue({
         code: 0,
-        stdout: 'sing-box version 1.12.0',
+        stdout: protocol === 'VLESS' ? 'Xray 26.2.6' : 'sing-box version 1.12.0',
         stderr: '',
       });
 

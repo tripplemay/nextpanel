@@ -56,7 +56,7 @@ printf '%s\\n' "$step" >> "$TEST_ROOT/events"
       }
       const result = spawnSync('bash', ['scripts/ci/verify.sh'], {
         cwd: temp, encoding: 'utf8',
-        env: { ...process.env, TEST_ROOT: temp, PG_BIN: '/fixture', XRAY_BINARY: '/fixture/xray', GO_BINARY: join(temp, 'bin/go'), FAIL_STEP: failure, PATH: `${temp}/bin:${process.env.PATH}` },
+        env: { ...process.env, TEST_ROOT: temp, PG_BIN: '/fixture', XRAY_BINARY: '/fixture/xray', MIHOMO_BINARY: '/fixture/mihomo', GO_BINARY: join(temp, 'bin/go'), FAIL_STEP: failure, PATH: `${temp}/bin:${process.env.PATH}` },
       });
       assert.equal(result.status, failure ? 42 : 0, result.stderr);
       const events = readFileSync(join(temp, 'events'), 'utf8').trim().split('\n');

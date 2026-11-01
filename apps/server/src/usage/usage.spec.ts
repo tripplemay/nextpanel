@@ -45,6 +45,17 @@ describe('server usage evidence boundaries', () => {
     expect(usageEligible(node)).toBe(true);
     for (const change of [{ implementation: 'SING_BOX' }, { transport: 'TCP' }, { tls: 'REALITY' }, { cfDnsRecordId: null }]) expect(usageEligible({ ...node, ...change })).toBe(false);
   });
+  it('shows implicit CDN pilot protection without claiming fresh or active usage', async () => {
+    const pilot = { ...node, userId: 'owner', transport: 'XHTTP', server: {}, usageState: null };
+    const db = { subscription: { findMany: async () => [{ id: 'sub', name: 'pilot', usageEnabled: false, cfOnly: false,
+      cfAuto: false, cfProtectedNodeIds: [], nodes: [{ nodeId: pilot.id, node: pilot }], _count: { externalNodes: 0 } }] },
+      usageCredential: { findMany: async () => [] }, user: { findMany: async () => [] } };
+    const service = new UsageService(db as any, {} as any);
+    const result = await service.overview('owner');
+    expect(result.nodes[0]).toMatchObject({ eligible: true, observing: false, fresh: false, preparedAt: null });
+    expect(result.subscriptions[0].protectedCount).toBe(1);
+    expect(result.summary.activeSubjects).toBe(0);
+  });
   it('never reports a stale or first sample as activity or a measured zero', () => {
     const now = 1_000_000;
     expect(usageStatus(null, null, false, now)).toBe('PENDING');

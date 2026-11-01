@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma.service';
 import { NodesService } from '../nodes/nodes.service';
 import { XrayTestService } from '../nodes/xray-test/xray-test.service';
 import { assertCfManagedNode, isCfManagedNode, isCloudflareIp, normalizeCfPreferredIps } from './cf-access.util';
+import { cfXhttpCredentials, isCfXhttp } from '../nodes/protocols/cf-xhttp';
 
 @Injectable()
 export class CfAccessService {
@@ -81,7 +82,7 @@ export class CfAccessService {
     const directSibling = await this.prisma.node.findFirst({
       where: {
         userId: ownerId, server: { ip: node.server.ip },
-        OR: [{ protocol: { not: 'VLESS' } }, { transport: { not: 'WS' } }, { transport: null }, { tls: { not: 'TLS' } }],
+        OR: [{ protocol: { not: 'VLESS' } }, { transport: { notIn: ['WS', 'XHTTP'] } }, { transport: null }, { tls: { not: 'TLS' } }, { cfDnsRecordId: null }],
       },
       select: { id: true },
     });
@@ -109,7 +110,7 @@ export class CfAccessService {
       const result = await this.xray.testWithParams({
         protocol: node.protocol, transport: node.transport, tls: node.tls,
         host, port: node.listenPort, domain: node.domain,
-        credentials: { ...credentials, transportHost: node.domain! },
+        credentials: isCfXhttp(node) ? cfXhttpCredentials(credentials, node.domain!) : { ...credentials, transportHost: node.domain! },
         secureProbe: true,
         requireUdp: node.exitType === 'SOCKS5',
       });

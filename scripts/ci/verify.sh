@@ -5,6 +5,7 @@ cd "$ROOT"
 mkdir -p out/ci
 : "${PG_BIN:?Set PG_BIN to a PostgreSQL 16+ toolchain; tests create an isolated cluster}"
 : "${XRAY_BINARY:?Set XRAY_BINARY to a verified Xray binary for loopback identity tests}"
+: "${MIHOMO_BINARY:?Set MIHOMO_BINARY to verified Mihomo 1.19.29 for CDN transport tests}"
 export GO_BINARY="${GO_BINARY:-$(command -v go)}"
 : "${GO_BINARY:?Install Go for Agent and native telemetry validation}"
 export NEXT_TELEMETRY_DISABLED=1

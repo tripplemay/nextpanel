@@ -49,7 +49,7 @@ describe('mixed subscriptions with per-node CDN protection', () => {
   });
   it('keeps strict CF-only restrictions and rejects auto mode with no compatible or foreign nodes', async () => {
     await expect(service.create('strict', ['cf', 'plain'], 'owner', ['external'], { cfOnly: true, cfAuto: true })).rejects.toThrow('no external nodes');
-    await expect(service.create('strict', ['cf', 'plain'], 'owner', [], { cfOnly: true })).rejects.toThrow('VLESS+WS+TLS');
+    await expect(service.create('strict', ['cf', 'plain'], 'owner', [], { cfOnly: true })).rejects.toThrow('VLESS+WS/XHTTP+TLS');
     await expect(service.create('empty', ['plain'], 'owner', ['external'], { cfAuto: true })).rejects.toThrow('1-20 compatible');
     await expect(service.create('foreign', ['cf'], 'other-owner', [], { cfAuto: true })).rejects.toThrow('selection is not available');
     expect(db.subscription.create).not.toHaveBeenCalled();

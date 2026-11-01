@@ -10,6 +10,7 @@ import { OperationLogService } from '../operation-log/operation-log.service';
 import { CertService, type RemoteCertUpdate } from '../common/cert/cert.service';
 import { CloudflareService } from '../cloudflare/cloudflare.service';
 import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.service';
+import { CF_XHTTP_XRAY_VERSION, isCfXhttp } from './protocols/cf-xhttp';
 import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
 import { generateConfig, generateChainExitConfig, getBinaryCommand, NodeInfo } from './config/config-generator';
 import { connectSsh, uploadText, binaryExists, whichBinary, detectPackageManager } from './ssh/ssh.util';
@@ -247,7 +248,14 @@ export class NodeDeployService {
 
       // ── 4. Check binary, auto-install if missing ──────────────────────────
       log(`Checking binary: ${bin}`);
-      if (!(await binaryExists(ssh, bin))) {
+      const present = await binaryExists(ssh, bin);
+      if (isCfXhttp(node)) {
+        const version = present ? await ssh.execCommand(`${bin} version 2>&1`) : null;
+        if (!version || version.code !== 0 || extractStableCoreVersion('XRAY', version.stdout) !== CF_XHTTP_XRAY_VERSION) {
+          throw new Error(`CDN XHTTP pilot requires reviewed Xray ${CF_XHTTP_XRAY_VERSION}; no shared core will be automatically replaced`);
+        }
+      }
+      if (!present) {
         log(`Binary not found: ${bin}. Starting auto-install...`);
         const impl = (node.implementation ?? 'XRAY').toUpperCase();
         const resolvedBin = await this.autoInstall(ssh, impl, log);
@@ -304,7 +312,8 @@ export class NodeDeployService {
       }
 
       // ── 5. Provision TLS certificate ───────────────────────────────────────
-      const strictManagedTls = node.protocol === 'TUIC' || node.protocol === 'ANYTLS';
+      const strictManagedTls = node.protocol === 'TUIC' || node.protocol === 'ANYTLS'
+        || (node.protocol === 'VLESS' && node.transport === 'XHTTP' && node.tls === 'TLS');
       const hasDomain = !!node.domain?.trim();
       if (strictManagedTls && !hasDomain) {
         throw new Error(`${node.protocol} requires a managed domain and trusted TLS certificate`);

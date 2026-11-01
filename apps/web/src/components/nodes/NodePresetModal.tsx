@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { App, Modal, Form, Input, Select, Tag, Space, Radio, Segmented } from 'antd';
+import { Alert, App, Modal, Form, Input, Select, Tag, Space, Radio, Segmented } from 'antd';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { nodesApi, serversApi } from '@/lib/api';
 import type { CreateChainNodeDto, Node } from '@/types/api';
@@ -41,6 +41,7 @@ export default function NodePresetModal({
 }: Props) {
   const { message } = App.useApp();
   const [form] = Form.useForm();
+  const selectedPreset = Form.useWatch('preset', form);
   const [deployMode, setDeployMode] = useState<DeployMode>('direct');
   const [chainExitType, setChainExitType] = useState<ChainExitType>('MANAGED_SERVER');
   const [serverId, setServerId] = useState<string | undefined>(undefined);
@@ -48,7 +49,7 @@ export default function NodePresetModal({
   const { data: presets } = useQuery({
     queryKey: ['node-presets'],
     queryFn: () => nodesApi.listPresets().then((r) => r.data),
-    staleTime: Infinity, // presets never change at runtime
+    staleTime: 30_000,
   });
 
   const { data: servers } = useQuery({
@@ -253,7 +254,7 @@ export default function NodePresetModal({
         <Form.Item name="preset" label="协议预设" rules={[{ required: true, message: '请选择协议预设' }]}>
           <Select
             placeholder="选择协议预设"
-            options={presets?.map((p) => ({ value: p.value, label: p.label, tags: p.tags }))}
+            options={presets?.map((p) => ({ value: p.value, label: p.disabled ? `${p.label} · 尚未开放` : p.label, tags: p.tags, disabled: p.disabled }))}
             optionRender={(option) => (
               <div style={{ padding: '4px 0' }}>
                 <div>{option.data.label}</div>
@@ -268,6 +269,10 @@ export default function NodePresetModal({
             )}
           />
         </Form.Item>
+
+        {selectedPreset === 'VLESS_XHTTP_TLS' && <Alert style={{ marginBottom: 16 }} type="warning" showIcon
+          message="独立 CDN 试点，不替换 WS"
+          description="需要空闲的 443 端口和有效 CF 域名；已占用时会拒绝创建。OpenClash 需新版 Meta/Mihomo 并使用 XHTTP 试点链接。Shadowrocket 在实测确认前继续使用原 WS 链接。" />}
 
         <Form.Item
           name="name"
