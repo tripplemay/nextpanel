@@ -15,6 +15,9 @@ const STATUS_COLOR: Record<string, string> = {
   PENDING: 'gold',
   COMPLETED: 'green',
   FAILED: 'red',
+  DIRECT_ACCESS: 'default',
+  CDN_ACCESS: 'cyan',
+  ACCESS_UNCONFIRMED: 'default',
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -29,6 +32,9 @@ const STATUS_LABEL: Record<string, string> = {
   PENDING: '排队中',
   COMPLETED: '已完成',
   FAILED: '失败',
+  DIRECT_ACCESS: '直连',
+  CDN_ACCESS: 'CDN 保护',
+  ACCESS_UNCONFIRMED: '接入方式待确认',
 };
 
 interface StatusTagProps {

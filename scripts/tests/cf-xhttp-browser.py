@@ -48,9 +48,9 @@ with sync_playwright() as p:
                     'cfOriginRoute': {'state': 'READY', 'port': 8443, 'ruleId': 'fixture-rule', 'rulesetId': 'fixture-set',
                         'checkedAt': datetime.now(timezone.utc).isoformat(), 'domain': node['domain']}}])
             elif url.path == '/api/nodes/presets':
-                route.fulfill(json=[{'value': 'VLESS_WS_TLS', 'label': 'VLESS + WS + TLS', 'description': 'Existing compatibility path'},
+                route.fulfill(json=[{'value': 'VLESS_WS_TLS', 'label': 'VLESS + WS + TLS', 'description': 'Existing compatibility path', 'accessMode': 'CDN'},
                                     {'value': 'VLESS_XHTTP_TLS', 'label': 'VLESS + XHTTP + TLS (CDN 试点)',
-                                     'description': 'Isolated pilot', 'disabled': not state['gate']}])
+                                     'description': 'Isolated pilot', 'accessMode': 'CDN', 'disabled': not state['gate']}])
             elif url.path.startswith('/api/subscriptions/cf-access/optimization/'):
                 route.fulfill(json={'enabled': False, 'profiles': [], 'missingRegions': []})
             else:
@@ -122,6 +122,7 @@ with sync_playwright() as p:
                 option.click()
                 page.get_by_label('节点名称', exact=True).click()
                 expect(page.locator('.ant-select-dropdown:visible')).to_have_count(0)
+                dialog.get_by_text('XHTTP 部署与客户端要求 · 不替换网站或 WS', exact=True).click()
                 expect(dialog.get_by_text(re.compile('自动检测端口'))).to_be_visible()
                 page.screenshot(path=str(output / f'cf-xhttp-preset-{width}-{mode}.png'), full_page=True, animations='disabled')
             else:

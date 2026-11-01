@@ -34,6 +34,16 @@ export interface CreateNodeFromPresetDto {
   preset: string;
 }
 
+export interface NodePreset {
+  value: string;
+  label: string;
+  description: string;
+  // Older servers may omit this during a rolling release; never infer protection from a domain.
+  accessMode?: 'DIRECT' | 'CDN';
+  disabled?: boolean;
+  tags: { text: string; color: string }[];
+}
+
 export interface CreateChainNodeDto {
   name: string;
   preset: string;
