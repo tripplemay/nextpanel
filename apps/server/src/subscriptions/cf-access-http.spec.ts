@@ -22,6 +22,10 @@ describe('CF access authenticated HTTP boundary', () => {
   const cf = new CfAccessService(db as any, { getCredentials: async () => ({ uuid: 'fixture' }) } as any, xray as any);
   const subscriptions = { create: jest.fn().mockResolvedValue({ id: 'created' }),
     update: jest.fn().mockResolvedValue({ id: 'updated' }),
+    generateContent: jest.fn().mockResolvedValue('fixture'),
+    generateContentByShareToken: jest.fn().mockResolvedValue('fixture'),
+    generateClashContent: jest.fn().mockResolvedValue({ content: 'proxies: []', name: 'fixture' }),
+    generateClashContentByShareToken: jest.fn().mockResolvedValue({ content: 'proxies: []', name: 'fixture' }),
     generateCfProvider: jest.fn().mockResolvedValue('proxies: []'),
     generateHomeProxyContentByShareToken: jest.fn().mockResolvedValue('{"fixture":true}') };
   const optimizer = { status: jest.fn().mockResolvedValue({ enabled: false }), rollback: jest.fn().mockResolvedValue({ paused: true }), resume: jest.fn().mockResolvedValue({ paused: false }) };
@@ -97,7 +101,7 @@ describe('CF access authenticated HTTP boundary', () => {
     for (const [kind, tokenKey] of [['link', 'token'], ['share', 'shareToken']]) {
       const response = await fetch(`${base}/subscriptions/${kind}/fixture/cf-provider/node`);
       expect(response.status).toBe(200); expect(response.headers.get('cache-control')).toContain('no-store');
-      expect(subscriptions.generateCfProvider).toHaveBeenCalledWith({ [tokenKey]: 'fixture' }, 'node');
+      expect(subscriptions.generateCfProvider).toHaveBeenCalledWith({ [tokenKey]: 'fixture' }, 'node', 'compatible');
     }
   });
   it('accepts independent mixed auto mode but rejects client-controlled protection scopes', async () => {
@@ -111,5 +115,24 @@ describe('CF access authenticated HTTP boundary', () => {
         body: JSON.stringify({ ...body, cfProtectedNodeIds: [] }) })).status).toBe(400);
       expect(action).toHaveBeenCalledTimes(count);
     }
+  });
+  it.each([
+    ['link', '', 'generateContent'], ['share', '', 'generateContentByShareToken'],
+    ['link', '/clash', 'generateClashContent'], ['share', '/clash', 'generateClashContentByShareToken'],
+    ['link', '/cf-provider/node', 'generateCfProvider'], ['share', '/cf-provider/node', 'generateCfProvider'],
+  ] as const)('validates explicit client profiles on %s%s without guessing user-agent', async (kind, suffix, method) => {
+    const url = `${base}/subscriptions/${kind}/fixture${suffix}`;
+    for (const [query, profile] of [['', 'compatible'], ['?profile=compatible', 'compatible'], ['?profile=xhttp', 'xhttp']]) {
+      const response = await fetch(url + query, { headers: { 'User-Agent': 'Mihomo/1.19.29' } });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toContain('no-store');
+      const args = suffix.startsWith('/cf-provider') ? [{ [kind === 'link' ? 'token' : 'shareToken']: 'fixture' }, 'node', profile] : ['fixture', profile];
+      expect(subscriptions[method]).toHaveBeenLastCalledWith(...args);
+    }
+    const count = subscriptions[method].mock.calls.length;
+    for (const query of ['?profile=', '?profile=latest', '?profile=xhttp&profile=compatible']) {
+      expect((await fetch(url + query)).status).toBe(400);
+    }
+    expect(subscriptions[method]).toHaveBeenCalledTimes(count);
   });
 });

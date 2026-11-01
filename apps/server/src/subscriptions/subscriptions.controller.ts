@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
   Res,
 } from '@nestjs/common';
@@ -23,6 +24,7 @@ import { CheckCfAccessDto } from './dto/check-cf-access.dto';
 import { CfOptimizationService } from './cf-optimization.service';
 import { UsageEnabledDto } from '../usage/usage.dto';
 import { Audit } from '../common/decorators/audit.decorator';
+import { clientProfile } from './client-profile';
 
 @ApiTags('subscriptions')
 @Controller('subscriptions')
@@ -59,15 +61,15 @@ export class SubscriptionsController {
   }
 
   @Get('link/:token/cf-provider/:nodeId')
-  async cfProvider(@Param('token') token: string, @Param('nodeId') nodeId: string, @Res() res: Response) {
+  async cfProvider(@Param('token') token: string, @Param('nodeId') nodeId: string, @Res() res: Response, @Query('profile') profile?: string) {
     res.setHeader('Cache-Control', 'private, no-store');
-    res.type('text/plain').send(await this.subscriptionsService.generateCfProvider({ token }, nodeId));
+    res.type('text/plain').send(await this.subscriptionsService.generateCfProvider({ token }, nodeId, clientProfile(profile)));
   }
 
   @Get('share/:shareToken/cf-provider/:nodeId')
-  async sharedCfProvider(@Param('shareToken') shareToken: string, @Param('nodeId') nodeId: string, @Res() res: Response) {
+  async sharedCfProvider(@Param('shareToken') shareToken: string, @Param('nodeId') nodeId: string, @Res() res: Response, @Query('profile') profile?: string) {
     res.setHeader('Cache-Control', 'private, no-store');
-    res.type('text/plain').send(await this.subscriptionsService.generateCfProvider({ shareToken }, nodeId));
+    res.type('text/plain').send(await this.subscriptionsService.generateCfProvider({ shareToken }, nodeId, clientProfile(profile)));
   }
 
   @Post('cf-access/check')
@@ -186,8 +188,9 @@ export class SubscriptionsController {
   /** Public — Base64 universal subscription (V2Ray / Xray compatible) */
   @Get('link/:token')
   @ApiOperation({ summary: 'Base64 universal subscription content' })
-  async getContent(@Param('token') token: string, @Res() res: Response) {
-    const content = await this.subscriptionsService.generateContent(token);
+  async getContent(@Param('token') token: string, @Res() res: Response, @Query('profile') profile?: string) {
+    const content = await this.subscriptionsService.generateContent(token, clientProfile(profile));
+    res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Subscription-Userinfo', 'upload=0; download=0; total=0');
     res.send(content);
@@ -196,8 +199,9 @@ export class SubscriptionsController {
   /** Public — Clash / Mihomo YAML subscription */
   @Get('link/:token/clash')
   @ApiOperation({ summary: 'Clash / Mihomo YAML subscription content' })
-  async getClashContent(@Param('token') token: string, @Res() res: Response) {
-    const { content, name } = await this.subscriptionsService.generateClashContent(token);
+  async getClashContent(@Param('token') token: string, @Res() res: Response, @Query('profile') profile?: string) {
+    const { content, name } = await this.subscriptionsService.generateClashContent(token, clientProfile(profile));
+    res.setHeader('Cache-Control', 'private, no-store');
     const filename = encodeURIComponent(name) + '.yaml';
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
@@ -229,8 +233,9 @@ export class SubscriptionsController {
   /** Public — VIEWER shareToken Base64 */
   @Get('share/:shareToken')
   @ApiOperation({ summary: 'VIEWER shared subscription — Base64 universal' })
-  async getShareContent(@Param('shareToken') shareToken: string, @Res() res: Response) {
-    const content = await this.subscriptionsService.generateContentByShareToken(shareToken);
+  async getShareContent(@Param('shareToken') shareToken: string, @Res() res: Response, @Query('profile') profile?: string) {
+    const content = await this.subscriptionsService.generateContentByShareToken(shareToken, clientProfile(profile));
+    res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Subscription-Userinfo', 'upload=0; download=0; total=0');
     res.send(content);
@@ -239,8 +244,9 @@ export class SubscriptionsController {
   /** Public — VIEWER shareToken Clash YAML */
   @Get('share/:shareToken/clash')
   @ApiOperation({ summary: 'VIEWER shared subscription — Clash YAML' })
-  async getShareClashContent(@Param('shareToken') shareToken: string, @Res() res: Response) {
-    const { content, name } = await this.subscriptionsService.generateClashContentByShareToken(shareToken);
+  async getShareClashContent(@Param('shareToken') shareToken: string, @Res() res: Response, @Query('profile') profile?: string) {
+    const { content, name } = await this.subscriptionsService.generateClashContentByShareToken(shareToken, clientProfile(profile));
+    res.setHeader('Cache-Control', 'private, no-store');
     const filename = encodeURIComponent(name) + '.yaml';
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);

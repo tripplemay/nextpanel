@@ -11,6 +11,7 @@ import { uploadText } from '../nodes/ssh/ssh.util';
 import { UsageService } from './usage.service';
 import { runtimeUsers, usageConfig, usageStagingPaths } from './usage-config';
 import { LEGACY_EMAIL, usageEligible, usageEmail } from './usage.util';
+import { isCfXhttp } from '../nodes/protocols/cf-xhttp';
 
 @Injectable()
 export class UsageProvisioner {
@@ -23,7 +24,7 @@ export class UsageProvisioner {
     if (!this.usage.enabled() || this.busy) return;
     this.busy = true;
     try {
-      const nodes = await this.prisma.usageNode.findMany({ where: { preparedAt: { not: null }, node: { enabled: true, status: 'RUNNING', protocol: 'VLESS', transport: 'WS', tls: 'TLS', statsPort: { not: null }, server: { retiredAt: null, status: 'ONLINE' } } },
+      const nodes = await this.prisma.usageNode.findMany({ where: { preparedAt: { not: null }, node: { enabled: true, status: 'RUNNING', protocol: 'VLESS', transport: { in: ['WS', 'XHTTP'] }, tls: 'TLS', statsPort: { not: null }, server: { retiredAt: null, status: 'ONLINE' } } },
         orderBy: { syncedAt: 'asc' }, take: 5, include: { node: { select: { userId: true } } } });
       for (const n of nodes) await this.sync(n.nodeId, n.node.userId, false).catch(() => undefined);
       await this.prisma.usageBucket.deleteMany({ where: { timestamp: { lt: new Date(Date.now() - 30 * 86400_000) } } });
@@ -41,7 +42,7 @@ export class UsageProvisioner {
         || node.server.retiredAt || ['DELETING', 'ERROR'].includes(node.server.status)) throw new BadRequestException('Node is not eligible for observation');
       if (!node.usageState) {
         const observed = await this.prisma.subscription.count({ where: { ownerId, usageEnabled: true, nodes: { some: { nodeId } },
-          OR: [{ cfOnly: true }, { cfProtectedNodeIds: { has: nodeId } }] } });
+          ...(isCfXhttp(node) ? {} : { OR: [{ cfOnly: true }, { cfProtectedNodeIds: { has: nodeId } }] }) } });
         if (!observed) throw new BadRequestException('Node is not in an observed subscription');
         await this.prisma.usageNode.upsert({ where: { nodeId }, create: { nodeId }, update: {} });
       }

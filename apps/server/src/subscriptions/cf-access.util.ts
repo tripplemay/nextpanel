@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { BlockList, isIP } from 'net';
 import { isFQDN } from 'class-validator';
 import type { NodeExportInfo } from './uri-builder';
+import { cfXhttpCredentials } from '../nodes/protocols/cf-xhttp';
 
 // Reviewed 2026-10-31: https://www.cloudflare.com/ips-v4 and /ips-v6.
 // Never replace this allowlist with a user-supplied range or third-party feed.
@@ -48,14 +49,14 @@ type CfManagedNode = {
 };
 
 export function isCfManagedNode(node: CfManagedNode): boolean {
-  return node.protocol === 'VLESS' && node.transport === 'WS' && node.tls === 'TLS'
+  return node.protocol === 'VLESS' && ['WS', 'XHTTP'].includes(node.transport ?? '') && node.tls === 'TLS'
     && node.listenPort === 443 && !!node.cfDnsRecordId && !!node.domain
     && node.domain.length <= 253 && isFQDN(node.domain);
 }
 
 export function assertCfManagedNode(node: CfManagedNode): void {
   if (!isCfManagedNode(node)) {
-    throw new BadRequestException('CF-only requires managed VLESS+WS+TLS nodes on port 443 with a Cloudflare domain');
+    throw new BadRequestException('CF-only requires managed VLESS+WS/XHTTP+TLS nodes on port 443 with a Cloudflare domain');
   }
 }
 
@@ -68,6 +69,11 @@ export function cfVariants(node: NodeExportInfo, nodeId: string, preferredIps: s
     host,
     name: `${group} ${label}`,
     cfGroup: group,
-    credentials: { ...node.credentials, transportHost: node.domain! },
+    credentials: cfTransportCredentials(node),
   }));
+}
+
+export function cfTransportCredentials(node: NodeExportInfo): Record<string, string> {
+  if (node.transport === 'XHTTP') return cfXhttpCredentials(node.credentials, node.domain!);
+  return { ...node.credentials, transportHost: node.domain! };
 }

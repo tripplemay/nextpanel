@@ -61,6 +61,7 @@ export class NodesController {
     return SUPPORTED_PROTOCOLS.map((key) => ({
       value: key,
       ...PROTOCOL_PRESETS[key],
+      disabled: key === 'VLESS_XHTTP_TLS' && process.env.CF_XHTTP_PILOT_ENABLED !== 'true',
     }));
   }
 

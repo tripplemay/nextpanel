@@ -14,9 +14,11 @@ import { PROTOCOL_PRESETS, CREDENTIAL_GENERATORS, type SupportedProtocol } from 
 import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
 import { parseSocksUri, SocksUriParseError, type ParsedSocksUri } from './socks-uri';
 import { ResourceLifecycleService } from '../resources/resource-lifecycle.service';
+import { assertCfXhttpPilotEnabled, cfXhttpCredentials, isCfXhttp } from './protocols/cf-xhttp';
 
 const CLOUDFLARE_PRESETS = new Set<SupportedProtocol>([
   'VLESS_WS_TLS',
+  'VLESS_XHTTP_TLS',
   'VLESS_TCP_TLS',
   'TUIC_V5',
   'ANYTLS',
@@ -46,6 +48,7 @@ export class NodesService {
       tls: dto.tls,
     });
     const egressIpPolicy = dto.egressIpPolicy ?? 'AUTO';
+    if (isCfXhttp(shape)) throw new BadRequestException('Create CDN XHTTP nodes with the managed VLESS_XHTTP_TLS preset');
     assertEgressIpPolicySupported(shape, egressIpPolicy);
     assertRecommendedPort(shape, dto.listenPort);
     const requiresManagedDns = isManagedCertificateProtocol(shape.protocol);
@@ -96,6 +99,7 @@ export class NodesService {
   async createFromPreset(userId: string, dto: CreateNodeFromPresetDto) {
     await this.assertOwnedServer(dto.serverId, userId);
     const presetKey = dto.preset as SupportedProtocol;
+    if (presetKey === 'VLESS_XHTTP_TLS') assertCfXhttpPilotEnabled();
     if (CLOUDFLARE_PRESETS.has(presetKey)) await this.assertActiveCloudflare(userId);
 
     const preset = PROTOCOL_PRESETS[presetKey];
@@ -130,8 +134,8 @@ export class NodesService {
     // Auto-create Cloudflare DNS A records for CDN/TLS nodes. Modern TLS
     // protocols require DNS-only records and roll back creation on failure.
     if (CLOUDFLARE_PRESETS.has(presetKey)) {
-      const strict = STRICT_DNS_PRESETS.has(presetKey);
-      const proxied = presetKey === 'VLESS_WS_TLS';
+      const strict = STRICT_DNS_PRESETS.has(presetKey) || presetKey === 'VLESS_XHTTP_TLS';
+      const proxied = presetKey === 'VLESS_WS_TLS' || presetKey === 'VLESS_XHTTP_TLS';
       try {
         await this.provisionCloudflareDns(userId, node.id, dto.serverId, proxied, strict);
       } catch (err) {
@@ -216,6 +220,13 @@ export class NodesService {
       tls: dto.tls ?? (enteringXhttp || enteringManagedProtocol ? undefined : existing.tls),
     });
     const targetListenPort = dto.listenPort ?? existing.listenPort;
+    if (isCfXhttp(shape) || isCfXhttp(existing)) {
+      if (shape.protocol !== existing.protocol || shape.transport !== existing.transport || shape.tls !== existing.tls
+        || targetListenPort !== existing.listenPort || (dto.domain !== undefined && dto.domain !== existing.domain)
+        || dto.credentials !== undefined) {
+        throw new BadRequestException('CDN XHTTP pilot cannot replace an existing transport or identity in place; retain the WS node');
+      }
+    }
     const targetEgressIpPolicy = dto.egressIpPolicy ?? existing.egressIpPolicy;
     assertEgressIpPolicySupported(shape, targetEgressIpPolicy);
     assertRecommendedPort(shape, targetListenPort);
@@ -472,6 +483,7 @@ export class NodesService {
       include: { server: { select: { ip: true } } },
     });
     if (!node) throw new NotFoundException(`Node ${id} not found`);
+    if (isCfXhttp(node)) throw new BadRequestException('Use the XHTTP pilot subscription to preserve verified CDN addresses');
     const credentials = await this.getCredentials(id, userId);
     return buildShareUri({
       name: node.name,
@@ -537,7 +549,8 @@ export class NodesService {
     }
 
     const presetKey = dto.preset as SupportedProtocol;
-    if (STRICT_DNS_PRESETS.has(presetKey)) await this.assertActiveCloudflare(userId);
+    if (presetKey === 'VLESS_XHTTP_TLS') assertCfXhttpPilotEnabled();
+    if (STRICT_DNS_PRESETS.has(presetKey) || presetKey === 'VLESS_XHTTP_TLS') await this.assertActiveCloudflare(userId);
 
     const preset = PROTOCOL_PRESETS[presetKey];
     const credentials = CREDENTIAL_GENERATORS[presetKey]();
@@ -594,9 +607,9 @@ export class NodesService {
       });
     });
 
-    if (STRICT_DNS_PRESETS.has(presetKey)) {
+    if (STRICT_DNS_PRESETS.has(presetKey) || presetKey === 'VLESS_XHTTP_TLS') {
       try {
-        await this.provisionCloudflareDns(userId, node.id, dto.entryServerId, false, true);
+        await this.provisionCloudflareDns(userId, node.id, dto.entryServerId, presetKey === 'VLESS_XHTTP_TLS', true);
       } catch (err) {
         await this.rollbackCreatedNode(node.id);
         throw err;
@@ -894,11 +907,11 @@ function normalizeNodeShape(input: {
     if (implementation && implementation !== 'XRAY') {
       throw new BadRequestException('VLESS + XHTTP 仅支持 Xray 实现');
     }
-    if (input.tls && input.tls !== 'REALITY') {
-      throw new BadRequestException('VLESS + XHTTP 仅支持 REALITY 安全模式');
+    if (input.tls && !['REALITY', 'TLS'].includes(input.tls)) {
+      throw new BadRequestException('VLESS + XHTTP 仅支持 REALITY 或 TLS 安全模式');
     }
     implementation = 'XRAY';
-    tls = 'REALITY';
+    tls = input.tls ?? 'REALITY';
   }
 
   if (isManagedCertificateProtocol(input.protocol)) {
@@ -929,7 +942,7 @@ function isManagedCertificateProtocol(protocol: string): boolean {
 
 function assertRecommendedPort(shape: NodeShape, listenPort: number): void {
   if (shape.transport === 'XHTTP' && listenPort !== 443) {
-    throw new BadRequestException('VLESS + XHTTP + REALITY 必须监听 443 端口');
+    throw new BadRequestException('VLESS + XHTTP 必须监听 443 端口');
   }
 }
 
@@ -1004,6 +1017,11 @@ function ensureCredentials(
   );
 
   if (shape.transport === 'XHTTP') {
+    if (isCfXhttp(shape)) {
+      // Domain binding is enforced again when generating the server/export config.
+      cfXhttpCredentials(normalized, normalized.xhttpHost ?? 'pending.invalid');
+      return normalized;
+    }
     const generated = CREDENTIAL_GENERATORS.VLESS_XHTTP_REALITY();
     normalized.uuid ||= generated.uuid;
     if (!normalized.realityPrivateKey || !normalized.realityPublicKey) {

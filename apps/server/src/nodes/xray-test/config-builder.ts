@@ -20,6 +20,7 @@ export interface NodeTestInfo {
   port: number;          // listenPort
   domain: string | null; // SNI / REALITY serverName
   credentials: Record<string, string>;
+  secureProbe?: boolean;
 }
 
 export function buildXrayClientConfig(node: NodeTestInfo, localSocksPort: number): string {
@@ -172,6 +173,7 @@ function clientStreamSettings(node: NodeTestInfo): unknown {
     base.security = 'tls';
     base.tlsSettings = {
       serverName: domain ?? '',
+      ...(network === 'xhttp' && node.secureProbe ? { alpn: ['h2'], allowInsecure: false } : {}),
     };
   } else if (tls === 'REALITY') {
     base.security = 'reality';

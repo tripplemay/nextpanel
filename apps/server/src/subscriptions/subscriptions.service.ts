@@ -11,6 +11,8 @@ import { CfAccessService } from './cf-access.service';
 import { assertCfManagedNode, isCfManagedNode, cfVariants, normalizeCfPreferredIps } from './cf-access.util';
 import { CfOptimizationService } from './cf-optimization.service';
 import { UsageService, UsageGrant } from '../usage/usage.service';
+import { isCfXhttp } from '../nodes/protocols/cf-xhttp';
+import type { ClientProfile } from './client-profile';
 
 type CfOptions = { cfOnly?: boolean; cfPreferredIps?: string[]; cfAuto?: boolean };
 
@@ -49,8 +51,9 @@ export class SubscriptionsService {
     const result = await this.usage.setEnabled(id, ownerId, enabled);
     if (enabled) {
       const sub = await this.prisma.subscription.findUniqueOrThrow({ where: { id }, include: { shares: true } });
-      await this.fetchActiveNodes({ token: sub.token });
-      for (const share of sub.shares) await this.fetchActiveNodes({ shareToken: share.shareToken });
+      // Provision every eligible transport; this internal preparation exports no client link.
+      await this.fetchActiveNodes({ token: sub.token }, undefined, 'xhttp');
+      for (const share of sub.shares) await this.fetchActiveNodes({ shareToken: share.shareToken }, undefined, 'xhttp');
     }
     return result;
   }
@@ -110,7 +113,7 @@ export class SubscriptionsService {
       include: {
         nodes: {
           include: {
-            node: { select: { id: true, name: true, protocol: true, status: true, enabled: true, listenPort: true, serverId: true, server: { select: { id: true, name: true, ip: true, tags: true, autoTags: true } } } },
+            node: { select: { id: true, name: true, protocol: true, transport: true, tls: true, status: true, enabled: true, listenPort: true, serverId: true, server: { select: { id: true, name: true, ip: true, tags: true, autoTags: true } } } },
           },
         },
         externalNodes: {
@@ -133,7 +136,7 @@ export class SubscriptionsService {
           include: {
             nodes: {
               include: {
-                node: { select: { id: true, name: true, protocol: true, status: true, enabled: true, listenPort: true, serverId: true, server: { select: { id: true, name: true, ip: true, tags: true, autoTags: true } } } },
+                node: { select: { id: true, name: true, protocol: true, transport: true, tls: true, status: true, enabled: true, listenPort: true, serverId: true, server: { select: { id: true, name: true, ip: true, tags: true, autoTags: true } } } },
               },
             },
             externalNodes: {
@@ -152,7 +155,7 @@ export class SubscriptionsService {
       createdAt: s.subscription.createdAt,
       updatedAt: s.subscription.updatedAt,
       nodes: s.subscription.nodes.map(({ node }) => ({
-        node: s.subscription.cfOnly || (s.subscription.cfProtectedNodeIds ?? []).includes(node.id)
+        node: s.subscription.cfOnly || (s.subscription.cfProtectedNodeIds ?? []).includes(node.id) || isCfXhttp(node)
           ? { ...node, server: { ...node.server, ip: undefined } } : node,
       })),
       externalNodes: s.subscription.externalNodes,
@@ -296,18 +299,18 @@ export class SubscriptionsService {
   }
 
   /** Base64-encoded subscription (V2Ray / Xray universal format) */
-  async generateContent(token: string): Promise<string> {
-    const nodes = await this.fetchActiveNodes({ token });
+  async generateContent(token: string, profile: ClientProfile = 'compatible'): Promise<string> {
+    const nodes = await this.fetchActiveNodes({ token }, undefined, profile);
     const lines = nodes.map((n) => buildShareUri(n)).filter((u): u is string => u !== null);
     return Buffer.from(lines.join('\n')).toString('base64');
   }
 
   /** Clash / Mihomo YAML subscription */
-  async generateClashContent(token: string): Promise<{ content: string; name: string }> {
+  async generateClashContent(token: string, profile: ClientProfile = 'compatible'): Promise<{ content: string; name: string }> {
     const sub = await this.prisma.subscription.findUnique({ where: { token }, select: { name: true } });
-    const nodes = await this.fetchActiveNodes({ token });
+    const nodes = await this.fetchActiveNodes({ token }, undefined, profile);
     const panelUrl = this.config.get<string>('PANEL_URL') ?? 'http://localhost:3001';
-    return { content: buildClashSubscription(nodes, panelUrl, `${panelUrl.replace(/\/$/, '')}/api/subscriptions/link/${encodeURIComponent(token)}/cf-provider`), name: sub?.name ?? 'clash' };
+    return { content: buildClashSubscription(nodes, panelUrl, `${panelUrl.replace(/\/$/, '')}/api/subscriptions/link/${encodeURIComponent(token)}/cf-provider`, profile), name: sub?.name ?? 'clash' };
   }
 
   /** Sing-box JSON subscription */
@@ -317,22 +320,22 @@ export class SubscriptionsService {
   }
 
   /** Base64-encoded subscription via shareToken (VIEWER) */
-  async generateContentByShareToken(shareToken: string): Promise<string> {
-    const nodes = await this.fetchActiveNodes({ shareToken });
+  async generateContentByShareToken(shareToken: string, profile: ClientProfile = 'compatible'): Promise<string> {
+    const nodes = await this.fetchActiveNodes({ shareToken }, undefined, profile);
     const lines = nodes.map((n) => buildShareUri(n)).filter((u): u is string => u !== null);
     return Buffer.from(lines.join('\n')).toString('base64');
   }
 
   /** Clash YAML via shareToken (VIEWER) */
-  async generateClashContentByShareToken(shareToken: string): Promise<{ content: string; name: string }> {
+  async generateClashContentByShareToken(shareToken: string, profile: ClientProfile = 'compatible'): Promise<{ content: string; name: string }> {
     const share = await this.prisma.subscriptionShare.findUnique({
       where: { shareToken },
       include: { subscription: { select: { name: true } } },
     });
     if (!share) throw new NotFoundException('Share not found');
-    const nodes = await this.fetchActiveNodes({ shareToken });
+    const nodes = await this.fetchActiveNodes({ shareToken }, undefined, profile);
     const panelUrl = this.config.get<string>('PANEL_URL') ?? 'http://localhost:3001';
-    return { content: buildClashSubscription(nodes, panelUrl, `${panelUrl.replace(/\/$/, '')}/api/subscriptions/share/${encodeURIComponent(shareToken)}/cf-provider`), name: share.subscription.name };
+    return { content: buildClashSubscription(nodes, panelUrl, `${panelUrl.replace(/\/$/, '')}/api/subscriptions/share/${encodeURIComponent(shareToken)}/cf-provider`, profile), name: share.subscription.name };
   }
 
   /** Sing-box JSON via shareToken (VIEWER) */
@@ -351,15 +354,15 @@ export class SubscriptionsService {
     return buildHomeProxyConfig(await this.fetchActiveNodes({ shareToken }));
   }
 
-  async generateCfProvider(by: { token?: string; shareToken?: string }, nodeId: string): Promise<string> {
-    const nodes = await this.fetchActiveNodes(by, nodeId);
+  async generateCfProvider(by: { token?: string; shareToken?: string }, nodeId: string, profile: ClientProfile = 'compatible'): Promise<string> {
+    const nodes = await this.fetchActiveNodes(by, nodeId, profile);
     if (!nodes.length) return buildCfUnavailableProvider(nodeId);
     return ['proxies:', ...nodes.map(n => buildClashProxy(n))].join('\n');
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────
 
-  private async fetchActiveNodes(by: { token?: string; shareToken?: string }, providerNodeId?: string): Promise<NodeExportInfo[]> {
+  private async fetchActiveNodes(by: { token?: string; shareToken?: string }, providerNodeId?: string, profile: ClientProfile = 'compatible'): Promise<NodeExportInfo[]> {
     const include = {
       nodes: {
         include: {
@@ -391,7 +394,8 @@ export class SubscriptionsService {
 
     if (!sub) throw new NotFoundException('Subscription not found');
     const protectedIds = new Set(sub.cfProtectedNodeIds ?? []);
-    const protectedNode = (id: string) => sub!.cfOnly || protectedIds.has(id);
+    const cdnXhttpIds = new Set(sub.nodes.filter(({ node }) => isCfXhttp(node)).map(({ node }) => node.id));
+    const protectedNode = (id: string) => sub!.cfOnly || protectedIds.has(id) || cdnXhttpIds.has(id);
     if (providerNodeId !== undefined && (!sub.cfAuto || !protectedNode(providerNodeId)
       || !sub.nodes.some(({ node }) => node.id === providerNodeId && node.userId === sub.ownerId))) {
       throw new NotFoundException('CF provider not available');
@@ -403,7 +407,8 @@ export class SubscriptionsService {
       throw new ServiceUnavailableException('CF-only subscription selection is invalid');
     }
     const activeNodes = sub.nodes.filter(({ node }) => node.enabled && node.status === 'RUNNING'
-      && (providerNodeId === undefined || node.id === providerNodeId));
+      && (providerNodeId === undefined || node.id === providerNodeId)
+      && (profile === 'xhttp' || !cdnXhttpIds.has(node.id)));
     if (sub.cfOnly) activeNodes.forEach(({ node }) => assertCfManagedNode(node));
     const domains = [...new Set(activeNodes.filter(({ node }) => protectedNode(node.id) && isCfManagedNode(node)).map(({ node }) => node.domain!))];
     const defaultIps = new Map(await Promise.all(domains.map(async (domain) => [domain, await this.cfAccess.defaultIp(domain)] as const)));
@@ -461,7 +466,7 @@ export class SubscriptionsService {
       });
     }
 
-    if ((sub.cfOnly || protectedIds.size > 0 || sub.cfAuto) && result.length === 0 && providerNodeId === undefined) {
+    if ((sub.cfOnly || protectedIds.size > 0 || sub.cfAuto || cdnXhttpIds.size > 0) && result.length === 0 && providerNodeId === undefined) {
       throw new ServiceUnavailableException('No active CF-only nodes; direct fallback is forbidden');
     }
     return result;

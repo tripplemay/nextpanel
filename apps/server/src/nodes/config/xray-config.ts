@@ -1,6 +1,7 @@
 import type { NodeInfo, NodeCredentials } from './config-generator';
 import { REALITY_DEFAULT_SNI, REALITY_FLOW } from '../protocols/reality';
 import { usageConfig } from '../../usage/usage-config';
+import { cfXhttpCredentials } from '../protocols/cf-xhttp';
 
 // ─── Xray / V2Ray ────────────────────────────────────────────────────────────
 
@@ -248,12 +249,18 @@ function xrayStreamSettings(
       path: path.startsWith('/') ? path : `/${path}`,
       mode: 'auto',
     };
+    if (tls === 'TLS') {
+      if (!domain) throw new Error('CDN XHTTP requires a managed domain');
+      const checked = cfXhttpCredentials(creds as Record<string, string>, domain);
+      base.xhttpSettings = { path: checked.path, host: domain, mode: checked.xhttpMode };
+    }
   }
 
   if (tls === 'TLS') {
     base.security = 'tls';
     base.tlsSettings = {
       serverName: domain ?? '',
+      ...(network === 'xhttp' ? { alpn: ['h2', 'http/1.1'] } : {}),
       certificates: [
         {
           certificateFile: `/etc/nextpanel/certs/${nodeId}.crt`,

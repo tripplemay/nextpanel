@@ -268,7 +268,7 @@ describe('CF-only subscriptions', () => {
   });
   it('rejects incompatible or external nodes after a configuration drift', async () => {
     sub.nodes = [{ node: { ...node, transport: 'TCP' } }];
-    await expect(svc.generateContent('token')).rejects.toThrow('managed VLESS+WS+TLS');
+    await expect(svc.generateContent('token')).rejects.toThrow('managed VLESS+WS/XHTTP+TLS');
     sub.nodes = [{ node }];
     sub.externalNodes = [{ externalNode: {} }];
     await expect(svc.generateContent('token')).rejects.toThrow('selection is invalid');

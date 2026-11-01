@@ -83,3 +83,38 @@ test('SCF deployment region takes precedence and conflicts fail closed', async t
   process.env.CF_PROBE_REGION = 'ap-guangzhou';
   assert.throws(() => createProbeServer({ token: 'f'.repeat(32), id: 'fixture' }), /conflicts/);
 });
+
+test('XHTTP v3 is explicit, bounded and cannot supply alternate download settings', () => {
+  const request = { ...batch, protocol: 3, transport: 'XHTTP', mode: 'packet-up', path: '/pilot' };
+  assert.equal(validateBatch(request), request);
+  for (const override of [{ protocol: 2 }, { transport: 'WS' }, { mode: 'auto' }, { extra: {} },
+    { downloadSettings: { address: '127.0.0.1' } }, { path: '/' }, { path: '/?q=1' }]) {
+    assert.throws(() => validateBatch({ ...request, ...override }), /INVALID_BATCH/);
+  }
+  assert.throws(() => validateBatch({ ...batch, transport: 'XHTTP' }), /INVALID_BATCH/);
+  const outbound = xrayConfig(request, request.ips[0], 1080).outbounds[0];
+  assert.equal(outbound.settings.vnext[0].address, request.ips[0]);
+  assert.deepEqual(outbound.streamSettings, { network: 'xhttp', security: 'tls',
+    tlsSettings: { serverName: batch.domain, allowInsecure: false, alpn: ['h2'] },
+    xhttpSettings: { path: '/pilot', host: batch.domain, mode: 'packet-up' } });
+});
+
+test('dual probe contract preserves v2 WS and echoes v3 transport identity', async t => {
+  const server = createProbeServer({ token: 'f'.repeat(32), id: 'dual', regionKey: 'ap-guangzhou',
+    lookupEgress: async () => null, checkRuntime: async () => true,
+    test: async (_body, ip) => ({ ip, ok: true, latency: 1 }) });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const headers = { Authorization: `Bearer ${'f'.repeat(32)}`, 'Content-Type': 'application/json' };
+  const caps = await (await fetch(url + '/capabilities', { headers })).json();
+  assert.equal(caps.protocol, 2); assert.deepEqual(caps.protocols, [2, 3]);
+  assert.ok(caps.features.includes('vless-xhttp-tls-packet-up-h2'));
+  for (const body of [batch, { ...batch, protocol: 3, transport: 'XHTTP', mode: 'packet-up' }]) {
+    const response = await fetch(url + '/probe', { method: 'POST', headers, body: JSON.stringify(body) });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.protocol, body.protocol ?? 2); assert.equal(result.transport, body.transport);
+    assert.equal(result.mode, body.mode); assert.equal(result.regionKey, 'ap-guangzhou');
+  }
+});

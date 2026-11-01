@@ -76,6 +76,52 @@ beforeEach(() => {
 });
 
 describe('NodesService', () => {
+  describe('CDN XHTTP pilot', () => {
+    const old = process.env.CF_XHTTP_PILOT_ENABLED;
+    beforeEach(() => {
+      process.env.CF_XHTTP_PILOT_ENABLED = 'true';
+      (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue({ apiToken: 'fixture', domain: 'example.com', zoneId: 'zone' });
+      (mockPrisma.server.findUnique as jest.Mock).mockResolvedValue({ ip: '192.0.2.1' });
+      (mockPrisma.node.create as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'pilot' });
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ ...fakeNode, id: 'pilot' });
+    });
+    afterEach(() => { if (old === undefined) delete process.env.CF_XHTTP_PILOT_ENABLED; else process.env.CF_XHTTP_PILOT_ENABLED = old; });
+    it('requires opt-in before creating any resources', async () => {
+      delete process.env.CF_XHTTP_PILOT_ENABLED;
+      await expect(svc.createFromPreset('owner', { serverId: 'srv-1', name: 'pilot', preset: 'VLESS_XHTTP_TLS' })).rejects.toThrow('disabled');
+      expect(mockPrisma.node.create).not.toHaveBeenCalled(); expect(mockCfService.createARecord).not.toHaveBeenCalled();
+    });
+    it('creates a separate TLS node with mandatory proxied DNS', async () => {
+      await svc.createFromPreset('owner', { serverId: 'srv-1', name: 'pilot', preset: 'VLESS_XHTTP_TLS' });
+      expect((mockPrisma.node.create as jest.Mock).mock.calls[0][0].data).toMatchObject({ transport: 'XHTTP', tls: 'TLS', listenPort: 443 });
+      expect(mockCfService.createARecord).toHaveBeenCalledWith('fixture', 'zone', expect.any(String), '192.0.2.1', true);
+      expect(mockDeploy.deploy).not.toHaveBeenCalled();
+    });
+    it('rejects an occupied port before DNS creation', async () => {
+      mockResources.unavailablePorts.mockResolvedValue(new Set([443]));
+      await expect(svc.createFromPreset('owner', { serverId: 'srv-1', name: 'pilot', preset: 'VLESS_XHTTP_TLS' })).rejects.toThrow();
+      expect(mockPrisma.node.create).not.toHaveBeenCalled(); expect(mockCfService.createARecord).not.toHaveBeenCalled();
+    });
+    it('removes the new record on DNS provisioning failure without touching WS', async () => {
+      (mockCfService.createARecord as jest.Mock).mockRejectedValue(new Error('DNS fixture failure'));
+      await expect(svc.createFromPreset('owner', { serverId: 'srv-1', name: 'pilot', preset: 'VLESS_XHTTP_TLS' })).rejects.toThrow('DNS fixture failure');
+      expect(mockPrisma.node.delete).toHaveBeenCalledWith({ where: { id: 'pilot' } });
+      expect(mockDeploy.undeploy).not.toHaveBeenCalled();
+    });
+    it('rejects manual creation that bypasses managed DNS', async () => {
+      await expect(svc.create({ serverId: 'srv-1', name: 'pilot', protocol: 'VLESS', transport: 'XHTTP', tls: 'TLS', listenPort: 443, credentials: {} } as any, 'owner')).rejects.toThrow('managed');
+      expect(mockPrisma.node.create).not.toHaveBeenCalled();
+    });
+    it('does not replace an existing WS node in place', async () => {
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ ...fakeNode, protocol: 'VLESS', transport: 'WS', tls: 'TLS', listenPort: 443, credentialsEnc: 'enc:{}' });
+      await expect(svc.update('node-1', { transport: 'XHTTP', tls: 'TLS' } as any, 'owner')).rejects.toThrow('retain the WS node');
+      expect(mockPrisma.node.update).not.toHaveBeenCalled(); expect(mockDeploy.deploy).not.toHaveBeenCalled();
+    });
+    it('requires a pinned-CDN subscription instead of a direct hostname share', async () => {
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ ...fakeNode, protocol: 'VLESS', transport: 'XHTTP', tls: 'TLS' });
+      await expect(svc.getShareLink('node-1', 'owner')).rejects.toThrow('verified CDN addresses');
+    });
+  });
   describe('create', () => {
     it('rejects a server that does not belong to the current user', async () => {
       (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue(null);

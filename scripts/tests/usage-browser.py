@@ -70,6 +70,8 @@ with sync_playwright() as p:
                 route.fulfill(json=[{'timestamp': stamp, 'upBytes': '1048576', 'downBytes': '8388608'}])
             elif path.path.startswith('/api/subscriptions/cf-access/optimization/'):
                 route.fulfill(json={'paused': False, 'enabled': True, 'registryError': False, 'rangeError': False, 'rangeUpdatedAt': stamp,
+                                    'transport': 'XHTTP' if state['regional_rollout'] else 'WS', 'tls': 'TLS',
+                                    'compatibility': 'XHTTP_OPT_IN' if state['regional_rollout'] else 'WS_COMPATIBLE',
                                     'regions': [{'key': 'ap-guangzhou', 'label': '广州'}, {'key': 'ap-chengdu', 'label': '成都'}], 'missingRegions': ['ap-chengdu'],
                                     'budget': ({'lowBudget': False, 'intervalMinutes': 15, 'monthlyLimit': 25000, 'used': 24, 'remaining': 24976, 'estimatedMonthlyBatchesPerNode': 5760, 'constrained': False, 'error': False}
                                                if state['regional_rollout'] else {'lowBudget': True, 'intervalMinutes': 5, 'monthlyLimit': 200, 'used': 24, 'remaining': 176, 'estimatedMonthlyBatchesPerNode': 360, 'constrained': True, 'error': False}),
@@ -125,6 +127,8 @@ with sync_playwright() as p:
         page.wait_for_load_state('networkidle')
         page.get_by_role('tab', name='优选状态', exact=True).click()
         expect(page.get_by_text('每 15 分钟（额度、失败退避与任务队列可能延后）', exact=True)).to_be_visible()
+        expect(page.get_by_text('XHTTP + TLS · CDN 试点', exact=True)).to_be_visible()
+        expect(page.get_by_text('仅在 XHTTP 试点导出中下发；旧 WS 链接不变', exact=True)).to_be_visible()
         expect(page.get_by_text('已用 24 / 25000 批 · 剩余 24976 批（不是云账单硬限额）', exact=True)).to_be_visible()
         expect(page.get_by_text('当前批次额度不足以持续覆盖所有地区', exact=True)).not_to_be_visible()
         assert not mutations, 'regional status refresh must be read-only'

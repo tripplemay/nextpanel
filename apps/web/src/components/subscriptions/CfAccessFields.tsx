@@ -20,7 +20,7 @@ export function subscriptionError(error: unknown): string {
   const value = (error as { response?: { data?: { message?: unknown } } })?.response?.data?.message;
   const known: Record<string, string> = {
     'CF-only subscriptions require 1-20 managed nodes and no external nodes': '严格 CF-only 仅允许 1–20 个托管 CF 节点，不能包含外部节点。混合订阅请仅开启 CF 自动优选。',
-    'CF-only requires managed VLESS+WS+TLS nodes on port 443 with a Cloudflare domain': '严格 CF-only 仅支持面板管理的 VLESS+WS+TLS/443 Cloudflare 节点；其他协议请保留在混合订阅中。',
+    'CF-only requires managed VLESS+WS/XHTTP+TLS nodes on port 443 with a Cloudflare domain': '严格 CF-only 仅支持面板管理的 VLESS+WS/XHTTP+TLS/443 Cloudflare 节点；其他协议请保留在混合订阅中。',
     'Automatic optimization requires 1-20 compatible managed CF nodes; other nodes may remain': '自动优选需要选中 1–20 个支持的托管 CF 节点；其他协议和外部节点可以保留。',
     'CF node selection is not available': '部分所选节点已删除或不属于当前账号，请刷新后重新选择。',
     'At most 20 managed nodes can have CDN protection': '每条订阅最多保护 20 个 CF 节点，请减少 CF 节点数量。',
@@ -43,7 +43,7 @@ export default function CfAccessFields({ form, nodes, locked, protectedIds, load
   const [check, setCheck] = useState<{ key: string; result: CfAccessCheckResult }>();
   const { message, modal } = App.useApp();
   const eligible = nodes.filter((n) => selectedIds.includes(n.id)
-    && n.protocol === 'VLESS' && n.transport === 'WS' && n.tls === 'TLS' && n.listenPort === 443 && n.domain && n.cfDnsRecordId);
+    && n.protocol === 'VLESS' && ['WS', 'XHTTP'].includes(n.transport ?? '') && n.tls === 'TLS' && n.listenPort === 443 && n.domain && n.cfDnsRecordId);
   const incompatible = nodes.filter(n => selectedIds.includes(n.id) && !eligible.some(e => e.id === n.id));
   const protectedSelected = protectedIds.filter(id => selectedIds.includes(id));
   const unavailableProtected = incompatible.filter(n => protectedSelected.includes(n.id));
@@ -100,7 +100,7 @@ export default function CfAccessFields({ form, nodes, locked, protectedIds, load
     </Form.Item>
     {enabled && <>
       <Alert type="warning" showIcon title="全程 CDN；源站隐藏需独立验收"
-        description="仅支持 1–20 个托管 VLESS+WS+TLS 节点，不可混入其他协议或外部节点。默认线路也固定为已验证的 CF IP；全部不可用则失败，不回退源站。入口/出口共用 IP 仍可能泄漏源站。切换手工模式并清空候选可回退默认 CDN，不关闭 CF-only。" />
+        description="仅支持 1–20 个托管 VLESS+WS/XHTTP+TLS 节点，不可混入其他协议或外部节点。XHTTP CDN 需使用试点导出。默认线路也固定为已验证的 CF IP；全部不可用则失败，不回退源站。入口/出口共用 IP 仍可能泄漏源站。" />
       {!!strictErrors.length && <Alert type="error" showIcon title="当前选择不符合严格 CF-only" description={strictErrors.join(' ')} />}
     </>}
     {(enabled || automatic || protectedSelected.length > 0) && <>
@@ -111,7 +111,7 @@ export default function CfAccessFields({ form, nodes, locked, protectedIds, load
       {automatic && <Alert type="info" showIcon title="每个节点一个自动入口，无需手选优选 IP"
         description="Clash/Mihomo、Sing-box/HomeProxy 主选择列表每个托管节点只保留一个自动入口。内部每地区最多 1 个首选 IP，加默认 CDN；相同 IP 合并，缺测时保留通用兜底。地区是测点部署地，不是用户所在地或运营商。请刷新完整订阅；Mihomo 随后每 15 分钟更新候选、每 5 分钟测速。普通 Base64 仅支持精简后的线路列表，其他客户端需启用订阅更新。" />}
       {enabled && !automatic && <Form.Item name="cfPreferredIps" label="优选 CF IP（按优先顺序，最多 3 个）" style={{ marginTop: 16 }}
-        extra="只接受 CF 公网 IPv4/IPv6，不接受域名、端口或 URL。SNI、WS Host 保留原业务域名。留空仅使用默认 CF 线路。"
+        extra="只接受 CF 公网 IPv4/IPv6，不接受域名、端口或 URL。SNI、传输 Host 保留原业务域名。留空仅使用默认 CF 线路。"
         rules={[{ type: 'array', max: 3, message: '最多填写 3 个 CF IP' }]}>
         <Select mode="tags" tokenSeparators={[',', ' ', '\n']} options={[]} placeholder="输入 IP 后按回车；不自动推荐未经实测的 IP" />
       </Form.Item>}

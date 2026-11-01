@@ -71,6 +71,7 @@ export function buildShareUri(node: NodeExportInfo): string | null {
       if (tls === 'REALITY' && net !== 'xhttp') params.set('flow', REALITY_FLOW);
       addTransportParams(params, net, domain, creds);
       addTlsParams(params, tls, domain, creds);
+      if (net === 'xhttp' && tls === 'TLS' && node.cfGroup) params.set('alpn', 'h2');
       return `vless://${creds.uuid ?? ''}@${authorityHost}:${port}?${params.toString()}#${tag}`;
     }
 
@@ -142,6 +143,9 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
   }
 
   lines.push(`  - name: ${yamlScalar(name)}`);
+  if (protocol === 'VLESS' && net === 'xhttp' && tls === 'TLS' && node.cfGroup) {
+    lines.push('    alpn: [h2]', '    skip-cert-verify: false');
+  }
 
   switch (protocol) {
     case 'VMESS': {
@@ -1088,7 +1092,7 @@ const RULE_BEHAVIOR: Record<typeof RULE_NAMES[number], string> = {
   openai: 'classical',
 };
 
-export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string, cfProviderBase?: string): string {
+export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string, cfProviderBase?: string, profile: 'compatible' | 'xhttp' = 'compatible'): string {
   const proxyEntries: { name: string; yaml: string; automatic: boolean; grouped: boolean }[] = [];
   for (const node of nodes) {
     const yaml = buildClashProxy(node);
@@ -1122,7 +1126,7 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
   // ── proxies ───────────────────────────────────────────────────────────────
   const inlineEntries = dynamic ? proxyEntries.filter(e => !e.automatic) : proxyEntries;
   const providers = dynamic ? [...new Set(nodes.filter(n => n.cfAuto).map(n => n.cfNodeId!))].map(id => [
-    `  cf-${id}:`, '    type: http', `    url: ${yamlScalar(`${cfProviderBase}/${encodeURIComponent(id)}`)}`,
+    `  cf-${id}:`, '    type: http', `    url: ${yamlScalar(`${cfProviderBase}/${encodeURIComponent(id)}${profile === 'xhttp' ? '?profile=xhttp' : ''}`)}`,
     '    interval: 900', '    proxy: DIRECT', '    size-limit: 262144',
     '    health-check:', '      enable: true', '      url: https://www.gstatic.com/generate_204',
     '      interval: 300', '      timeout: 5000', '      lazy: false', '      expected-status: 204',

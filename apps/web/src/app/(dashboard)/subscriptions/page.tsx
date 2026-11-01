@@ -38,10 +38,11 @@ function buildFormats(base: string): SubFormat[] {
       url: `hiddify://import/${singboxUrl}#NextPanel`,
       extra: singboxUrl,
     },
-    { key: 'clash', label: 'Clash / Mihomo', url: `${base}/clash` },
+    { key: 'clash', label: 'Clash / OpenClash', url: `${base}/clash` },
     { key: 'singbox', label: 'Sing-box JSON', url: singboxUrl },
     { key: 'homeproxy', label: 'HomeProxy (OpenWrt)', url: `${base}/homeproxy` },
-    { key: 'v2ray', label: 'V2Ray / Xray Base64', url: base },
+    { key: 'v2ray', label: 'Shadowrocket / Base64', url: base },
+    { key: 'xhttp', label: 'XHTTP · 试点', url: `${base}/clash?profile=xhttp`, extra: `${base}?profile=xhttp` },
   ];
 }
 
@@ -340,6 +341,7 @@ export default function SubscriptionsPage() {
                     size="small"
                     type="primary"
                     icon={<ExportOutlined />}
+                    aria-label={`导出 ${sub.name} 的订阅链接`}
                     onClick={() => {
                       const token = opts.useShareToken ? sub.shareToken : sub.token;
                       if (!token) { message.error('订阅凭证缺失，请刷新页面'); return; }
@@ -369,6 +371,7 @@ export default function SubscriptionsPage() {
                     size="small"
                     type="primary"
                     icon={<ExportOutlined />}
+                    aria-label={`导出 ${sub.name} 的订阅链接`}
                     onClick={() => {
                       const token = opts.useShareToken ? sub.shareToken : sub.token;
                       if (!token) { message.error('订阅凭证缺失，请刷新页面'); return; }
@@ -570,9 +573,10 @@ export default function SubscriptionsPage() {
 }
 
 const FORMAT_DESCRIPTIONS: Record<string, string> = {
-  clash: '支持 VLESS XHTTP、TUIC 和 AnyTLS，适配 Clash Verge、Mihomo Party 等 Mihomo 内核客户端，并包含广告屏蔽、流媒体、AI 服务和国内直连规则。',
+  clash: '适配 Clash Verge、OpenClash（Meta/Mihomo 内核）等客户端。原链接保持不变，默认不加入新增 XHTTP CDN 试点节点；原有节点按既有格式输出。',
+  xhttp: '显式加入 XHTTP CDN 试点节点。OpenClash/Clash Verge 需经实测的新版 Meta/Mihomo 内核（XHTTP 初始支持为 1.19.22）；不适用于旧 Clash 或 sing-box。原链接和 WS 服务仍保留，回退时换回兼容链接并更新订阅。纯 XHTTP 试点订阅在兼容入口会明确拒绝，不会直连。',
   singbox: '适合 sing-box 原生客户端及 Hiddify，支持 TUIC 和 AnyTLS。sing-box 暂不支持 XHTTP，因此不会包含 XHTTP 节点。',
-  v2ray: '适合支持分享链接的客户端。包含 VLESS XHTTP 和官方 AnyTLS URI；TUIC 暂无统一分享 URI，因此不会出现在此格式中。',
+  v2ray: '适合 Shadowrocket、V2Ray/Xray 分享链接客户端。原 Base64 链接和 WS 节点不变，不自动加入新增 XHTTP CDN 试点；原有 XHTTP REALITY 节点仍按原逻辑输出。Shadowrocket 的 XHTTP 能力需按具体版本实测。TUIC 不包含在此格式中。',
   homeproxy: '适合 OpenWrt 上的 HomeProxy，支持 TUIC 和 AnyTLS，并包含完整分流规则。sing-box 暂不支持 XHTTP，因此不会包含 XHTTP 节点。',
 };
 
@@ -625,6 +629,7 @@ function LinkTabs({ formats }: { formats: SubFormat[] }) {
               </Typography.Text>
             )}
             <LinkBlock url={f.url} label="订阅链接" />
+            {f.key === 'xhttp' && f.extra && <LinkBlock url={f.extra} label="Xray Base64 试点链接（非默认 Shadowrocket 入口）" />}
             {isMobile ? <QrCard value={f.url} size={160} /> : qrToggle(f.url)}
           </Space>
         ),

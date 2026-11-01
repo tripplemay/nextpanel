@@ -41,6 +41,7 @@ describe('CertRenewalScheduler', () => {
         source: 'AUTO',
         OR: [
           { transport: 'TCP' },
+          { protocol: 'VLESS', transport: 'XHTTP' },
           { protocol: { in: ['TUIC', 'ANYTLS'] } },
         ],
       }),

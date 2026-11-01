@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma.service';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
 import type { NodeExportInfo } from '../subscriptions/uri-builder';
+import { isCfXhttp } from '../nodes/protocols/cf-xhttp';
 import { candidateKey, counterDelta, grantVersion, LEGACY_EMAIL, USAGE_ACTIVE_MS, USAGE_FRESH_MS, USAGE_LIMIT, usageEligible, usageEmail, usageStatus } from './usage.util';
 
 export interface UsageGrant {
@@ -35,8 +36,8 @@ export class UsageService {
     const sub = await this.prisma.subscription.findFirst({ where: { id, ownerId }, include: { nodes: { include: { node: true } } } });
     if (!sub) throw new NotFoundException();
     const nodes = sub.nodes.map(n => n.node).filter(n => n.userId === ownerId && usageEligible(n)
-      && (sub.cfOnly || sub.cfProtectedNodeIds.includes(n.id)));
-    if (enabled && !nodes.length) throw new BadRequestException('No protected VLESS WS TLS nodes available');
+      && (sub.cfOnly || sub.cfProtectedNodeIds.includes(n.id) || isCfXhttp(n)));
+    if (enabled && !nodes.length) throw new BadRequestException('No protected VLESS WS/XHTTP TLS nodes available');
     const recorded = await this.prisma.usageCredential.findMany({ where: { subscriptionId: id, ownerId }, select: { nodeId: true }, distinct: ['nodeId'] });
     // A queued sample must not restore the old baseline after a pause has committed.
     await withPostgresAdvisoryLocks([...sub.nodes.map(n => n.nodeId), ...recorded.map(r => r.nodeId)]
@@ -171,7 +172,7 @@ export class UsageService {
     const nodes = [...new Map(subscriptions.flatMap(s => s.nodes.map(n => n.node)).filter(n => n.userId === ownerId).map(n => [n.id, n])).values()];
     const coverage = nodes.map(n => ({ id: n.id, name: n.name,
       serverId: n.serverId, agentVersion: n.server.agentVersion, agentSeenAt: n.server.lastSeenAt,
-      eligible: usageEligible(n) && subscriptions.some(s => s.nodes.some(sn => sn.nodeId === n.id) && (s.cfOnly || s.cfProtectedNodeIds.includes(n.id))),
+      eligible: usageEligible(n) && subscriptions.some(s => s.nodes.some(sn => sn.nodeId === n.id) && (s.cfOnly || s.cfProtectedNodeIds.includes(n.id) || isCfXhttp(n))),
       observing: subscriptions.some(s => s.usageEnabled && s.nodes.some(sn => sn.nodeId === n.id)),
       preparedAt: n.usageState?.preparedAt ?? null, syncedAt: n.usageState?.syncedAt ?? null,
       error: n.usageState?.error ?? null, sampledAt: n.usageState?.sampledAt ?? null,
@@ -182,7 +183,7 @@ export class UsageService {
     return { enabled: this.enabled(), asOf: new Date(now), freshnessSeconds: USAGE_FRESH_MS / 1000, activeWindowSeconds: USAGE_ACTIVE_MS / 1000,
       limited: records.length > 1000, rows, nodes: coverage,
       subscriptions: subscriptions.map(s => ({ id: s.id, name: s.name, enabled: s.usageEnabled, externalCount: s._count.externalNodes,
-        automatic: s.cfAuto, protectedCount: s.nodes.filter(n => n.node.userId === ownerId && usageEligible(n.node) && (s.cfOnly || s.cfProtectedNodeIds.includes(n.nodeId))).length })),
+        automatic: s.cfAuto, protectedCount: s.nodes.filter(n => n.node.userId === ownerId && usageEligible(n.node) && (s.cfOnly || s.cfProtectedNodeIds.includes(n.nodeId) || isCfXhttp(n.node))).length })),
       summary: { activeSubjects: new Set(rows.filter(r => r.status === 'ACTIVE').map(r => r.subjectId)).size,
         activeCandidates: rows.filter(r => r.status === 'ACTIVE').length,
         preparedNodes: coverage.filter(n => n.preparedAt).length, freshNodes: coverage.filter(n => n.fresh).length,

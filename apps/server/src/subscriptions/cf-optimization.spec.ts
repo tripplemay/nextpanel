@@ -413,6 +413,32 @@ describe('probe to publication pipeline', () => {
   async function rounds(count = 4) {
     for (let i = 0; i < count; i++) { clock.mockReturnValue(now + i * 300_000); await service.measure(node as any, probe); }
   }
+  it('never sends an XHTTP request to a legacy WS-only worker', async () => {
+    const pilot = { ...node, transport: 'XHTTP' };
+    db.node.findUnique.mockResolvedValue(pilot);
+    await service.measure(pilot as any, probe);
+    expect(requests).toHaveLength(0);
+    expect(row.error).toBe('PROBE_IDENTITY_OR_CAPABILITY_MISMATCH');
+  });
+  it.each([false, true])('validates protocol and transport identity in XHTTP results (mismatch=%s)', async mismatch => {
+    const pilot = { ...node, transport: 'XHTTP' };
+    db.node.findUnique.mockResolvedValue(pilot);
+    remote.mockImplementation(async (_url, options) => {
+      if (!options?.body) return new Response(JSON.stringify({ protocol: 2, protocols: [2, 3], probeId: probe.id,
+        features: ['vless-ws-tls', 'vless-xhttp-tls-packet-up-h2'] }));
+      const body = JSON.parse(options.body as string); requests.push(body);
+      return new Response(JSON.stringify({ protocol: mismatch ? 2 : 3, transport: 'XHTTP', mode: 'packet-up', probeId: probe.id,
+        results: body.ips.map((ip: string) => ({ ip, ok: true, latency: 100 })) }));
+    });
+    await service.measure(pilot as any, probe);
+    expect(requests[0]).toMatchObject({ protocol: 3, transport: 'XHTTP', mode: 'packet-up' });
+    if (mismatch) expect(row.error).toBe('INVALID_PROBE_RESULT');
+    else {
+      clock.mockReturnValue(now + 300_000);
+      await service.measure(pilot as any, probe);
+      expect(row.error).toBeNull(); expect(row.published.length).toBeGreaterThan(0);
+    }
+  });
   it('discovers, probes twice and publishes bounded safe aliases without origin or SSH data', async () => {
     await service.measure(node as any, probe);
     expect(row.published).toEqual([]);

@@ -17,7 +17,7 @@ export function usageConfig(raw: string, nodeId: string, statsPort: number, user
   if (!Array.isArray(config.inbounds)) throw new Error('INVALID_CONFIG');
   const inbound = config.inbounds.map(object).find(i => i.tag === `in-${nodeId}`);
   const apiInbound = config.inbounds.map(object).find(i => i.tag === 'api');
-  if (!inbound || inbound.protocol !== 'vless' || object(inbound.streamSettings).network !== 'ws'
+  if (!inbound || inbound.protocol !== 'vless' || !['ws', 'xhttp'].includes(String(object(inbound.streamSettings).network))
     || object(inbound.streamSettings).security !== 'tls' || !apiInbound || apiInbound.listen !== '127.0.0.1'
     || apiInbound.port !== statsPort) throw new Error('UNSUPPORTED_CONFIG');
   const settings = object(inbound.settings);

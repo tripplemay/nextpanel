@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { BlockList, isIP } from 'net';
-import { CF_IP_RANGES, isCloudflareIp } from './cf-access.util';
+import { CF_IP_RANGES, cfTransportCredentials, isCloudflareIp } from './cf-access.util';
 import type { NodeExportInfo } from './uri-builder';
 
 export const FRESH_MS = 30 * 60_000;
@@ -182,7 +182,7 @@ export function automaticVariants(node: NodeExportInfo, nodeId: string, profiles
     const label = e.profile === 'DNS' ? '默认 CDN' : `${e.region ? `${e.region.label}云测优选` : '通用候选'} ${position}`;
     return { ...node, host: e.ip, name: `${base} ${label} [CF-REGION:${e.region?.key ?? e.profile}] [CF:${e.profile === 'DNS' ? 'DNS' : 'GENERIC'}]`,
       cfGroup: base, cfAuto: true, cfNodeId: nodeId, cfProfile: e.profile, cfRegion: e.region, cfRegions: regions,
-      credentials: { ...node.credentials, transportHost: node.domain! },
+      credentials: cfTransportCredentials(node),
     };
   });
 }
