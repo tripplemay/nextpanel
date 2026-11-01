@@ -83,6 +83,10 @@ jobs:
         run: |
           set -euo pipefail
           sudo "$(command -v node)" scripts/tests/cf-origin-firewall.fixture.cjs 2>&1 | tee out/ci/cf-origin-firewall.log
+      - name: Verify isolated Xray install without replacing the shared core
+        run: |
+          set -euo pipefail
+          sudo "$(command -v node)" scripts/tests/cf-xhttp-core.fixture.cjs 2>&1 | tee out/ci/cf-xhttp-core.log
       - name: Preserve fixture-only verification logs
         if: always()
         uses: actions/upload-artifact@v4

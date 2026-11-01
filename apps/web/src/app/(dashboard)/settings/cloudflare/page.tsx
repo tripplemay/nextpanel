@@ -33,6 +33,7 @@ interface VerifyResult {
   zoneName?: string;
   zoneStatus?: string;
   message: string;
+  origin?: { readable: boolean; message: string };
 }
 
 const helpSteps = (
@@ -42,6 +43,8 @@ const helpSteps = (
       <Paragraph type="secondary" style={{ marginTop: 4, marginBottom: 4 }}>
         登录 Cloudflare → My Profile → API Tokens → Create Token，选择「Edit zone DNS」模板，
         权限设置为 Zone &gt; DNS &gt; Edit，Zone 范围选择你的域名。
+        使用 XHTTP 独立回源时，还需 Zone Read、Zone Settings Read、Origin Rules Edit 和 Config Rules Edit（API 名称 Origin Write / Config Settings Write）。
+        建议使用仅限节点根域名的专用 token，不扩大其他域名权限。
       </Paragraph>
       <Link href="https://dash.cloudflare.com/profile/api-tokens" target="_blank">
         前往创建 API Token →
@@ -154,7 +157,7 @@ export default function CloudflareSettingsPage() {
                 <Text>当前域名：<Text strong>{setting.domain}</Text></Text>
                 {verifyResult?.valid && (
                   <Text type="success">
-                    <CheckCircleOutlined style={{ marginRight: 4 }} />已验证
+                    <CheckCircleOutlined style={{ marginRight: 4 }} />基础访问已验证
                   </Text>
                 )}
               </Space>
@@ -163,7 +166,7 @@ export default function CloudflareSettingsPage() {
         )}
 
         <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-          配置后，创建 VLESS+WS+TLS 节点时将自动创建 Cloudflare DNS A 记录。
+          用于托管节点的 DNS 与证书。XHTTP 独立回源为新主机名设置 Full (strict) TLS，并检查回源规则权限，不修改全局 TLS。
         </Text>
 
         <Form
@@ -237,6 +240,16 @@ export default function CloudflareSettingsPage() {
                 <Text>{verifyResult.message}</Text>
               )
             }
+          />
+        )}
+
+        {verifyResult?.origin && (
+          <Alert
+            style={{ marginTop: 12 }}
+            type={verifyResult.origin.readable ? 'info' : 'warning'}
+            showIcon
+            message={verifyResult.origin.readable ? 'XHTTP 回源：只读预检通过' : 'XHTTP 回源：尚未就绪'}
+            description={verifyResult.origin.message}
           />
         )}
 

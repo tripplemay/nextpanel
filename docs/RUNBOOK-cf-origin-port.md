@@ -21,16 +21,31 @@ ruleset. Shared source IP does not require sharing the website's domain or port.
 
 ## Prerequisites and refusal conditions
 
-- Keep the existing XHTTP pilot gate, pinned Xray version and trusted certificate
-  requirements. No automatic shared-core upgrade.
-- A proxied, independently owned node hostname; existing Full (strict) TLS.
+- Keep the XHTTP pilot gate, reviewed Xray 26.2.6 and trusted certificate
+  requirements. If the shared core has another version, deployment installs a
+  checksum-pinned official build in `/usr/local/lib/nextpanel/xray-26.2.6/`.
+  It never replaces or downgrades the shared binary. Supported isolated-core
+  architectures are Linux x86_64/aarch64; curl and unzip must be available.
+- A proxied, independently owned node hostname. An exact-host Configuration Rule
+  sets `ssl: strict` for that node; the zone-wide SSL mode and website rules stay
+  unchanged. This supports zones using Full for legacy self-signed WS services.
   Never lower TLS validation or change the website's zone settings automatically.
-- Token scope for the original zone: DNS read/edit, Zone Settings read, Origin
-  Rules read/edit. Confirm the zone's available rule quota before rollout.
-- `nft` must already be installed and usable with the managed SSH privilege.
-  A read-only host preflight checks this before new cloud resource creation.
-  Missing support fails provisioning/deployment; no package/firewall-manager
-  replacement. Do not uninstall nft or remove ownership files before cleanup.
+- Token scope for the original zone: DNS read/edit, Zone read, Zone Settings read,
+  Origin Rules read/edit and Configuration Rules read/edit (API permissions
+  `Origin Write` and `Config Settings Write`). Confirm both phase quotas before
+  rollout. Use a zone-specific token rather than expanding a shared multi-zone token.
+- Creation checks cloud access and host compatibility before persisting a node.
+  Cloudflare Settings displays XHTTP read-only readiness separately from basic
+  DNS access; a read-only success does not prove write permission or connectivity.
+- On Debian 11+/Ubuntu 22.04+ with Linux 5.10+, root SSH and working distribution
+  repositories, the streamed deploy can install missing nftables and allowlisted
+  new library packages. It refuses package upgrades/removals and never starts
+  the global firewall. Package plans and before/after rulesets are retained in
+  `/opt/backups/nextpanel/nftables-bootstrap-*`. A temporary service mask prevents
+  package activation; installation must leave the ruleset unchanged and the
+  global service disabled/inactive. Present but unusable nftables, older kernels,
+  unknown package dependencies and unsupported bootstrap systems are rejected,
+  not silently replaced. Do not uninstall nft or remove ownership files before cleanup.
 - Existing enabled Origin Rules must be provably disjoint exact-host rules.
   Broad/path/complex expressions are conservatively blocked for manual review.
   This does not automatically prove absence of effects from every other CF
@@ -79,6 +94,18 @@ and port before creating any external resource. DNS comments and Origin Rule
 refs carry that ownership. Response-loss retries rediscover owned resources.
 Failed creation keeps an ERROR node/intent visible; redeploy or delete that
 record instead of creating repeated replacement nodes.
+Hostname TLS rules use the deterministic `${originRef}_tls` reference and persist
+their original ruleset/rule IDs. Lost responses are rediscovered, drift is not
+overwritten, and cleanup removes only the owned TLS rule after the origin rule.
+No operation replaces a whole configuration ruleset or changes global TLS.
+
+Mapped creation performs read-only checks and returns the retained record; long
+dependency preparation and cloud writes occur in the streamed deployment with
+keepalives. Every retry repeats preflight before external writes. Only successful
+end-to-end acceptance publishes the mapping. The isolated core is a shared,
+versioned dependency cache, not a node service; node deletion does not remove it
+while other nodes could still use it. Usage synchronization uses the deployed
+unit's allowlisted core path rather than assuming the global binary.
 
 Deletion first withdraws readiness, then removes only owned services/firewall
 and Cloudflare resources. Partial failures retain the record for retry. Forced

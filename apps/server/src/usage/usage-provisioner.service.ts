@@ -12,6 +12,7 @@ import { UsageService } from './usage.service';
 import { runtimeUsers, usageConfig, usageStagingPaths } from './usage-config';
 import { LEGACY_EMAIL, usageEligible, usageEmail } from './usage.util';
 import { isCfXhttp } from '../nodes/protocols/cf-xhttp';
+import { usageXrayBinary } from '../nodes/protocols/cf-xhttp-core';
 
 @Injectable()
 export class UsageProvisioner {
@@ -64,7 +65,13 @@ export class UsageProvisioner {
         const legacyId = JSON.parse(next.config).inbounds.find((i: { tag: string }) => i.tag === `in-${nodeId}`).settings.clients[0].id;
         restart = !next.prepared;
         if (restart && !allowRestart) throw new Error('PREPARATION_REQUIRED');
-        const api = `/usr/local/bin/xray api`;
+        let binary = '/usr/local/bin/xray';
+        if (isCfXhttp(node)) {
+          const unit = await remoteExec(ssh, `systemctl show ${quote(paths.service)} -p ExecStart --value`);
+          if (unit.code !== 0) throw new Error('UNEXPECTED_CORE_PATH');
+          binary = usageXrayBinary(unit.stdout);
+        }
+        const api = `${binary} api`;
         const address = `--server=127.0.0.1:${node.statsPort}`;
         const tag = `-tag=${quote(`in-${nodeId}`)}`;
         const readUsers = async () => {
@@ -76,7 +83,7 @@ export class UsageProvisioner {
         for (const u of users) if (current.has(u.email) && current.get(u.email) !== u.id) throw new Error('RUNTIME_IDENTITY_CONFLICT');
         if (next.config !== before) {
           await uploadText(ssh, next.config, stage);
-          const check = await remoteExec(ssh, `/usr/local/bin/xray run -test -config ${quote(stage)} >/dev/null 2>&1`);
+          const check = await remoteExec(ssh, `${binary} run -test -config ${quote(stage)} >/dev/null 2>&1`);
           if (check.code !== 0) throw new Error('CONFIG_VALIDATION_FAILED');
           const activate = await remoteExec(ssh, `set -eu; test ! -L ${quote(paths.config)}; ` +
             `test "$(sha256sum -- ${quote(paths.config)} | cut -d ' ' -f 1)" = ${quote(hash)}; ` +

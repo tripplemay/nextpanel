@@ -16,7 +16,8 @@ export function nodeFingerprint(node: Record<string, unknown>): string {
   if (node.publicPort == null) return fingerprint(legacy);
   const route = node.cfOriginRoute as Record<string, unknown> | null;
   return fingerprint([...legacy, node.publicPort,
-    ...['zoneId', 'ref', 'rulesetId', 'ruleId', 'domain', 'port'].map(key => route?.[key] ?? null)]);
+    ...['zoneId', 'ref', 'rulesetId', 'ruleId', 'domain', 'port'].map(key => route?.[key] ?? null),
+    ...(route?.tlsRuleId ? [route.tlsRulesetId, route.tlsRuleId] : [])]);
 }
 
 export async function boundedText(response: Response, limit: number): Promise<string> {

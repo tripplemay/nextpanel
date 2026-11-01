@@ -2027,7 +2027,7 @@ describe('NodeDeployService', () => {
       expect(mockPrisma.node.delete).not.toHaveBeenCalled();
     });
 
-    it.each([null, '25.3.6', '26.2.7'])('rejects unreviewed CDN pilot core %s without replacing a shared binary', async version => {
+    it.each([null, '25.3.6', '26.2.7'])('fails closed if isolated core preparation is unavailable with shared version %s', async version => {
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ ...fakeNode,
         protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'TLS', domain: 'cdn.example.com' });
       (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
@@ -2039,7 +2039,7 @@ describe('NodeDeployService', () => {
       const stage = jest.spyOn(internalSvc, 'stageAndValidateConfig');
       const result = await svc.deploy('node-1');
       expect(result.success).toBe(false);
-      expect(result.log).toContain('no shared core will be automatically replaced');
+      expect(result.log).toContain('shared core unchanged');
       expect(install).not.toHaveBeenCalled(); expect(stage).not.toHaveBeenCalled();
       expect(mockCertService.ensureWildcardCert).not.toHaveBeenCalled();
     });

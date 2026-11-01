@@ -22,6 +22,7 @@ export default function NodePort({ node }: { node: Node }) {
     <Typography.Text type="secondary">原 443 网站或 WS 服务保持不变。</Typography.Text>
     <Typography.Text>域名：{node.domain ?? '待配置'}</Typography.Text>
     <Typography.Text>回源规则：{route?.ruleId ? '已登记' : '待登记'}</Typography.Text>
+    <Typography.Text>严格 TLS：{route?.tlsRuleId ? '独立主机名规则已登记' : '部署时核验'}</Typography.Text>
     <Typography.Text>最近配置核验：{route?.checkedAt ? new Date(route.checkedAt).toLocaleString() : '尚未完成'}</Typography.Text>
     {route?.error && <Typography.Text type="danger">{route.error}</Typography.Text>}
     <Typography.Text type="secondary">配置核验涵盖回源规则与专用防火墙，不代表客户端测速或源站 IP 完全隐藏。异常或过期的映射不下发。</Typography.Text>

@@ -23,6 +23,7 @@ export interface CfVerifyResult {
   zoneName?: string;
   zoneStatus?: string;
   message: string;
+  origin?: { readable: boolean; message: string };
 }
 
 @Injectable()
