@@ -66,7 +66,7 @@ describe('bounded CDN XHTTP configuration', () => {
       tlsSettings: { alpn: ['h2'], serverName: node.domain, allowInsecure: false }, xhttpSettings: { host: node.domain } });
     expect(candidateKey(candidate)).not.toBe(candidateKey({ ...candidate, transport: 'WS' }));
   });
-  it('uses conservative explicit client profiles', () => {
+  it('uses compatibility for unknown clients and supports explicit overrides', () => {
     expect(clientProfile(undefined)).toBe('compatible'); expect(clientProfile('xhttp')).toBe('xhttp');
     for (const value of [null, '', 'latest', ['xhttp'], { value: 'xhttp' }]) expect(() => clientProfile(value)).toThrow();
   });
@@ -93,8 +93,18 @@ describe('CDN pilot export isolation', () => {
     expect(pilot).toContain('type=xhttp'); expect(pilot).toContain('type=ws'); expect(pilot).not.toContain(node.server.ip);
     expect(decode(await service[method]('token'))).toBe(before);
   });
+  it.each(['generateContent', 'generateContentByShareToken'] as const)('includes protected XHTTP on existing Shadowrocket links via %s', async method => {
+    const content = Buffer.from(await service[method]('token', clientProfile(undefined, 'Shadowrocket/2.2.93')), 'base64').toString();
+    expect(content).toContain('type=xhttp'); expect(content).toContain('type=ws');
+    expect(content).toContain('alpn=h2'); expect(content).toContain('mode=packet-up');
+    expect(content).not.toContain(node.server.ip);
+    const rollback = Buffer.from(await service[method]('token', clientProfile('compatible', 'Shadowrocket/2.2.93')), 'base64').toString();
+    expect(rollback).toContain('type=ws'); expect(rollback).not.toContain('type=xhttp');
+  });
   it.each(['generateClashContent', 'generateClashContentByShareToken'] as const)('isolates dynamic provider URLs in %s', async method => {
-    expect((await service[method]('token')).content).not.toContain('cf-pilot:');
+    const compatible = (await service[method]('token')).content;
+    expect(compatible).not.toContain('cf-pilot:');
+    expect(compatible).toContain('/cf-provider/ws?profile=compatible');
     const yaml = (await service[method]('token', 'xhttp')).content;
     expect(yaml).toContain('/cf-provider/pilot?profile=xhttp'); expect(yaml).toContain('empty-fallback: REJECT');
     expect(yaml.match(/ {4}use: \[cf-/g)).toHaveLength(2);

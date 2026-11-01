@@ -120,12 +120,20 @@ describe('CF access authenticated HTTP boundary', () => {
     ['link', '', 'generateContent'], ['share', '', 'generateContentByShareToken'],
     ['link', '/clash', 'generateClashContent'], ['share', '/clash', 'generateClashContentByShareToken'],
     ['link', '/cf-provider/node', 'generateCfProvider'], ['share', '/cf-provider/node', 'generateCfProvider'],
-  ] as const)('validates explicit client profiles on %s%s without guessing user-agent', async (kind, suffix, method) => {
+  ] as const)('selects and overrides client profiles on %s%s', async (kind, suffix, method) => {
     const url = `${base}/subscriptions/${kind}/fixture${suffix}`;
-    for (const [query, profile] of [['', 'compatible'], ['?profile=compatible', 'compatible'], ['?profile=xhttp', 'xhttp']]) {
+    for (const [query, profile] of [['', 'xhttp'], ['?profile=auto', 'xhttp'], ['?profile=compatible', 'compatible'], ['?profile=xhttp', 'xhttp']]) {
       const response = await fetch(url + query, { headers: { 'User-Agent': 'Mihomo/1.19.29' } });
       expect(response.status).toBe(200);
       expect(response.headers.get('cache-control')).toContain('no-store');
+      expect(response.headers.get('vary')).toContain('User-Agent');
+      const args = suffix.startsWith('/cf-provider') ? [{ [kind === 'link' ? 'token' : 'shareToken']: 'fixture' }, 'node', profile] : ['fixture', profile];
+      expect(subscriptions[method]).toHaveBeenLastCalledWith(...args);
+    }
+    for (const ua of ['Shadowrocket/2.2.93', 'Shadowrocket/3488', 'clash.meta/alpha-gbc76c13', 'Shadowrocket/2.2.66', 'sing-box/1.12.0', 'unknown']) {
+      const response = await fetch(url, { headers: { 'User-Agent': ua } });
+      expect(response.status).toBe(200);
+      const profile = ['Shadowrocket/2.2.93', 'Shadowrocket/3488', 'clash.meta/alpha-gbc76c13'].includes(ua) ? 'xhttp' : 'compatible';
       const args = suffix.startsWith('/cf-provider') ? [{ [kind === 'link' ? 'token' : 'shareToken']: 'fixture' }, 'node', profile] : ['fixture', profile];
       expect(subscriptions[method]).toHaveBeenLastCalledWith(...args);
     }

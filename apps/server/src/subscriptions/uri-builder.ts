@@ -1126,7 +1126,7 @@ export function buildClashSubscription(nodes: NodeExportInfo[], panelUrl: string
   // ── proxies ───────────────────────────────────────────────────────────────
   const inlineEntries = dynamic ? proxyEntries.filter(e => !e.automatic) : proxyEntries;
   const providers = dynamic ? [...new Set(nodes.filter(n => n.cfAuto).map(n => n.cfNodeId!))].map(id => [
-    `  cf-${id}:`, '    type: http', `    url: ${yamlScalar(`${cfProviderBase}/${encodeURIComponent(id)}${profile === 'xhttp' ? '?profile=xhttp' : ''}`)}`,
+    `  cf-${id}:`, '    type: http', `    url: ${yamlScalar(`${cfProviderBase}/${encodeURIComponent(id)}?profile=${profile}`)}`,
     '    interval: 900', '    proxy: DIRECT', '    size-limit: 262144',
     '    health-check:', '      enable: true', '      url: https://www.gstatic.com/generate_204',
     '      interval: 300', '      timeout: 5000', '      lazy: false', '      expected-status: 204',
