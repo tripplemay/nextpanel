@@ -33,7 +33,7 @@
 
 TUIC 和 AnyTLS 创建时要求用户已配置状态为 `active` 的 Cloudflare Zone。面板为直连节点（链式节点则为入口服务器）创建 DNS-only A 记录，签发并自动续期受信任的 Let's Encrypt 通配符证书；DNS 或证书失败会中止部署，不降级为自签证书或跳过证书校验。XHTTP + REALITY 不依赖 Cloudflare 或域名。
 
-XHTTP + TLS CDN 试点要求受代理的 Cloudflare DNS、可信证书和已验收的 Xray 26.2.6；不会自动替换同机共享内核。原 OpenClash/Shadowrocket 链接继续使用既有节点，新增试点仅通过显式 `?profile=xhttp` 下发；sing-box/HomeProxy 不接收 XHTTP。部署顺序、客户端验收、源站保护和回退见 [CDN XHTTP 试点手册](docs/RUNBOOK-cf-xhttp.md)。
+XHTTP + TLS CDN 试点要求受代理的 Cloudflare DNS、可信证书和已验收的 Xray 26.2.6；不会自动替换同机共享内核。原 Base64/Clash 订阅地址不变，识别到支持 XHTTP 的 Shadowrocket、Meta/Mihomo 或 Xray 系客户端时自动加入新节点；未知或旧版本保留兼容配置。`?profile=xhttp` 可显式加入，`?profile=compatible` 可回退；sing-box/HomeProxy 不接收 XHTTP。版本识别边界见 [客户端适配说明](docs/RUNBOOK-client-subscriptions.md)，部署、源站保护和回退见 [CDN XHTTP 试点手册](docs/RUNBOOK-cf-xhttp.md)。
 
 443 共存采用独立域名的 Cloudflare Origin Rule：客户端仍访问 CDN 443，源站优先使用空闲 8443，再选择 18000–18999。映射模式需已有 Full (strict)、Origin Rules 权限及 nftables；不接管网站反向代理、不修改全局 TLS/WAF。状态异常或配置核验过期时不下发该节点。权限、清理和上线门禁见 [回源端口映射手册](docs/RUNBOOK-cf-origin-port.md)。
 

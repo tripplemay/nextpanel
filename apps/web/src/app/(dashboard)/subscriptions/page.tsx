@@ -27,6 +27,8 @@ interface SubFormat {
   url: string;
   /** Hiddify: the actual sing-box subscription URL; `url` is the app deep link. */
   extra?: string;
+  compatible?: string;
+  modern?: string;
 }
 
 function buildFormats(base: string): SubFormat[] {
@@ -34,15 +36,15 @@ function buildFormats(base: string): SubFormat[] {
   return [
     {
       key: 'hiddify',
-      label: 'Hiddify（推荐）',
+      label: 'Hiddify',
       url: `hiddify://import/${singboxUrl}#NextPanel`,
       extra: singboxUrl,
     },
-    { key: 'clash', label: 'Clash / OpenClash', url: `${base}/clash` },
+    { key: 'clash', label: 'Clash / OpenClash', url: `${base}/clash`, compatible: `${base}/clash?profile=compatible`, modern: `${base}/clash?profile=xhttp` },
     { key: 'singbox', label: 'Sing-box JSON', url: singboxUrl },
     { key: 'homeproxy', label: 'HomeProxy (OpenWrt)', url: `${base}/homeproxy` },
-    { key: 'v2ray', label: 'Shadowrocket / Base64', url: base },
-    { key: 'xhttp', label: 'XHTTP · 试点', url: `${base}/clash?profile=xhttp`, extra: `${base}?profile=xhttp` },
+    { key: 'v2ray', label: 'Shadowrocket / Base64', url: base, compatible: `${base}?profile=compatible`, modern: `${base}?profile=xhttp` },
+    { key: 'xhttp', label: 'XHTTP · 手动指定', url: `${base}/clash?profile=xhttp`, extra: `${base}?profile=xhttp` },
   ];
 }
 
@@ -98,7 +100,7 @@ function LinkBlock({ url, label }: { url: string; label?: string }) {
 }
 
 /** 二维码卡片：始终保持白底黑码，暗色主题下也可正常扫码 */
-function QrCard({ value, size = 200 }: { value: string; size?: number }) {
+function QrCard({ value, size = 200, caption = '扫码导入客户端' }: { value: string; size?: number; caption?: string }) {
   const { token } = antdTheme.useToken();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
@@ -114,7 +116,7 @@ function QrCard({ value, size = 200 }: { value: string; size?: number }) {
         <QRCode value={value} size={size} color="#000" bgColor="#fff" bordered={false} />
       </div>
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-        扫码导入客户端
+        {caption}
       </Typography.Text>
     </div>
   );
@@ -573,10 +575,10 @@ export default function SubscriptionsPage() {
 }
 
 const FORMAT_DESCRIPTIONS: Record<string, string> = {
-  clash: '适配 Clash Verge、OpenClash（Meta/Mihomo 内核）等客户端。原链接保持不变，默认不加入新增 XHTTP CDN 试点节点；原有节点按既有格式输出。',
-  xhttp: '显式加入 XHTTP CDN 试点节点。OpenClash/Clash Verge 需经实测的新版 Meta/Mihomo 内核（XHTTP 初始支持为 1.19.22）；不适用于旧 Clash 或 sing-box。原链接和 WS 服务仍保留，回退时换回兼容链接并更新订阅。纯 XHTTP 试点订阅在兼容入口会明确拒绝，不会直连。',
+  clash: '原订阅地址不变。识别到 Meta/Mihomo 1.19.22+ 时自动包含 XHTTP CDN 节点；无法确认内核版本时保持兼容。客户端隐藏或自定义标识时，可使用下方 XHTTP 链接。旧 Clash 不支持 XHTTP。',
+  xhttp: '用于已确认支持 XHTTP、但自动识别未生效的客户端。支持新版 Shadowrocket、Xray 和 Meta/Mihomo；不适用于旧 Clash 或 sing-box。原有 WS 服务仍保留；遇到兼容问题可换回对应客户端页中的兼容链接。纯 XHTTP 订阅在不支持的入口会明确拒绝，不会直连源站。',
   singbox: '适合 sing-box 原生客户端及 Hiddify，支持 TUIC 和 AnyTLS。sing-box 暂不支持 XHTTP，因此不会包含 XHTTP 节点。',
-  v2ray: '适合 Shadowrocket、V2Ray/Xray 分享链接客户端。原 Base64 链接和 WS 节点不变，不自动加入新增 XHTTP CDN 试点；原有 XHTTP REALITY 节点仍按原逻辑输出。Shadowrocket 的 XHTTP 能力需按具体版本实测。TUIC 不包含在此格式中。',
+  v2ray: '原订阅地址不变。识别到 Shadowrocket 2.2.67+、v2rayN 7.3+、v2rayNG 1.9.24+ 或支持的 Xray 时，更新订阅即加入 XHTTP CDN 节点。未知版本保持兼容，可在确认客户端支持后使用下方 XHTTP 链接。保留已有 WS 节点；TUIC 不包含在此格式中。',
   homeproxy: '适合 OpenWrt 上的 HomeProxy，支持 TUIC 和 AnyTLS，并包含完整分流规则。sing-box 暂不支持 XHTTP，因此不会包含 XHTTP 节点。',
 };
 
@@ -584,14 +586,14 @@ function LinkTabs({ formats }: { formats: SubFormat[] }) {
   const { isMobile } = useIsMobile();
   const [showQr, setShowQr] = useState(isMobile);
 
-  const qrToggle = (value: string) => (
+  const qrToggle = (value: string, caption?: string) => (
     <div style={{ textAlign: 'center' }}>
       <Button type="link" size="small" onClick={() => setShowQr((v) => !v)}>
         {showQr ? '收起二维码' : '显示二维码'}
       </Button>
       {showQr && (
         <div style={{ marginTop: 8 }}>
-          <QrCard value={value} />
+          <QrCard value={value} caption={caption} />
         </div>
       )}
     </div>
@@ -599,7 +601,7 @@ function LinkTabs({ formats }: { formats: SubFormat[] }) {
 
   return (
     <Tabs
-      defaultActiveKey="hiddify"
+      defaultActiveKey={isMobile ? 'v2ray' : 'clash'}
       items={formats.map((f) => ({
         key: f.key,
         label: f.label,
@@ -628,9 +630,18 @@ function LinkTabs({ formats }: { formats: SubFormat[] }) {
                 {FORMAT_DESCRIPTIONS[f.key]}
               </Typography.Text>
             )}
-            <LinkBlock url={f.url} label="订阅链接" />
-            {f.key === 'xhttp' && f.extra && <LinkBlock url={f.extra} label="Xray Base64 试点链接（非默认 Shadowrocket 入口）" />}
-            {isMobile ? <QrCard value={f.url} size={160} /> : qrToggle(f.url)}
+            <LinkBlock url={f.url} label={f.key === 'xhttp' ? 'Clash / OpenClash XHTTP 链接' : '订阅链接'} />
+            {f.modern && f.compatible && <Collapse size="small" items={[{ key: 'compatibility', label: '未看到新节点？手动指定与兼容回退', children:
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <LinkBlock url={f.modern} label="包含 XHTTP（已确认支持的客户端）" />
+                <LinkBlock url={f.compatible} label="兼容 / 回退链接（不含新 XHTTP CDN 节点）" />
+              </Space>,
+            }]} />}
+            {f.key === 'xhttp' && f.extra && <LinkBlock url={f.extra} label="Shadowrocket / Xray Base64 链接" />}
+            {isMobile
+              ? <QrCard value={f.key === 'xhttp' && f.extra ? f.extra : f.url} size={160}
+                caption={f.key === 'xhttp' ? '扫码导入 Shadowrocket / Xray' : undefined} />
+              : qrToggle(f.url, f.key === 'xhttp' ? '扫码导入 Clash / OpenClash' : undefined)}
           </Space>
         ),
       }))}

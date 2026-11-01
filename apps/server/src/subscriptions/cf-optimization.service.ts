@@ -152,7 +152,7 @@ export class CfOptimizationService {
     return {
       enabled: process.env.CF_OPTIMIZATION_ENABLED === 'true', paused, registryError,
       transport: node.transport, tls: node.tls,
-      compatibility: isCfXhttp(node) ? 'XHTTP_OPT_IN' : 'WS_COMPATIBLE',
+      compatibility: isCfXhttp(node) ? 'XHTTP_CAPABLE_CLIENT' : 'WS_COMPATIBLE',
       budget: { lowBudget, intervalMinutes, monthlyLimit, used: budgetError ? null : used,
         remaining: budgetError || monthlyLimit === null ? null : Math.max(0, monthlyLimit - used),
         estimatedMonthlyBatchesPerNode, constrained: monthlyLimit !== null && estimatedMonthlyBatchesPerNode > monthlyLimit, error: budgetError },

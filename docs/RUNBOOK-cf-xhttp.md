@@ -15,13 +15,16 @@ does not establish that a particular Cloudflare path or client is working.
 
 | Entry | New managed XHTTP/TLS pilot | Existing WS |
 | --- | --- | --- |
-| Existing Base64 / Clash links | Not included | Unchanged |
+| Existing Base64 / Clash links, known capable client | Automatically included | Unchanged |
+| Unknown/old client, or explicit `?profile=compatible` | Not included | Unchanged |
 | Base64 / Clash `?profile=xhttp` | Explicit opt-in | Included |
 | sing-box / HomeProxy | Not included | Included |
 | Single-node share link | Refused; use protected subscription | Existing behavior |
 
-The same policy applies to owner and share tokens. No token rotation or user-agent
-guessing is introduced. Existing REALITY/imported nodes keep their old export
+The same policy applies to owner and share tokens. No token rotation is needed.
+Bounded client/version hints select the default profile; explicit profiles override
+them. See [client subscription policy](RUNBOOK-client-subscriptions.md) for exact
+baselines, opaque builds and verification limits. Existing REALITY/imported nodes keep their old export
 behavior. A pure pilot subscription requested via an incompatible entry returns
 503 instead of an empty configuration that could direct traffic outside the proxy.
 The dynamic provider URL also carries the profile; do not manually reuse a cache
@@ -30,8 +33,9 @@ the existing explicit rejection behavior.
 
 OpenClash must use a verified Meta/Mihomo core; a plugin label saying "latest" is
 not an exact core version. Local native acceptance uses Mihomo **1.19.29** and
-Xray **26.2.6**, not the whole OpenClash router environment. Shadowrocket remains
-on the original WS link until its exact build and actual phone behavior pass.
+Xray **26.2.6**, not the whole OpenClash router environment. Capable Shadowrocket
+clients receive XHTTP on the original link; its exact build and actual phone
+behavior still need independent acceptance. Explicit compatibility retains WS.
 Do not remove the compatibility entry or schedule automatic WS retirement.
 
 ## Default-off gates
@@ -93,7 +97,8 @@ chain exit for the CDN-only pilot; do not silently waive `ENTRY_IS_EXIT`.
    Telecom peak hours alongside unchanged WS for 24-48 hours. Record p50/p95 E2E
    delay, timeout rate, complete transfers and reconnect recovery; do not equate
    the cloud regions with residential carriers or assume XHTTP is faster.
-9. Shadowrocket stays on WS until a separately recorded phone test succeeds.
+9. Separately record Shadowrocket import and phone connection acceptance; keep
+   the explicit compatibility link available for immediate WS rollback.
    Keep WS at least 14 days after any later migration and until owners confirm.
    Website coexistence uses the origin-port extension, never shared Nginx 443.
    Stream-up A/B remains outside this scope.
