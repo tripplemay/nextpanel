@@ -54,8 +54,10 @@ not a new dynamic range synchronization mechanism. Update/verify that list when
 Cloudflare changes its ranges. External firewall resets can remove rules before
 the audit notices; this is not protection against arbitrary root changes.
 
-Every five minutes, the panel revalidates at most 20 running/enabled mappings
-(oldest updated first), including resource ownership/config, firewall, proxied
+Every five minutes, the panel revalidates at most 20 running/enabled mappings,
+oldest audit attempt first (persisted independently of Agent heartbeats).
+Failed attempts advance this rotation without refreshing accepted evidence. Checks
+include resource ownership/config, firewall, proxied
 DNS, TLS mode and rule identity. READY evidence expires after 20 minutes; error
 or stale mappings are withheld, never exported as direct origin fallbacks.
 Configuration verification is not client throughput proof. A downloaded client

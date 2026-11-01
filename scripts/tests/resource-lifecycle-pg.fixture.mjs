@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 export async function verifyResourceLifecycle({ prisma, cipher, databaseUrl, require, root, sql }) {
   const { ResourceLifecycleService } = require(`${root}/apps/server/src/resources/resource-lifecycle.service.ts`);
   const { ResourceCleanupScheduler } = require(`${root}/apps/server/src/nodes/resource-cleanup.scheduler.ts`);
-  const { Prisma } = require('@prisma/client');
+  const { CfOriginService, ORIGIN_AUDIT_BATCH } = require(`${root}/apps/server/src/cloudflare/cf-origin.service.ts`);
   const previous = process.env.DATABASE_URL;
   process.env.DATABASE_URL = databaseUrl;
   try {
@@ -90,16 +90,37 @@ export async function verifyResourceLifecycle({ prisma, cipher, databaseUrl, req
     await assert.rejects(prisma.node.create({ data: { id: 'life-invalid-port', userId: 'life-owner', serverId: 'life-mapped',
       name: 'invalid port', protocol: 'VLESS', listenPort: 8443, publicPort: 443, credentialsEnc: cipher.encrypt('fixture') } }), /Node_publicPort_check/);
     await prisma.node.create({ data: { id: 'life-mapped-node', userId: 'life-owner', serverId: 'life-mapped', name: 'mapped',
-      protocol: 'VLESS', transport: 'XHTTP', tls: 'TLS', listenPort: 8443, publicPort: 443,
+      protocol: 'VLESS', transport: 'XHTTP', tls: 'TLS', listenPort: 8443, publicPort: 443, status: 'RUNNING',
       cfOriginRoute: origin, domain: origin.domain, credentialsEnc: cipher.encrypt('fixture') } });
     await prisma.cloudflareSetting.update({ where: { userId: 'life-owner' }, data: { zoneId: 'changed-zone' } });
-    const acceptedMappings = () => prisma.node.findMany({ where: { publicPort: 443,
-      cfOriginRoute: { path: ['checkedAt'], not: Prisma.AnyNull } }, select: { id: true } });
+    const acceptedMappings = () => prisma.$queryRaw(ORIGIN_AUDIT_BATCH);
     assert.equal((await acceptedMappings()).length, 0, 'Never-accepted intent must not occupy audit slots');
     await prisma.node.update({ where: { id: 'life-mapped-node' }, data: { cfOriginRoute: { ...origin, checkedAt: new Date().toISOString() } } });
     assert.equal((await acceptedMappings()).length, 1);
     await prisma.node.update({ where: { id: 'life-mapped-node' }, data: { cfOriginRoute: { ...origin, checkedAt: null } } });
     assert.equal((await acceptedMappings()).length, 0, 'Withdrawn mapping must not be reactivated by audit');
+    const auditIds = Array.from({ length: 25 }, (_, i) => `life-audit-${String(i).padStart(2, '0')}`);
+    const checkedAt = '2026-01-01T00:00:00.000Z';
+    await prisma.node.createMany({ data: auditIds.map((id, i) => ({
+      id, userId: 'life-owner', serverId: 'life-mapped', name: id, protocol: 'VLESS', transport: 'XHTTP', tls: 'TLS',
+      listenPort: 19000 + i, publicPort: 443, status: 'RUNNING', credentialsEnc: cipher.encrypt('fixture'),
+      cfOriginRoute: { ...origin, port: 19000 + i, state: 'READY', checkedAt },
+    })) });
+    const unavailable = { connect: async () => { throw new Error('fixture unavailable host'); } };
+    await new CfOriginService(prisma, {}, unavailable).audit();
+    const attempts = async () => prisma.node.findMany({ where: { id: { in: auditIds } }, orderBy: { id: 'asc' } });
+    assert.equal((await attempts()).filter(n => n.cfOriginRoute.auditedAt).length, 20, 'Audit batch must remain bounded');
+    // Simulate fixed heartbeat ordering that repeatedly makes the same 20 nodes oldest.
+    await prisma.node.updateMany({ where: { id: { in: auditIds.slice(0, 20) } }, data: { updatedAt: new Date(0) } });
+    await prisma.node.updateMany({ where: { id: { in: auditIds.slice(20) } }, data: { updatedAt: new Date() } });
+    assert.deepEqual((await acceptedMappings()).slice(0, 5).map(n => n.id), auditIds.slice(20));
+    // Recreate the scheduler to prove rotation survives process restarts and failed attempts.
+    await new CfOriginService(prisma, {}, unavailable).audit();
+    const audited = await attempts();
+    assert.ok(audited.every(n => n.cfOriginRoute.auditedAt && n.cfOriginRoute.state === 'ERROR'));
+    assert.ok(audited.every(n => n.cfOriginRoute.checkedAt === checkedAt), 'Failed audits must not refresh accepted evidence');
+    await prisma.node.deleteMany({ where: { id: { in: auditIds } } });
+    process.stdout.write('Origin audit: bounded persistent rotation, heartbeat independence, failure freshness and withdrawal exclusion PASS\n');
     await resources.queueServerDeletion('life-mapped', 'life-owner', true);
     const mapped = await prisma.resourceCleanup.findMany({ where: { nodeId: 'life-mapped-node' } });
     assert.deepEqual(mapped.map(x => x.role).sort(), ['CF_ORIGIN', 'ENTRY']);

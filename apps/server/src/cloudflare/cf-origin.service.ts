@@ -11,6 +11,14 @@ import { originRoute, type OriginRoute } from './cf-origin.util';
 import { verifyOriginFirewall } from './cf-origin-firewall';
 import { remoteExec } from '../resources/remote-exec';
 
+export const ORIGIN_AUDIT_BATCH = Prisma.sql`
+  SELECT id FROM "Node"
+  WHERE "publicPort" = 443 AND status = 'RUNNING' AND enabled = true
+    AND "cfOriginRoute"->>'checkedAt' IS NOT NULL
+  ORDER BY COALESCE("cfOriginRoute"->>'auditedAt', "cfOriginRoute"->>'checkedAt'), id
+  LIMIT 20
+`;
+
 @Injectable()
 export class CfOriginService {
   private readonly logger = new Logger(CfOriginService.name);
@@ -70,14 +78,17 @@ export class CfOriginService {
     const api = await this.api(node.userId, r.zoneId);
     await api.prerequisites(node.cfDnsRecordId!, r.domain, node.server.ip, r.ref);
     const verified = await api.verify(r);
+    const now = new Date().toISOString();
     await this.prisma.node.update({ where: { id: nodeId }, data: {
-      cfOriginRoute: { ...verified, state: 'READY', checkedAt: new Date().toISOString(), error: null },
+      cfOriginRoute: { ...verified, state: 'READY', checkedAt: now, auditedAt: now, error: null },
     } });
   }
 
   private async fail(nodeId: string, r: OriginRoute, error: unknown) {
     const message = error instanceof Error ? error.message : 'Origin mapping verification failed';
-    await this.prisma.node.updateMany({ where: { id: nodeId }, data: { cfOriginRoute: { ...r, state: 'ERROR', error: message.slice(0, 300) } } });
+    await this.prisma.node.updateMany({ where: { id: nodeId }, data: { cfOriginRoute: {
+      ...r, state: 'ERROR', auditedAt: new Date().toISOString(), error: message.slice(0, 300),
+    } } });
   }
 
   async remove(ownerId: string, value: unknown) {
@@ -103,9 +114,9 @@ export class CfOriginService {
     if (this.running) return;
     this.running = true;
     try {
-      const nodes = await this.prisma.node.findMany({ where: { publicPort: 443, status: 'RUNNING', enabled: true,
-        cfOriginRoute: { path: ['checkedAt'], not: Prisma.AnyNull } },
-        orderBy: { updatedAt: 'asc' }, take: 20, include: { server: true } });
+      // Heartbeats rewrite updatedAt; attempts (including failures) have their own
+      // persisted ordering so neither active nor broken nodes starve other audits.
+      const nodes = await this.prisma.$queryRaw<Array<{ id: string }>>(ORIGIN_AUDIT_BATCH);
       for (const candidate of nodes) {
         await withPostgresAdvisoryLocks([`nextpanel:node:${candidate.id}`], async () => {
           const node = await this.prisma.node.findUnique({ where: { id: candidate.id }, include: { server: true } });

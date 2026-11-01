@@ -10,6 +10,7 @@ export interface OriginRoute {
   ruleId?: string;
   state: 'PENDING' | 'CONFIGURED' | 'READY' | 'ERROR';
   checkedAt?: string;
+  auditedAt?: string;
   error?: string;
 }
 

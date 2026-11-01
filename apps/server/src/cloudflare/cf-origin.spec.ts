@@ -178,7 +178,7 @@ describe('durable origin provisioning', () => {
   });
   it.each([true, false])('audit preserves acceptance only while remote ownership is valid=%s', async valid => {
     const candidate = { ...node, cfOriginRoute: ready, status: 'RUNNING', enabled: true };
-    const db = { node: { findMany: jest.fn().mockResolvedValue([candidate]), findUnique: jest.fn().mockResolvedValue(candidate),
+    const db = { $queryRaw: jest.fn().mockResolvedValue([candidate]), node: { findUnique: jest.fn().mockResolvedValue(candidate),
       updateMany: jest.fn() } };
     const ssh = { dispose: jest.fn(), execCommand: jest.fn().mockResolvedValue({ code: 0, stdout: '', stderr: '' }) };
     const resources = { connect: jest.fn().mockResolvedValue(ssh), assertUnchangedDeployment: jest.fn(async () => {
@@ -190,14 +190,15 @@ describe('durable origin provisioning', () => {
     expect(accept).toHaveBeenCalledTimes(valid ? 1 : 0);
     expect(ssh.dispose).toHaveBeenCalled();
     if (!valid) expect(db.node.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: { cfOriginRoute: expect.objectContaining({ state: 'ERROR', error: 'Remote ownership changed' }) },
+      data: { cfOriginRoute: expect.objectContaining({ state: 'ERROR', checkedAt: ready.checkedAt,
+        auditedAt: expect.any(String), error: 'Remote ownership changed' }) },
     }));
   });
 
   it('audit cannot accept an undeployed or withdrawn mapping', async () => {
     const candidate = { ...node, cfOriginRoute: route, status: 'RUNNING', enabled: true };
     const resources = { connect: jest.fn() };
-    const service = new CfOriginService({ node: { findMany: async () => [candidate], findUnique: async () => candidate } } as any,
+    const service = new CfOriginService({ $queryRaw: async () => [candidate], node: { findUnique: async () => candidate } } as any,
       {} as any, resources as any);
     const accept = jest.spyOn(service, 'ready').mockResolvedValue();
     await service.audit();
