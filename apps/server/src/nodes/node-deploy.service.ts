@@ -127,7 +127,7 @@ export class NodeDeployService {
     options: DeployOptions = {},
   ): Promise<DeployResult> {
     const startMs = Date.now();
-    const node = await this.prisma.node.findUnique({
+    let node = await this.prisma.node.findUnique({
       where: { id: nodeId },
       include: { server: true, usageState: true },
     });
@@ -142,6 +142,25 @@ export class NodeDeployService {
       logs.push(line);
       onLog?.(line);
     };
+
+    let mappedOrigin: OriginRoute | null = null;
+    if (node.publicPort != null) {
+      try {
+        if (!this.cfOrigin) throw new Error('Origin mapping service unavailable');
+        mappedOrigin = await this.cfOrigin.prepare(node.id);
+        // A retained failed creation may not have a domain yet. Generate from
+        // the persisted identity returned by preparation, not the stale row.
+        const prepared = await this.prisma.node.findUnique({
+          where: { id: nodeId }, include: { server: true, usageState: true },
+        });
+        if (!prepared || prepared.domain !== mappedOrigin.domain) throw new Error('Prepared origin identity unavailable');
+        node = prepared;
+      } catch (err) {
+        log(`Origin preparation failed: ${err instanceof Error ? err.message : String(err)}`);
+        await this.finalize(nodeId, node.name, false, logs, '', actorId, startMs, correlationId, undefined, node.userId);
+        return { success: false, log: logs.join('\n') };
+      }
+    }
 
     // ── 1. Decrypt credentials ───────────────────────────────────────────────
     const credentials = JSON.parse(
@@ -235,14 +254,9 @@ export class NodeDeployService {
     let firewallChanges: FirewallChange[] = [];
     let rollbackFailed = false;
     let ownershipUpdate: { rollback(): Promise<void> } | null = null;
-    let mappedOrigin: OriginRoute | null = null;
     let firewallGuard: string | undefined;
 
     try {
-      if (node.publicPort != null) {
-        if (!this.cfOrigin) throw new Error('Origin mapping service unavailable');
-        mappedOrigin = await this.cfOrigin.prepare(node.id);
-      }
       log(`Connecting via SSH...`);
       ssh = await connectSsh({
         host: server.ip,

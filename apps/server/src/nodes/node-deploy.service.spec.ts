@@ -1957,6 +1957,33 @@ describe('NodeDeployService', () => {
   });
 
   describe('deploy — XHTTP, TUIC, and AnyTLS', () => {
+    it.each([true, false])('prepares retained domain-less mapped nodes before config generation, recovery=%s', async recovered => {
+      const pending = { ...fakeNode, protocol: 'VLESS', transport: 'XHTTP', tls: 'TLS', listenPort: 8443, publicPort: 443, domain: null };
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(pending);
+      (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.configSnapshot.create as jest.Mock).mockResolvedValue({});
+      mockOrigin.prepare.mockImplementationOnce(async () => {
+        if (!recovered) throw new Error('nft preflight still unavailable');
+        (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ ...pending, domain: 'recovered.example.com' });
+        return { domain: 'recovered.example.com' };
+      });
+      const generator = generateConfig as jest.Mock;
+      generator.mockImplementationOnce(info => {
+        expect(info.domain).toBe('recovered.example.com');
+        return '{"config":true}';
+      });
+      // Stop before any remote deployment; this regression covers recovery order.
+      mockConnectSsh.mockRejectedValueOnce(new Error('fixture stop after config generation'));
+      const result = await svc.deploy('node-1');
+      expect(result.success).toBe(false);
+      expect(generator).toHaveBeenCalledTimes(recovered ? 1 : 0);
+      expect(mockConnectSsh).toHaveBeenCalledTimes(recovered ? 1 : 0);
+      if (recovered) expect(generator.mock.invocationCallOrder[0]).toBeGreaterThan(mockOrigin.prepare.mock.invocationCallOrder[0]);
+      else expect(result.log).toContain('Origin preparation failed');
+      generator.mockReset().mockReturnValue('{"config":true}');
+      mockConnectSsh.mockReset().mockResolvedValue(mockSsh);
+    });
+
     it.each([true, false])('publishes a mapped node only after CDN acceptance=%s without touching 443', async reachable => {
       const r = { version: 1, zoneId: 'zone', ref: `np_origin_${'a'.repeat(32)}`, domain: 'cdn.example.com', port: 8443, state: 'CONFIGURED' };
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ ...fakeNode,
