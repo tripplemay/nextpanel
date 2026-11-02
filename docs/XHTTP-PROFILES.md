@@ -29,10 +29,16 @@ H2 or direct-origin retry is implicit. Keep a separate H2/WS node for fallback.
 2. Keep `CF_XHTTP_PILOT_ENABLED=true` as the shared managed-XHTTP gate. It gates
    both presets; disabling it prevents new creations, not existing exports.
 3. Enable HTTP/3 for the zone before H3 creation; enable gRPC before H2 stream-up.
-   The panel requires Zone Settings Read and performs GET-only preflight checks
-   before creation/update and again on deployment/retry. It never enables
+   The panel requires Zone Settings Read and checks HTTP/3 or HTTP/2 (respectively)
+   with GET-only requests before creation/update and again on deployment/retry.
+   `settings/grpc` is not a supported Zone Settings endpoint (HTTP 400, code 1003,
+   `Undefined zone setting: grpc`); HTTP/2 being on does **not** confirm gRPC.
+   Check gRPC in the Cloudflare dashboard under Network. The panel never enables
    zone-wide settings automatically. Mapped nodes check their original zone.
-   Ensure WAF/Access rules allow the path. Settings checks do not prove E2E.
+   Ensure WAF allows the path; Cloudflare Access does not enforce authentication
+   on gRPC traffic, so review other services before enabling the zone-wide toggle.
+   Actual CDN transport acceptance remains mandatory before deployment commits;
+   a failed mode switch restores the previous remote configuration and DB mode.
 4. Create an independent H3 node or choose stream-up on an H2 preset. Existing
    H2 nodes expose mode editing without exposing identity/port/host mutation.
    Saving redeploys; changing mode requires clients to refresh subscriptions.

@@ -2014,11 +2014,13 @@ describe('NodeDeployService', () => {
       mockConnectSsh.mockReset().mockResolvedValue(mockSsh);
     });
 
-    it.each([true, false])('publishes a mapped node only after CDN acceptance=%s without touching 443', async reachable => {
+    it.each(['packet-up', 'stream-up'].flatMap(mode => [true, false].map(reachable => ({ mode, reachable }))))(
+      'publishes mapped $mode only after CDN acceptance=$reachable without touching 443', async ({ mode, reachable }) => {
       const r = { version: 1, zoneId: 'zone', ref: `np_origin_${'a'.repeat(32)}`, domain: 'cdn.example.com', port: 8443, state: 'CONFIGURED' };
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue({ ...fakeNode,
         protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'TLS', domain: r.domain,
-        listenPort: 8443, publicPort: 443, cfOriginRoute: r });
+        listenPort: 8443, publicPort: 443, cfOriginRoute: r,
+        credentialsEnc: `enc:${JSON.stringify({ uuid: 'abc', xhttpMode: mode })}` });
       (mockPrisma.node.update as jest.Mock).mockResolvedValue({});
       (mockPrisma.configSnapshot.findFirst as jest.Mock).mockResolvedValue(null);
       (mockPrisma.configSnapshot.create as jest.Mock).mockResolvedValue({});
@@ -2036,9 +2038,16 @@ describe('NodeDeployService', () => {
       });
       jest.spyOn(internalSvc, 'stageAndValidateConfig').mockResolvedValue('/etc/nextpanel/nodes/node-1.json.next-tested');
       jest.spyOn(internalSvc, 'activateStagedConfig').mockResolvedValue(undefined);
+      const restore = jest.spyOn(internalSvc, 'restoreDeploymentRollback');
       const pending = svc.deploy('node-1');
       await jest.runAllTimersAsync();
-      expect((await pending).success).toBe(reachable);
+      const result = await pending;
+      expect(result.success).toBe(reachable);
+      expect(restore).toHaveBeenCalledTimes(reachable ? 0 : 1);
+      if (mode === 'stream-up') {
+        expect(result.log).toContain('gRPC is not exposed by the Zone Settings API');
+        if (!reachable) expect(result.log).toContain('Check Cloudflare Network > gRPC');
+      }
       expect(install).toHaveBeenCalledWith(mockSsh, 'node-1', 8443, r.ref);
       expect(verify).toHaveBeenCalled();
       expect(mockOrigin.ready).toHaveBeenCalledTimes(reachable ? 1 : 0);

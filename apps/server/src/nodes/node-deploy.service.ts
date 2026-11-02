@@ -153,6 +153,9 @@ export class NodeDeployService {
       try {
         if (!this.cfOrigin) throw new Error('Cloudflare XHTTP preflight unavailable');
         await this.cfOrigin.checkXhttpEdge(node.userId, credentials, node.cfOriginRoute);
+        if (cfXhttpProfile(credentials).mode === 'stream-up') {
+          log('Cloudflare HTTP/2 prerequisite checked; gRPC is not exposed by the Zone Settings API. Enable it in Network; real CDN acceptance is still required.');
+        }
       } catch (err) {
         log(`XHTTP edge preflight failed: ${err instanceof Error ? err.message : String(err)}`);
         return { success: false, log: logs.join('\n') };
@@ -524,6 +527,9 @@ export class NodeDeployService {
       if (isActive) ownershipUpdate = await this.resources.registerDeployment(ssh, server, node.id, 'ENTRY', configJson);
 
       if (!isActive) {
+        if (isCfXhttp(node) && cfXhttpProfile(credentials).mode === 'stream-up') {
+          log('XHTTP stream-up acceptance failed. Check Cloudflare Network > gRPC, WAF/Access and origin HTTP/2; restoring the previous deployment when available. No zone-wide settings were changed.');
+        }
         const { stdout: journalOut } = await ssh.execCommand(
           `journalctl -u ${serviceName} -n 30 --no-pager 2>&1 || true`,
         );

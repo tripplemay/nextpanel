@@ -332,7 +332,7 @@ export default function NodePresetModal({
 
         {selectedPreset === 'VLESS_XHTTP_TLS' && (
           <Form.Item name="xhttpMode" label="XHTTP 上传模式" initialValue="packet-up" preserve={false}
-            extra="HTTP/2；不修改已有节点。stream-up 需先在 Cloudflare 开启 gRPC，面板只读检查，不自动修改区域设置。">
+            extra="HTTP/2；不修改已有节点。stream-up 需在 Cloudflare → 网络中开启 gRPC；API 无法读取该开关，部署时验证真实 CDN 链路，不自动修改区域设置。">
             <Select options={[
               { value: 'packet-up', label: 'packet-up · 兼容默认' },
               { value: 'stream-up', label: 'stream-up · 持续流式上传' },

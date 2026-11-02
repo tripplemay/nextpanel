@@ -64,7 +64,7 @@ describe('Cloudflare origin API isolation', () => {
     });
   });
   afterEach(() => fetcher.mockRestore());
-  it.each(['http3', 'grpc'] as const)('checks %s read-only and fails closed on disabled, malformed or denied responses', async setting => {
+  it.each(['http3', 'http2'] as const)('checks %s read-only and fails closed on disabled, malformed or denied responses', async setting => {
     const api = new CfOriginApi('private-fixture', 'zone');
     for (const value of ['off', null, true, undefined]) {
       fetcher.mockResolvedValueOnce(response({ value }));
@@ -76,6 +76,23 @@ describe('Cloudflare origin API isolation', () => {
     await api.requireXhttpSetting(setting);
     expect(fetcher).toHaveBeenLastCalledWith(`https://api.cloudflare.com/client/v4/zones/zone/settings/${setting}`,
       expect.objectContaining({ method: 'GET', redirect: 'error' }));
+    expect(writes).toEqual([]);
+  });
+  it.each([
+    [400, 'request rejected or API setting unavailable'],
+    [404, 'request rejected or API setting unavailable'],
+    [401, 'check token permissions'],
+    [403, 'check token permissions'],
+    [429, 'rate limited'],
+    [503, 'service unavailable'],
+  ])('classifies HTTP %s without disclosing provider errors or treating every failure as permissions', async (status, hint) => {
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ success: false,
+      errors: [{ code: 1003, message: 'Undefined zone setting: grpc; private-fixture' }] }), { status: Number(status) }));
+    const error = await new CfOriginApi('private-fixture', 'zone').requireXhttpSetting('http2').catch(e => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain(hint);
+    expect(error.message).not.toContain('private-fixture');
+    if (![401, 403].includes(Number(status))) expect(error.message).not.toContain('check token permissions');
     expect(writes).toEqual([]);
   });
   it('appends only an exact-host port rule and leaves the website unchanged', async () => {
@@ -289,14 +306,17 @@ describe('durable origin provisioning', () => {
   afterEach(() => jest.restoreAllMocks());
   it('uses the original mapping zone for new-profile checks and does no cloud IO for legacy H2', async () => {
     const token = jest.fn().mockResolvedValue({ apiToken: 'fixture', zoneId: 'replacement-zone' });
-    const fetcher = jest.spyOn(global, 'fetch').mockImplementation(async () => response({ value: 'on' }));
+    const fetcher = jest.spyOn(global, 'fetch').mockImplementation(async input => String(input).endsWith('/settings/grpc')
+      ? new Response(JSON.stringify({ success: false, errors: [{ code: 1003, message: 'Undefined zone setting: grpc' }] }), { status: 400 })
+      : response({ value: 'on' }));
     const service = new CfOriginService({} as any, { getDecryptedToken: token } as any, {} as any);
     await service.checkXhttpEdge('owner', {}, route);
     expect(fetcher).not.toHaveBeenCalled(); expect(token).not.toHaveBeenCalled();
     await service.checkXhttpEdge('owner', { xhttpAlpn: 'h3' }, route);
     expect(fetcher).toHaveBeenLastCalledWith('https://api.cloudflare.com/client/v4/zones/zone/settings/http3', expect.anything());
     await service.checkXhttpEdge('owner', { xhttpMode: 'stream-up' }, route);
-    expect(fetcher).toHaveBeenLastCalledWith('https://api.cloudflare.com/client/v4/zones/zone/settings/grpc', expect.anything());
+    expect(fetcher).toHaveBeenLastCalledWith('https://api.cloudflare.com/client/v4/zones/zone/settings/http2', expect.anything());
+    expect(fetcher.mock.calls.some(([url]) => String(url).endsWith('/settings/grpc'))).toBe(false);
   });
   it('requires source firewall support before persisting intent or creating cloud resources', async () => {
     const update = jest.fn(); const token = jest.fn().mockResolvedValue({ apiToken: 'fixture', zoneId: 'zone', domain: 'example.com' });
