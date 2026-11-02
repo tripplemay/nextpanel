@@ -39,7 +39,9 @@ export class CfOriginService {
     const cf = await this.settings.getDecryptedToken(ownerId);
     if (!cf) throw new Error('Cloudflare credentials unavailable');
     const zone = route ? originRoute(route).zoneId : cf.zoneId;
-    await new CfOriginApi(cf.apiToken, zone).requireXhttpSetting(profile.alpn === 'h3' ? 'http3' : 'grpc');
+    // gRPC has no supported Zone Settings endpoint. HTTP/2 is only a prerequisite;
+    // deployment must still pass the real CDN transport test before committing.
+    await new CfOriginApi(cf.apiToken, zone).requireXhttpSetting(profile.alpn === 'h3' ? 'http3' : 'http2');
   }
 
   async preflight(ownerId: string, serverId: string, mapped: boolean) {

@@ -296,7 +296,7 @@ export default function NodeFormModal({ open, initialValues, onClose, onSuccess 
           </Form.Item>
           <Alert type="warning" showIcon message="保存会重新部署此节点，可能短暂重连"
             description={h3 ? 'H3 预设固定使用 packet-up；需要 H2 时保留或新建独立 H2 节点。'
-              : '切换模式后必须更新客户端订阅；stream-up 需开启 CF gRPC。部署失败按现有事务机制回滚；要恢复旧模式，请改回 packet-up 并再次更新订阅。'} />
+              : '切换模式后必须更新客户端订阅；stream-up 需在 Cloudflare → 网络中开启 gRPC，API 无法读取该开关。部署时验证真实 CDN 链路，失败回滚；要恢复旧模式，请改回 packet-up 并再次更新订阅。'} />
         </Form>
       </Modal>
     );

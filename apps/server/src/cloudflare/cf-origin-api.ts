@@ -29,7 +29,14 @@ export class CfOriginApi {
         : path.includes('http_config_settings') ? 'Configuration Rules (requires Config Settings Read/Write)'
         : path.startsWith('rulesets') ? 'Origin Rules (requires Origin Read/Write)'
         : 'DNS records (requires DNS Read/Edit)';
-      throw new Error(`Cloudflare ${operation}: ${method} failed (HTTP ${response.status}); check token permissions and access to the original zone`);
+      const hint = response.status === 401 || response.status === 403
+        ? 'check token permissions and access to the original zone'
+        : response.status === 400 || response.status === 404
+          ? 'request rejected or API setting unavailable; verify the supported endpoint and request parameters'
+          : response.status === 429 ? 'rate limited; retry later'
+            : response.status >= 500 ? 'Cloudflare service unavailable; retry later'
+              : 'unexpected API response; operation was not confirmed';
+      throw new Error(`Cloudflare ${operation}: ${method} failed (HTTP ${response.status}); ${hint}`);
     }
     const reader = response.body?.getReader();
     if (!reader) throw new Error('Cloudflare origin response empty');
@@ -64,7 +71,7 @@ export class CfOriginApi {
     return id(record.id);
   }
 
-  async requireXhttpSetting(setting: 'http3' | 'grpc') {
+  async requireXhttpSetting(setting: 'http3' | 'http2') {
     const result = await this.request<{ value: string }>(`settings/${setting}`);
     if (result?.value !== 'on') {
       throw new Error(`Cloudflare ${setting} must be enabled for this XHTTP profile; zone-wide settings were not changed`);
