@@ -14,12 +14,13 @@ import { PROTOCOL_PRESETS, CREDENTIAL_GENERATORS, type SupportedProtocol } from 
 import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
 import { parseSocksUri, SocksUriParseError, type ParsedSocksUri } from './socks-uri';
 import { ResourceLifecycleService } from '../resources/resource-lifecycle.service';
-import { assertCfXhttpPilotEnabled, cfXhttpCredentials, isCfXhttp } from './protocols/cf-xhttp';
+import { applyCfXhttpMode, assertCfXhttpPilotEnabled, cfXhttpCredentials, cfXhttpProfile, isCfXhttp, isCfXhttpPreset } from './protocols/cf-xhttp';
 import { CfOriginService } from '../cloudflare/cf-origin.service';
 
 const CLOUDFLARE_PRESETS = new Set<SupportedProtocol>([
   'VLESS_WS_TLS',
   'VLESS_XHTTP_TLS',
+  'VLESS_XHTTP_H3_TLS',
   'VLESS_TCP_TLS',
   'TUIC_V5',
   'ANYTLS',
@@ -101,11 +102,13 @@ export class NodesService {
   async createFromPreset(userId: string, dto: CreateNodeFromPresetDto) {
     await this.assertOwnedServer(dto.serverId, userId);
     const presetKey = dto.preset as SupportedProtocol;
-    if (presetKey === 'VLESS_XHTTP_TLS') assertCfXhttpPilotEnabled();
+    if (isCfXhttpPreset(presetKey)) assertCfXhttpPilotEnabled();
     if (CLOUDFLARE_PRESETS.has(presetKey)) await this.assertActiveCloudflare(userId);
 
     const preset = PROTOCOL_PRESETS[presetKey];
     const credentials = CREDENTIAL_GENERATORS[presetKey]();
+    applyCfXhttpMode(presetKey, credentials, dto.xhttpMode);
+    if (isCfXhttpPreset(presetKey)) await this.checkXhttpEdge(userId, credentials);
     const credentialsEnc = this.crypto.encrypt(JSON.stringify(credentials));
     const node = await this.withDatabaseLocks([serverPortLock(dto.serverId)], async () => {
       await this.assertOwnedServer(dto.serverId, userId);
@@ -114,9 +117,9 @@ export class NodesService {
         preset.fixedPort,
         preset.portBase,
         preset.implementation,
-        presetKey === 'VLESS_XHTTP_TLS',
+        isCfXhttpPreset(presetKey),
       );
-      if (presetKey === 'VLESS_XHTTP_TLS') {
+      if (isCfXhttpPreset(presetKey)) {
         if (!this.cfOrigin) throw new Error('Origin mapping service unavailable');
         try { await this.cfOrigin.preflight(userId, dto.serverId, listenPort !== 443); }
         catch (error) { throw new BadRequestException(error instanceof Error ? error.message : 'Origin preflight failed'); }
@@ -131,7 +134,7 @@ export class NodesService {
           transport: preset.transport as any,
           tls: preset.tls as any,
           listenPort,
-          ...(presetKey === 'VLESS_XHTTP_TLS' && listenPort !== 443 ? { publicPort: 443 } : {}),
+          ...(isCfXhttpPreset(presetKey) && listenPort !== 443 ? { publicPort: 443 } : {}),
           domain: null,
           credentialsEnc,
           source: 'AUTO',
@@ -145,8 +148,8 @@ export class NodesService {
     // Mapped origins are prepared by the streamed deploy, not the creation
     // request: package downloads can exceed the CDN's ordinary request limit.
     if (CLOUDFLARE_PRESETS.has(presetKey) && node.publicPort !== 443) {
-      const strict = STRICT_DNS_PRESETS.has(presetKey) || presetKey === 'VLESS_XHTTP_TLS';
-      const proxied = presetKey === 'VLESS_WS_TLS' || presetKey === 'VLESS_XHTTP_TLS';
+      const strict = STRICT_DNS_PRESETS.has(presetKey) || isCfXhttpPreset(presetKey);
+      const proxied = presetKey === 'VLESS_WS_TLS' || isCfXhttpPreset(presetKey);
       try {
         await this.provisionCloudflareDns(userId, node.id, dto.serverId, proxied, strict);
       } catch (err) {
@@ -206,6 +209,7 @@ export class NodesService {
         egressIpPolicy: true,
         cfDnsRecordId: true,
         credentialsEnc: true,
+        cfOriginRoute: true,
         source: true,
         status: true,
         enabled: true,
@@ -219,6 +223,10 @@ export class NodesService {
     }
 
     const data: Record<string, unknown> = { ...dto };
+    delete data.xhttpMode;
+    if (dto.xhttpMode !== undefined && !isCfXhttp(existing)) {
+      throw new BadRequestException('xhttpMode is only supported by managed CDN XHTTP nodes');
+    }
     const enteringXhttp = dto.transport === 'XHTTP' && existing.transport !== 'XHTTP';
     const enteringManagedProtocol =
       dto.protocol !== undefined &&
@@ -268,7 +276,12 @@ export class NodesService {
       const currentCreds = JSON.parse(
         this.crypto.decrypt(existing.credentialsEnc),
       ) as Record<string, string>;
-      const merged = { ...currentCreds, ...(dto.credentials ?? {}) };
+      const merged = { ...currentCreds, ...(dto.credentials ?? {}),
+        ...(dto.xhttpMode !== undefined ? { xhttpMode: dto.xhttpMode } : {}) };
+      if (dto.xhttpMode !== undefined) {
+        cfXhttpProfile(merged);
+        await this.checkXhttpEdge(userId, ensureCredentials(shape, merged), existing.cfOriginRoute);
+      }
       data.credentialsEnc = this.crypto.encrypt(
         JSON.stringify(ensureCredentials(shape, merged)),
       );
@@ -565,11 +578,13 @@ export class NodesService {
     }
 
     const presetKey = dto.preset as SupportedProtocol;
-    if (presetKey === 'VLESS_XHTTP_TLS') assertCfXhttpPilotEnabled();
-    if (STRICT_DNS_PRESETS.has(presetKey) || presetKey === 'VLESS_XHTTP_TLS') await this.assertActiveCloudflare(userId);
+    if (isCfXhttpPreset(presetKey)) assertCfXhttpPilotEnabled();
+    if (STRICT_DNS_PRESETS.has(presetKey) || isCfXhttpPreset(presetKey)) await this.assertActiveCloudflare(userId);
 
     const preset = PROTOCOL_PRESETS[presetKey];
     const credentials = CREDENTIAL_GENERATORS[presetKey]();
+    applyCfXhttpMode(presetKey, credentials, dto.xhttpMode);
+    if (isCfXhttpPreset(presetKey)) await this.checkXhttpEdge(userId, credentials);
     const credentialsEnc = this.crypto.encrypt(JSON.stringify(credentials));
 
     const chainCredEnc = managedExitServerId
@@ -595,9 +610,9 @@ export class NodesService {
         preset.fixedPort,
         preset.portBase,
         preset.implementation,
-        presetKey === 'VLESS_XHTTP_TLS',
+        isCfXhttpPreset(presetKey),
       );
-      if (presetKey === 'VLESS_XHTTP_TLS') {
+      if (isCfXhttpPreset(presetKey)) {
         if (!this.cfOrigin) throw new Error('Origin mapping service unavailable');
         try { await this.cfOrigin.preflight(userId, dto.entryServerId, listenPort !== 443); }
         catch (error) { throw new BadRequestException(error instanceof Error ? error.message : 'Origin preflight failed'); }
@@ -615,7 +630,7 @@ export class NodesService {
           transport: preset.transport as any,
           tls: preset.tls as any,
           listenPort,
-          ...(presetKey === 'VLESS_XHTTP_TLS' && listenPort !== 443 ? { publicPort: 443 } : {}),
+          ...(isCfXhttpPreset(presetKey) && listenPort !== 443 ? { publicPort: 443 } : {}),
           domain: null,
           credentialsEnc,
           exitType: exitType as any,
@@ -630,9 +645,9 @@ export class NodesService {
       });
     });
 
-    if ((STRICT_DNS_PRESETS.has(presetKey) || presetKey === 'VLESS_XHTTP_TLS') && node.publicPort !== 443) {
+    if ((STRICT_DNS_PRESETS.has(presetKey) || isCfXhttpPreset(presetKey)) && node.publicPort !== 443) {
       try {
-        await this.provisionCloudflareDns(userId, node.id, dto.entryServerId, presetKey === 'VLESS_XHTTP_TLS', true);
+        await this.provisionCloudflareDns(userId, node.id, dto.entryServerId, isCfXhttpPreset(presetKey), true);
       } catch (err) {
         await this.rollbackCreatedNode(node.id);
         throw err;
@@ -872,6 +887,13 @@ export class NodesService {
       if (strict) throw err;
       // Existing TLS presets preserve their historical best-effort behavior.
     }
+  }
+
+  private async checkXhttpEdge(userId: string, credentials: Record<string, string>, route?: unknown) {
+    if (cfXhttpProfile(credentials).protocol === 3) return;
+    if (!this.cfOrigin) throw new BadRequestException('Cloudflare XHTTP preflight unavailable');
+    try { await this.cfOrigin.checkXhttpEdge(userId, credentials, route); }
+    catch (error) { throw new BadRequestException(error instanceof Error ? error.message : 'Cloudflare XHTTP preflight failed'); }
   }
 
   private safeSelect() {

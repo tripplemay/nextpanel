@@ -31,21 +31,24 @@ export function validateBatch(body) {
     || typeof body.path !== 'string' || !body.path.startsWith('/') || body.path.length > 2048 || /[\r\n\0]/.test(body.path)
     || !Array.isArray(body.downloadIps) || body.downloadIps.length > 3
     || new Set(body.downloadIps).size !== body.downloadIps.length || body.downloadIps.some(ip => !body.ips.includes(ip))
-    || Object.keys(body).some(k => !['ips', 'domain', 'uuid', 'path', 'downloadIps', 'protocol', 'transport', 'mode'].includes(k))) throw new Error('INVALID_BATCH');
-  if (body.protocol !== undefined || body.transport !== undefined || body.mode !== undefined) {
-    if (body.protocol !== 3 || body.transport !== 'XHTTP' || body.mode !== 'packet-up'
+    || Object.keys(body).some(k => !['ips', 'domain', 'uuid', 'path', 'downloadIps', 'protocol', 'transport', 'mode', 'alpn'].includes(k))) throw new Error('INVALID_BATCH');
+  if (body.protocol !== undefined || body.transport !== undefined || body.mode !== undefined || body.alpn !== undefined) {
+    const legacy = body.protocol === 3 && body.mode === 'packet-up' && body.alpn === undefined;
+    const extended = body.protocol === 4 && ((body.alpn === 'h2' && body.mode === 'stream-up')
+      || (body.alpn === 'h3' && body.mode === 'packet-up'));
+    if ((!legacy && !extended) || body.transport !== 'XHTTP'
       || !/^\/[A-Za-z0-9_/-]{1,128}$/.test(body.path)) throw new Error('INVALID_BATCH');
   }
   return body;
 }
 
 export function xrayConfig(body, ip, port) {
-  const xhttp = body.protocol === 3;
+  const xhttp = body.protocol === 3 || body.protocol === 4;
   return { log: { loglevel: 'none' }, inbounds: [{ listen: '127.0.0.1', port, protocol: 'http', settings: {} }],
     outbounds: [{ protocol: 'vless', settings: { vnext: [{ address: ip, port: 443, users: [{ id: body.uuid, encryption: 'none' }] }] },
       streamSettings: { network: xhttp ? 'xhttp' : 'ws', security: 'tls',
-        tlsSettings: { serverName: body.domain, allowInsecure: false, ...(xhttp ? { alpn: ['h2'] } : {}) },
-        ...(xhttp ? { xhttpSettings: { path: body.path, host: body.domain, mode: 'packet-up' } }
+        tlsSettings: { serverName: body.domain, allowInsecure: false, ...(xhttp ? { alpn: [body.protocol === 4 ? body.alpn : 'h2'] } : {}) },
+        ...(xhttp ? { xhttpSettings: { path: body.path, host: body.domain, mode: body.protocol === 4 ? body.mode : 'packet-up' } }
           : { wsSettings: { path: body.path, headers: { Host: body.domain } } }) } }] };
 }
 
@@ -202,7 +205,8 @@ export function createProbeServer({ token, id, regionKey = process.env.TENCENTCL
     if (++calls > 30) return send(429, { error: 'RATE_LIMIT' });
     if (!await checkRuntime()) return send(503, { error: 'PROBE_RUNTIME_UNAVAILABLE' });
     if (req.method === 'GET' && req.url === '/capabilities') return send(200, {
-      protocol: 2, protocols: [2, 3], probeId: id, egressIp: await lookupEgress(), features: ['vless-ws-tls', 'vless-xhttp-tls-packet-up-h2', 'bounded-download'],
+      protocol: 2, protocols: [2, 3, 4], probeId: id, egressIp: await lookupEgress(),
+      features: ['vless-ws-tls', 'vless-xhttp-tls-packet-up-h2', 'vless-xhttp-tls-stream-up-h2', 'vless-xhttp-tls-packet-up-h3', 'bounded-download'],
       regionKey: regionKey ?? null, networkType: 'CLOUD', maxCandidates: 8, runtime: { ...runtimeVersions },
     });
     if (req.method !== 'POST' || req.url !== '/probe') return send(404, { error: 'NOT_FOUND' });
@@ -220,7 +224,9 @@ export function createProbeServer({ token, id, regionKey = process.env.TENCENTCL
           results.push(await test(body, ip, abort.signal)); }
       }));
       if (results.some(r => r.error)) return send(503, { error: 'PROBE_RUNTIME_UNAVAILABLE' });
-      send(200, { protocol: body.protocol ?? 2, ...(body.protocol === 3 ? { transport: 'XHTTP', mode: 'packet-up' } : {}),
+      send(200, { protocol: body.protocol ?? 2,
+        ...(body.protocol === 3 ? { transport: 'XHTTP', mode: 'packet-up' } : {}),
+        ...(body.protocol === 4 ? { transport: 'XHTTP', mode: body.mode, alpn: body.alpn } : {}),
         probeId: id, regionKey: regionKey ?? null, networkType: 'CLOUD', egressIp: await lookupEgress(), results });
     } catch { send(400, { error: 'INVALID_OR_ABORTED_BATCH' }); }
     finally { clearTimeout(timer); busy = false; }

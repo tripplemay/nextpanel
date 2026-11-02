@@ -18,7 +18,6 @@ const { cfVariants } = require(join(root, 'apps/server/src/subscriptions/cf-acce
 const { buildClashProxy } = require(join(root, 'apps/server/src/subscriptions/uri-builder.ts'));
 const xray = process.env.XRAY_BINARY;
 const mihomo = process.env.MIHOMO_BINARY;
-const credentials = { uuid: '00000000-0000-4000-8000-000000000001', path: '/pilot', xhttpMode: 'packet-up' };
 
 function checked(binary, args) {
   const result = spawnSync(binary, args, { encoding: 'utf8', timeout: 15000 });
@@ -53,9 +52,11 @@ async function request(proxyPort, target, payload) {
   });
 }
 
-test('isolated XHTTP TLS/H2 E2E with Xray worker and Mihomo, including certificate rejection', {
+for (const [alpn, mode] of [['h2', 'packet-up'], ['h2', 'stream-up'], ['h3', 'packet-up']]) {
+test(`isolated XHTTP ${alpn}/${mode} with Xray worker and Mihomo, including certificate rejection`, {
   skip: !xray || !mihomo, timeout: 60000,
 }, async () => {
+  const credentials = { uuid: '00000000-0000-4000-8000-000000000001', path: '/pilot', xhttpMode: mode, xhttpAlpn: alpn };
   const dir = mkdtempSync(join(tmpdir(), 'np-xhttp-native-'));
   const children = []; let received = 0; let logs = '';
   const target = http.createServer((req, res) => {
@@ -79,7 +80,13 @@ test('isolated XHTTP TLS/H2 E2E with Xray worker and Mihomo, including certifica
       domain: 'cdn.example.com', listenPort };
     const server = JSON.parse(generateXrayConfig(node, credentials));
     if (process.env.NP_NATIVE_DEBUG === '1') server.log = { loglevel: 'debug' };
-    // Only the fixture socket/cert paths change. No public address can be dialed.
+    // Production always uses H2 at the origin. The H3 fixture is a loopback
+    // transport peer, not a Cloudflare-edge or real H3-to-H2 acceptance test.
+    assert.deepEqual(server.inbounds[0].streamSettings.tlsSettings.alpn, ['h2', 'http/1.1']);
+    if (alpn === 'h3') {
+      server.inbounds[0].streamSettings.tlsSettings.alpn = ['h3'];
+      server.log = { loglevel: 'info' };
+    }
     server.inbounds[0].listen = '127.0.0.1';
     server.inbounds[0].streamSettings.tlsSettings.certificates = [{ certificateFile: crt, keyFile: key }];
     // New Xray blocks private destinations by default. Permit only this fixture sink.
@@ -93,10 +100,18 @@ test('isolated XHTTP TLS/H2 E2E with Xray worker and Mihomo, including certifica
       { type: 'field', network: 'tcp,udp', outboundTag: 'blocked' }] };
     const serverFile = join(dir, 'server.json'); writeFileSync(serverFile, JSON.stringify(server));
     checked(xray, ['run', '-test', '-c', serverFile]);
-    await ready(listenPort, start(xray, ['run', '-c', serverFile]));
+    const serverProcess = start(xray, ['run', '-c', serverFile]);
+    if (alpn === 'h3') {
+      for (let i = 0; i < 100 && !logs.includes('listening QUIC for XHTTP/3'); i++) {
+        assert.equal(serverProcess.exitCode, null, logs);
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      assert.ok(logs.includes('listening QUIC for XHTTP/3'), `QUIC readiness timeout: ${logs}`);
+    } else await ready(listenPort, serverProcess);
 
     const clientPort = await port();
-    const client = xrayConfig({ domain: node.domain, ...credentials, protocol: 3 }, '127.0.0.1', clientPort);
+    const protocol = alpn === 'h2' && mode === 'packet-up' ? 3 : 4;
+    const client = xrayConfig({ domain: node.domain, ...credentials, protocol, mode, alpn }, '127.0.0.1', clientPort);
     if (process.env.NP_NATIVE_DEBUG === '1') client.log = { loglevel: 'debug' };
     client.outbounds[0].settings.vnext[0].port = listenPort;
     client.outbounds[0].streamSettings.tlsSettings.certificates = [{ certificateFile: crt, usage: 'verify' }];
@@ -131,3 +146,4 @@ test('isolated XHTTP TLS/H2 E2E with Xray worker and Mihomo, including certifica
     rmSync(dir, { recursive: true, force: true });
   }
 });
+}

@@ -18,6 +18,7 @@ export type SupportedProtocol =
   | 'VLESS_REALITY'
   | 'VLESS_XHTTP_REALITY'
   | 'VLESS_XHTTP_TLS'
+  | 'VLESS_XHTTP_H3_TLS'
   | 'VLESS_WS_TLS'
   | 'VLESS_TCP_TLS'
   | 'HYSTERIA2'
@@ -30,6 +31,7 @@ export const SUPPORTED_PROTOCOLS: SupportedProtocol[] = [
   'VLESS_REALITY',
   'VLESS_XHTTP_REALITY',
   'VLESS_XHTTP_TLS',
+  'VLESS_XHTTP_H3_TLS',
   'VLESS_WS_TLS',
   'VLESS_TCP_TLS',
   'HYSTERIA2',
@@ -134,13 +136,25 @@ export const PROTOCOL_PRESETS: Record<SupportedProtocol, ProtocolPreset> = {
     portBase: null,
   },
   VLESS_XHTTP_TLS: {
-    label: 'VLESS + XHTTP + TLS (CDN 试点)',
+    label: 'VLESS + XHTTP + H2 + TLS (CDN)',
     accessMode: 'CDN',
     description: '经 Cloudflare CDN，独立试点；443 占用时自动选择回源端口，不替换网站或 WS。客户端须明确启用 XHTTP 导出。',
     tags: [
       { text: 'CDN 试点', color: 'cyan' },
       { text: '新版 Mihomo', color: 'blue' },
       { text: '保留 WS', color: 'gold' },
+    ],
+    protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'TLS',
+    fixedPort: 443, portBase: null,
+  },
+  VLESS_XHTTP_H3_TLS: {
+    label: 'VLESS + XHTTP + HTTP/3 + TLS (CDN)',
+    accessMode: 'CDN',
+    description: '客户端以 QUIC/HTTP/3 连接 Cloudflare，回源保持 TLS/H2；使用 packet-up，需开启 CF HTTP/3 且客户端网络允许 UDP/443。不自动回退直连。',
+    tags: [
+      { text: 'CDN', color: 'cyan' },
+      { text: 'HTTP/3', color: 'blue' },
+      { text: '保留 H2 / WS', color: 'gold' },
     ],
     protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'TLS',
     fixedPort: 443, portBase: null,
@@ -260,6 +274,12 @@ export const CREDENTIAL_GENERATORS: Record<
     uuid: crypto.randomUUID(),
     path: `/${crypto.randomBytes(18).toString('base64url')}`,
     xhttpMode: 'packet-up',
+  }),
+  VLESS_XHTTP_H3_TLS: () => ({
+    uuid: crypto.randomUUID(),
+    path: `/${crypto.randomBytes(18).toString('base64url')}`,
+    xhttpMode: 'packet-up',
+    xhttpAlpn: 'h3',
   }),
   VLESS_TCP_TLS: () => ({
     uuid: crypto.randomUUID(),

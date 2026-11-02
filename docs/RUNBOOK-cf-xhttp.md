@@ -1,5 +1,10 @@
 # CDN XHTTP isolated pilot
 
+For the optional H2 stream-up and separate H3 packet-up presets, use the
+[XHTTP profile extension](XHTTP-PROFILES.md). The original H2 packet-up path
+below remains unchanged; v4 worker capabilities and additional cloud settings
+are required only for the new profiles.
+
 ## Scope and compatibility contract
 
 This release adds `VLESS_XHTTP_TLS`, not a migration of existing WS services.

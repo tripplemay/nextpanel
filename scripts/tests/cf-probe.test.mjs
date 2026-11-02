@@ -108,13 +108,31 @@ test('dual probe contract preserves v2 WS and echoes v3 transport identity', asy
   const url = `http://127.0.0.1:${server.address().port}`;
   const headers = { Authorization: `Bearer ${'f'.repeat(32)}`, 'Content-Type': 'application/json' };
   const caps = await (await fetch(url + '/capabilities', { headers })).json();
-  assert.equal(caps.protocol, 2); assert.deepEqual(caps.protocols, [2, 3]);
+  assert.equal(caps.protocol, 2); assert.deepEqual(caps.protocols, [2, 3, 4]);
   assert.ok(caps.features.includes('vless-xhttp-tls-packet-up-h2'));
-  for (const body of [batch, { ...batch, protocol: 3, transport: 'XHTTP', mode: 'packet-up' }]) {
+  for (const body of [batch, { ...batch, protocol: 3, transport: 'XHTTP', mode: 'packet-up' },
+    { ...batch, protocol: 4, transport: 'XHTTP', mode: 'stream-up', alpn: 'h2' },
+    { ...batch, protocol: 4, transport: 'XHTTP', mode: 'packet-up', alpn: 'h3' }]) {
     const response = await fetch(url + '/probe', { method: 'POST', headers, body: JSON.stringify(body) });
     assert.equal(response.status, 200);
     const result = await response.json();
     assert.equal(result.protocol, body.protocol ?? 2); assert.equal(result.transport, body.transport);
     assert.equal(result.mode, body.mode); assert.equal(result.regionKey, 'ap-guangzhou');
+    assert.equal(result.alpn, body.alpn);
   }
+});
+
+test('v4 profiles require exact ALPN/mode and preserve TLS verification and CDN restrictions', () => {
+  for (const [alpn, mode] of [['h2', 'stream-up'], ['h3', 'packet-up']]) {
+    const request = { ...batch, protocol: 4, transport: 'XHTTP', mode, alpn, path: '/pilot' };
+    validateBatch(request);
+    const outbound = xrayConfig(request, request.ips[0], 1080).outbounds[0];
+    assert.deepEqual(outbound.streamSettings.tlsSettings, { serverName: batch.domain, allowInsecure: false, alpn: [alpn] });
+    assert.equal(outbound.streamSettings.xhttpSettings.mode, mode);
+    for (const override of [{ protocol: 3 }, { alpn: ['h3'] }, { alpn: 'http/1.1' }, { mode: 'auto' },
+      { mode: 'stream-one' }, { ips: ['192.0.2.1'] }, { downloadSettings: { address: '192.0.2.1' } }]) {
+      assert.throws(() => validateBatch({ ...request, ...override }), /INVALID_BATCH/);
+    }
+  }
+  assert.throws(() => validateBatch({ ...batch, protocol: 4, transport: 'XHTTP', mode: 'stream-up', alpn: 'h3' }), /INVALID_BATCH/);
 });

@@ -15,6 +15,11 @@ export class CreateChainNodeDto {
   @ApiProperty({ enum: SUPPORTED_PROTOCOLS, description: 'Protocol preset key' })
   preset: SupportedProtocol;
 
+  @ApiPropertyOptional({ enum: ['packet-up', 'stream-up'] })
+  @IsOptional()
+  @IsIn(['packet-up', 'stream-up'])
+  xhttpMode?: 'packet-up' | 'stream-up';
+
   @ApiProperty({ description: 'Entry server ID (user connects here)' })
   @IsString()
   entryServerId: string;

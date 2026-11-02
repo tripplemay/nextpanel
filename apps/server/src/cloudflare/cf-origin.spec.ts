@@ -64,6 +64,20 @@ describe('Cloudflare origin API isolation', () => {
     });
   });
   afterEach(() => fetcher.mockRestore());
+  it.each(['http3', 'grpc'] as const)('checks %s read-only and fails closed on disabled, malformed or denied responses', async setting => {
+    const api = new CfOriginApi('private-fixture', 'zone');
+    for (const value of ['off', null, true, undefined]) {
+      fetcher.mockResolvedValueOnce(response({ value }));
+      await expect(api.requireXhttpSetting(setting)).rejects.toThrow('must be enabled');
+    }
+    fetcher.mockResolvedValueOnce(response(null, 403));
+    await expect(api.requireXhttpSetting(setting)).rejects.toThrow('Zone Settings Read');
+    fetcher.mockResolvedValueOnce(response({ value: 'on' }));
+    await api.requireXhttpSetting(setting);
+    expect(fetcher).toHaveBeenLastCalledWith(`https://api.cloudflare.com/client/v4/zones/zone/settings/${setting}`,
+      expect.objectContaining({ method: 'GET', redirect: 'error' }));
+    expect(writes).toEqual([]);
+  });
   it('appends only an exact-host port rule and leaves the website unchanged', async () => {
     const site = structuredClone(rules[0]);
     const api = new CfOriginApi('private-fixture', 'zone');
@@ -273,6 +287,17 @@ describe('durable origin provisioning', () => {
     jest.spyOn(core, 'ensureCfXhttpCore').mockResolvedValue('/usr/local/bin/xray');
   });
   afterEach(() => jest.restoreAllMocks());
+  it('uses the original mapping zone for new-profile checks and does no cloud IO for legacy H2', async () => {
+    const token = jest.fn().mockResolvedValue({ apiToken: 'fixture', zoneId: 'replacement-zone' });
+    const fetcher = jest.spyOn(global, 'fetch').mockImplementation(async () => response({ value: 'on' }));
+    const service = new CfOriginService({} as any, { getDecryptedToken: token } as any, {} as any);
+    await service.checkXhttpEdge('owner', {}, route);
+    expect(fetcher).not.toHaveBeenCalled(); expect(token).not.toHaveBeenCalled();
+    await service.checkXhttpEdge('owner', { xhttpAlpn: 'h3' }, route);
+    expect(fetcher).toHaveBeenLastCalledWith('https://api.cloudflare.com/client/v4/zones/zone/settings/http3', expect.anything());
+    await service.checkXhttpEdge('owner', { xhttpMode: 'stream-up' }, route);
+    expect(fetcher).toHaveBeenLastCalledWith('https://api.cloudflare.com/client/v4/zones/zone/settings/grpc', expect.anything());
+  });
   it('requires source firewall support before persisting intent or creating cloud resources', async () => {
     const update = jest.fn(); const token = jest.fn().mockResolvedValue({ apiToken: 'fixture', zoneId: 'zone', domain: 'example.com' });
     const ssh = { execCommand: jest.fn().mockResolvedValue({ code: 1 }), dispose: jest.fn() };

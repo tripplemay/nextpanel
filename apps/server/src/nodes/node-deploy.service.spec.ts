@@ -131,7 +131,7 @@ const mockSocksExitResolver = {
 } as unknown as import('./socks-exit-resolver.service').SocksExitResolverService;
 
 const mockOwnershipRollback = jest.fn().mockResolvedValue(undefined);
-const mockOrigin = { prepare: jest.fn(), ready: jest.fn(), withdraw: jest.fn(), remove: jest.fn() };
+const mockOrigin = { checkXhttpEdge: jest.fn(), prepare: jest.fn(), ready: jest.fn(), withdraw: jest.fn(), remove: jest.fn() };
 const mockResources = {
   connect: jest.fn(),
   prepareCleanup: jest.fn(),
@@ -1973,6 +1973,20 @@ describe('NodeDeployService', () => {
   });
 
   describe('deploy — XHTTP, TUIC, and AnyTLS', () => {
+    it.each(['h3', 'h2'])('rejects unavailable CF prerequisites before touching the origin (%s)', async alpn => {
+      setupHappyPath();
+      const credentials = { xhttpAlpn: alpn, xhttpMode: alpn === 'h3' ? 'packet-up' : 'stream-up' };
+      const node = { ...fakeNode, protocol: 'VLESS', transport: 'XHTTP', tls: 'TLS', publicPort: 443,
+        credentialsEnc: `enc:${JSON.stringify(credentials)}` };
+      (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(node);
+      mockOrigin.checkXhttpEdge.mockRejectedValueOnce(new Error('Cloudflare setting must be enabled'));
+      const result = await svc.deploy(node.id);
+      expect(result.success).toBe(false);
+      expect(result.log).toContain('XHTTP edge preflight failed');
+      expect(mockOrigin.prepare).not.toHaveBeenCalled();
+      expect(mockConnectSsh).not.toHaveBeenCalled();
+      expect(mockPrisma.node.update).not.toHaveBeenCalled();
+    });
     it.each([true, false])('prepares retained domain-less mapped nodes before config generation, recovery=%s', async recovered => {
       const pending = { ...fakeNode, protocol: 'VLESS', transport: 'XHTTP', tls: 'TLS', listenPort: 8443, publicPort: 443, domain: null };
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(pending);
@@ -2060,6 +2074,12 @@ describe('NodeDeployService', () => {
       expect(mockCertService.ensureWildcardCert).not.toHaveBeenCalled();
     });
     const cases = [
+      ...['h2', 'h3'].flatMap(alpn => [true, false].map(reachable => ({
+        label: `XHTTP ${alpn} CDN acceptance=${reachable}`, reachable,
+        node: { protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'TLS',
+          credentialsEnc: `enc:${JSON.stringify({ xhttpAlpn: alpn, xhttpMode: alpn === 'h3' ? 'packet-up' : 'stream-up' })}` },
+        version: 'Xray 26.10.31 (Xray, Penetrates Everything.)', versionBin: '/usr/local/bin/xray', socket: 'tcp',
+      }))),
       {
         label: 'XHTTP CDN',
         node: { protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'TLS' },
@@ -2095,6 +2115,7 @@ describe('NodeDeployService', () => {
       version,
       versionBin,
       socket,
+      ...scenario
     }) => {
       const modernNode = {
         ...fakeNode,
@@ -2102,6 +2123,8 @@ describe('NodeDeployService', () => {
         source: 'MANUAL',
         domain: shape.tls === 'TLS' ? 'np-node-1.example.com' : null,
       };
+      const reachable = 'reachable' in scenario ? scenario.reachable : true;
+      (mockXrayTest.testNode as jest.Mock).mockResolvedValue({ reachable, message: 'fixture edge acceptance' });
       (mockPrisma.node.findUnique as jest.Mock).mockResolvedValue(modernNode);
       (mockPrisma.configSnapshot.findFirst as jest.Mock).mockResolvedValue(null);
       (mockPrisma.configSnapshot.create as jest.Mock).mockResolvedValue({});
@@ -2134,7 +2157,12 @@ describe('NodeDeployService', () => {
       await jest.runAllTimersAsync();
       const result = await promise;
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(reachable);
+      if ('reachable' in scenario) {
+        expect(mockOrigin.checkXhttpEdge).toHaveBeenCalled();
+        expect(mockXrayTest.testNode).toHaveBeenCalledWith(modernNode.id);
+        expect(result.log).toContain('CDN XHTTP profile acceptance');
+      }
       expect(mockExecCommand).toHaveBeenCalledWith(`${versionBin} version 2>&1`);
       expect(stageSpy).toHaveBeenCalledWith(
         mockSsh,

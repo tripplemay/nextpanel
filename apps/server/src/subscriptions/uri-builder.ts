@@ -3,6 +3,8 @@
  * No IO, no side effects.
  */
 
+import { cfXhttpProfile } from '../nodes/protocols/cf-xhttp';
+
 export interface NodeExportInfo {
   name: string;
   protocol: string;
@@ -71,7 +73,7 @@ export function buildShareUri(node: NodeExportInfo): string | null {
       if (tls === 'REALITY' && net !== 'xhttp') params.set('flow', REALITY_FLOW);
       addTransportParams(params, net, domain, creds);
       addTlsParams(params, tls, domain, creds);
-      if (net === 'xhttp' && tls === 'TLS' && node.cfGroup) params.set('alpn', 'h2');
+      if (net === 'xhttp' && tls === 'TLS' && node.cfGroup) params.set('alpn', cfXhttpProfile(creds).alpn);
       return `vless://${creds.uuid ?? ''}@${authorityHost}:${port}?${params.toString()}#${tag}`;
     }
 
@@ -144,7 +146,7 @@ export function buildClashProxy(node: NodeExportInfo): string | null {
 
   lines.push(`  - name: ${yamlScalar(name)}`);
   if (protocol === 'VLESS' && net === 'xhttp' && tls === 'TLS' && node.cfGroup) {
-    lines.push('    alpn: [h2]', '    skip-cert-verify: false');
+    lines.push(`    alpn: [${cfXhttpProfile(creds).alpn}]`, '    skip-cert-verify: false');
   }
 
   switch (protocol) {

@@ -1,4 +1,4 @@
-# Isolated CF probe (WS v2 / XHTTP v3)
+# Isolated CF probe (WS v2 / XHTTP v3-v4)
 
 This HTTP worker is **not** a replacement for `gfw-check/index.handler`.
 The original TCP-only function remains unchanged. See
@@ -66,7 +66,7 @@ numeric curl/HTTP diagnostics, never stderr or proxy credentials.
 
 Both endpoints require `Authorization: Bearer <secret>` and return `no-store`.
 
-- `GET /capabilities`: protocol 2, `protocols: [2,3]`, probe ID, current outbound IP, `regionKey`,
+- `GET /capabilities`: protocol 2, `protocols: [2,3,4]`, probe ID, current outbound IP, `regionKey`,
   `networkType=CLOUD` and supported features. Missing Xray/curl returns 503.
   Missing region returns null for legacy generic compatibility, never a guessed city.
 - `POST /probe`: `{ips, domain, uuid, path, downloadIps}`. At most eight literal
@@ -76,12 +76,17 @@ Both endpoints require `Authorization: Bearer <secret>` and return `no-store`.
   request. Capabilities must include `vless-xhttp-tls-packet-up-h2`; results echo
   protocol, transport and mode. Legacy WS payloads and v2 responses are unchanged.
   See [CDN XHTTP release gates](../../docs/RUNBOOK-cf-xhttp.md).
+- New profiles use `protocol: 4, transport: 'XHTTP'` and exactly one of
+  `{mode: 'stream-up', alpn: 'h2'}` or `{mode: 'packet-up', alpn: 'h3'}`.
+  Features are `vless-xhttp-tls-stream-up-h2` and `vless-xhttp-tls-packet-up-h3`.
+  Results must echo both mode and ALPN; missing/mismatched capabilities fail
+  closed, never reinterpret an H2 packet-up measurement as H3 or stream-up.
 - Results repeat the regional identity and contain IP, success and E2E latency; successful download samples add
   byte count/duration. Errors and logs never include UUID/path/authorization.
 
 For each candidate, Xray dials its literal CF IP while retaining domain SNI and
 WS/XHTTP Host, certificate verification, UUID and transport path. XHTTP pins
-`packet-up` and H2 with no alternate download endpoint. curl is explicitly forced
+the requested mode and ALPN with no alternate download endpoint. curl is explicitly forced
 through that loopback proxy (`--noproxy ''`); there is no direct retry. Connectivity
 uses a fixed HTTPS 204 endpoint. The optional throughput sample uses a fixed
 1 MiB Cloudflare download URL. Only a complete 200 response counts as a sample.

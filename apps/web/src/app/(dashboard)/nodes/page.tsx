@@ -120,6 +120,7 @@ export default function NodesPage() {
     openDelete,
     openRename,
     openEgressPolicy,
+    openXhttpProfile,
   } = nodeActions;
   const testMutation = { mutate: nodeActions.testNode };
   const toggleMutation = { mutate: nodeActions.toggleNode };
@@ -274,6 +275,9 @@ export default function NodesPage() {
       width: isMobile ? 48 : 160,
       render: (_: unknown, record) => {
         const moreItems = [
+          ...(record.protocol === 'VLESS' && record.transport === 'XHTTP' && record.tls === 'TLS' ? [{
+            key: 'xhttp-profile', icon: <EditOutlined />, label: 'XHTTP 传输设置', onClick: () => openXhttpProfile(record),
+          }] : []),
           {
             key: 'deploy',
             icon: <CloudUploadOutlined />,
@@ -360,7 +364,7 @@ export default function NodesPage() {
       },
     },
 
-  ], [isMobile, testResults, testingId, batchTesting, togglingId, toggleMutation, testMutation, modal, openDeploy, openDelete, openRename, openEgressPolicy]);
+  ], [isMobile, testResults, testingId, batchTesting, togglingId, toggleMutation, testMutation, modal, openDeploy, openDelete, openRename, openEgressPolicy, openXhttpProfile]);
 
   // Tablet: hide low-priority columns; mobile uses card layout (table not rendered)
   const TABLET_KEEP_COLUMNS = new Set(['名称', '协议', '状态', '启用', '连通性', '操作']);
@@ -485,6 +489,9 @@ export default function NodesPage() {
           );
 
           const moreItems = [
+            ...(node.protocol === 'VLESS' && node.transport === 'XHTTP' && node.tls === 'TLS' ? [{
+              key: 'xhttp-profile', icon: <EditOutlined />, label: 'XHTTP 传输设置', onClick: () => openXhttpProfile(node),
+            }] : []),
             { key: 'deploy', icon: <CloudUploadOutlined />, label: '部署', onClick: () => openDeploy(node) },
             { key: 'log', icon: <FileTextOutlined />, label: '日志', onClick: () => setLogNode(node) },
             { key: 'rename', icon: <EditOutlined />, label: '重命名', onClick: () => openRename(node) },

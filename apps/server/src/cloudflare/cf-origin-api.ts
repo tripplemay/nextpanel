@@ -25,7 +25,7 @@ export class CfOriginApi {
     // Provider errors may contain sensitive request data. Never propagate their body.
     if (!response.ok) {
       await response.body?.cancel();
-      const operation = path === 'settings/ssl' ? 'SSL settings (requires Zone Settings Read)'
+      const operation = path.startsWith('settings/') ? `${path.slice(9)} settings (requires Zone Settings Read)`
         : path.includes('http_config_settings') ? 'Configuration Rules (requires Config Settings Read/Write)'
         : path.startsWith('rulesets') ? 'Origin Rules (requires Origin Read/Write)'
         : 'DNS records (requires DNS Read/Edit)';
@@ -62,6 +62,13 @@ export class CfOriginApi {
       throw new Error('Managed DNS ownership or target changed; overwrite refused');
     }
     return id(record.id);
+  }
+
+  async requireXhttpSetting(setting: 'http3' | 'grpc') {
+    const result = await this.request<{ value: string }>(`settings/${setting}`);
+    if (result?.value !== 'on') {
+      throw new Error(`Cloudflare ${setting} must be enabled for this XHTTP profile; zone-wide settings were not changed`);
+    }
   }
 
   async removeDns(r: OriginRoute) {
