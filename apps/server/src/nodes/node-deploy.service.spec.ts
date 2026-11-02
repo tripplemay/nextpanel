@@ -7,6 +7,7 @@ import { NodeSSH } from 'node-ssh';
 import { generateConfig, generateChainExitConfig } from './config/config-generator';
 import { CleanupBlockedError } from '../resources/resource-lifecycle.service';
 import * as originFirewall from '../cloudflare/cf-origin-firewall';
+import * as reviewedCore from './protocols/cf-xhttp-core';
 
 jest.mock('../common/database/advisory-lock', () => ({
   withPostgresAdvisoryLocks: (_keys: string[], work: () => Promise<unknown>) => work(),
@@ -254,6 +255,7 @@ function setupHappyPath() {
 beforeEach(() => {
   jest.restoreAllMocks();
   jest.clearAllMocks();
+  jest.spyOn(reviewedCore, 'ensureRealityCore').mockResolvedValue('/usr/local/bin/xray');
   mockExecCommand.mockReset();
   mockAssertPorts.mockReset().mockResolvedValue(undefined);
   mockResources.assertDeploymentOwner.mockReset().mockResolvedValue(undefined);
@@ -297,6 +299,20 @@ beforeEach(() => {
 
 // Speed up the 2s timer in deploy
 jest.useFakeTimers();
+
+describe('REALITY installation dependencies', () => {
+  it.each([true, false])('provisions unzip only when isolated installation requests it: available=%s', async available => {
+    const unzip = jest.spyOn(svc as any, 'ensureUnzip').mockResolvedValue(available);
+    jest.mocked(reviewedCore.ensureRealityCore).mockImplementation(async (_ssh, _log, prepare) => {
+      await prepare!();
+      return reviewedCore.REALITY_CORE_BIN;
+    });
+    const result = (svc as any).prepareRealityCore(mockSsh, jest.fn());
+    if (available) await expect(result).resolves.toBe(reviewedCore.REALITY_CORE_BIN);
+    else await expect(result).rejects.toThrow('unzip unavailable');
+    expect(unzip).toHaveBeenCalledWith(mockSsh, expect.any(Function));
+  });
+});
 
 describe('detached resource cleanup', () => {
   const job = { id: 'cleanup', ownerId: 'user-1', serverId: 'srv-1', nodeId: 'node-1', role: 'ENTRY', payload: { port: 10086, statsPort: 30086, protocols: ['tcp'] } };
@@ -534,7 +550,7 @@ describe('NodeDeployService', () => {
       mockExecCommand.mockReset();
       mockExecCommand
         .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })                      // uname -m
-        .mockResolvedValueOnce({ stdout: '{"tag_name":"v26.2.6"}', stderr: '' })      // github API
+        .mockResolvedValueOnce({ stdout: '{"tag_name":"v26.10.31"}', stderr: '' })      // github API
         .mockResolvedValueOnce({ code: 0, stderr: '' })                               // ensureUnzip: command -v unzip → present
         .mockResolvedValueOnce({ stderr: '' })                                         // download + extract + install
         .mockResolvedValueOnce({ code: 0 })                                            // test -x xray
@@ -941,7 +957,7 @@ describe('NodeDeployService', () => {
       mockExecCommand.mockReset();
       mockExecCommand
         .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })                 // uname -m
-        .mockResolvedValueOnce({ stdout: '{"tag_name":"v26.2.6"}', stderr: '' }) // github API
+        .mockResolvedValueOnce({ stdout: '{"tag_name":"v26.10.31"}', stderr: '' }) // github API
         .mockResolvedValueOnce({ code: 0, stderr: '' })                           // ensureUnzip: command -v unzip → present
         .mockResolvedValueOnce({ stderr: '' })                                    // download + extract + install
         .mockResolvedValueOnce({ code: 0 });                                      // test -x xray succeeds → installXray returns true
@@ -1678,7 +1694,7 @@ describe('NodeDeployService', () => {
           versionReads += 1;
           return {
             code: 0,
-            stdout: versionReads === 1 ? 'Xray 24.1.1' : 'Xray 26.2.6',
+            stdout: versionReads === 1 ? 'Xray 24.1.1' : 'Xray 26.10.31',
             stderr: '',
           };
         }
@@ -1740,7 +1756,7 @@ describe('NodeDeployService', () => {
           versionReads += 1;
           return {
             code: 0,
-            stdout: versionReads === 1 ? 'Xray 24.1.1' : 'Xray 26.2.6',
+            stdout: versionReads === 1 ? 'Xray 24.1.1' : 'Xray 26.10.31',
             stderr: '',
           };
         }
@@ -1834,7 +1850,7 @@ describe('NodeDeployService', () => {
     it.each([
       ['a failed command', { code: 1, stdout: 'sing-box version 1.12.0', stderr: 'broken' }],
       ['a prerelease', { code: 0, stdout: 'sing-box version 1.12.0-beta.1', stderr: '' }],
-      ['another product output', { code: 0, stdout: 'Xray 26.2.6', stderr: '' }],
+      ['another product output', { code: 0, stdout: 'Xray 26.10.31', stderr: '' }],
     ])('rejects %s as a stable sing-box version', async (_label, response) => {
       mockExecCommand.mockReset().mockResolvedValue(response);
       mockBinaryExists.mockResolvedValue(false);
@@ -2000,7 +2016,7 @@ describe('NodeDeployService', () => {
       const verify = jest.spyOn(originFirewall, 'verifyOriginFirewall').mockResolvedValue(undefined);
       mockConnectSsh.mockResolvedValue(mockSsh);
       mockExecCommand.mockReset().mockImplementation(async (command: string) => {
-        if (command.endsWith(' version 2>&1')) return { code: 0, stdout: 'Xray 26.2.6', stderr: '' };
+        if (command.endsWith(' version 2>&1')) return { code: 0, stdout: 'Xray 26.10.31', stderr: '' };
         if (command.includes('systemctl is-active')) return { code: 0, stdout: 'active', stderr: '' };
         return { code: 0, stdout: '', stderr: '' };
       });
@@ -2047,7 +2063,7 @@ describe('NodeDeployService', () => {
       {
         label: 'XHTTP CDN',
         node: { protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'TLS' },
-        version: 'Xray 26.2.6 (Xray, Penetrates Everything.)',
+        version: 'Xray 26.10.31 (Xray, Penetrates Everything.)',
         versionBin: '/usr/local/bin/xray',
         socket: 'tcp',
       },
@@ -2169,7 +2185,7 @@ describe('NodeDeployService', () => {
         if (command === '/usr/local/bin/xray version 2>&1') {
           return {
             code: 0,
-            stdout: 'Xray 26.2.6 (Xray, Penetrates Everything.)',
+            stdout: 'Xray 26.10.31 (Xray, Penetrates Everything.)',
             stderr: '',
           };
         }
@@ -2226,7 +2242,7 @@ describe('NodeDeployService', () => {
       mockBinaryExists.mockResolvedValue(true);
       mockExecCommand.mockReset().mockImplementation(async (command: string) => {
         if (command === '/usr/local/bin/xray version 2>&1') {
-          return { code: 0, stdout: 'Xray 26.2.6 (Xray, Penetrates Everything.)', stderr: '' };
+          return { code: 0, stdout: 'Xray 26.10.31 (Xray, Penetrates Everything.)', stderr: '' };
         }
         if (command === 'systemctl is-active nextpanel-node-1') {
           return { code: 3, stdout: 'failed', stderr: '' };
@@ -2335,7 +2351,7 @@ describe('NodeDeployService', () => {
       (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue(null);
       mockExecCommand.mockReset().mockResolvedValue({
         code: 0,
-        stdout: protocol === 'VLESS' ? 'Xray 26.2.6' : 'sing-box version 1.12.0',
+        stdout: protocol === 'VLESS' ? 'Xray 26.10.31' : 'sing-box version 1.12.0',
         stderr: '',
       });
 
@@ -2421,7 +2437,7 @@ describe('NodeDeployService', () => {
       mockBinaryExists.mockResolvedValue(true);
       mockExecCommand.mockReset().mockImplementation(async (command: string) => {
         if (command === '/usr/local/bin/xray version 2>&1') {
-          return { code: 0, stdout: 'Xray 26.2.6 (Xray, Penetrates Everything.)', stderr: '' };
+          return { code: 0, stdout: 'Xray 26.10.31 (Xray, Penetrates Everything.)', stderr: '' };
         }
         if (command === 'command -v curl') {
           return { code: 0, stdout: '/usr/bin/curl', stderr: '' };
@@ -2657,14 +2673,9 @@ describe('NodeDeployService', () => {
       const deployment = await promise;
 
       expect(connectSpy).toHaveBeenCalled();
-      expect(execSpy).toHaveBeenCalledWith('test -x /usr/local/bin/xray');
-      expect(ensureVersionSpy).toHaveBeenCalledWith(
-        expect.any(NodeSSH),
-        '/usr/local/bin/xray',
-        'XRAY',
-        '25.3.6',
-        expect.any(Function),
-      );
+      expect(reviewedCore.ensureRealityCore).toHaveBeenCalledWith(expect.any(NodeSSH), expect.any(Function), expect.any(Function));
+      expect(ensureVersionSpy).not.toHaveBeenCalled();
+      expect(mockUploadText.mock.calls.some(call => String(call[1]).includes('Environment="GODEBUG=multipathtcp=0"'))).toBe(true);
       expect(generateChainExitConfig).toHaveBeenCalledWith(
         'node-1',
         15001,
@@ -2755,7 +2766,7 @@ describe('NodeDeployService', () => {
         .mockResolvedValue(true);
       mockExecCommand.mockImplementation(async (command: string) => {
         if (command === '/usr/local/bin/xray version 2>&1') {
-          return { code: 0, stdout: 'Xray 26.2.6 (Xray, Penetrates Everything.)', stderr: '' };
+          return { code: 0, stdout: 'Xray 26.10.31 (Xray, Penetrates Everything.)', stderr: '' };
         }
         if (command === `systemctl is-active nextpanel-${chainNode.id}`) {
           return { code: 3, stdout: 'failed', stderr: '' };

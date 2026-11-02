@@ -10,7 +10,7 @@ Playwright/Chromium. It runs backend HTTP/unit tests, SSE/ops/fail-closed gate t
 ESLint correctness checks, type checks, production builds, isolated database migration/restore and browser
 security/P1 flows. Fixture-only logs are retained for seven days.
 
-The native configuration tests use sing-box 1.13.0. CI installs the official Linux
+The native configuration tests use sing-box 1.14.4. CI installs the official Linux
 amd64 release with a checked-in SHA-256 pin before running the gate. `verify.sh`
 requires the binary and sets `REQUIRE_SING_BOX=1`; a missing binary is a failure,
 not a skipped test. Install this version locally before reproducing the full gate.
@@ -53,7 +53,7 @@ conversations before merging. Keep required approvals at zero for the current
 single-maintainer workflow; CI remains mandatory. Repository protection does not
 restrict a host administrator's direct SSH access.
 
-Server-side usage validation additionally pins Xray 26.2.6 in CI and requires Go
+Server-side usage validation additionally pins Xray 26.10.31 in CI and requires Go
 for Agent race tests, Linux amd64/arm64 builds, and loopback telemetry decoding.
 These fixtures do not contact production proxy nodes. See
 [server-side usage rollout](RUNBOOK-server-usage.md) before enabling its default-off

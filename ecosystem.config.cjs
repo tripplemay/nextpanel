@@ -1,9 +1,13 @@
+const { existsSync } = require('node:fs');
+const managedNode = '/opt/apps/nextpanel-runtime/current/bin/node';
+const interpreter = existsSync(managedNode) ? managedNode : process.execPath;
+
 module.exports = {
   apps: [
     {
       name: 'nextpanel-server',
-      script: 'pnpm',
-      args: 'run start',
+      script: 'dist/main.js',
+      interpreter,
       cwd: '/opt/apps/nextpanel/apps/server',
       env: {
         NODE_ENV: 'production',
@@ -23,8 +27,9 @@ module.exports = {
     },
     {
       name: 'nextpanel-web',
-      script: 'pnpm',
-      args: 'run start',
+      script: 'node_modules/next/dist/bin/next',
+      args: 'start',
+      interpreter,
       cwd: '/opt/apps/nextpanel/apps/web',
       env: {
         NODE_ENV: 'production',

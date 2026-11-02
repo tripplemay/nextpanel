@@ -21,9 +21,9 @@ ruleset. Shared source IP does not require sharing the website's domain or port.
 
 ## Prerequisites and refusal conditions
 
-- Keep the XHTTP pilot gate, reviewed Xray 26.2.6 and trusted certificate
+- Keep the XHTTP pilot gate, reviewed Xray 26.10.31 and trusted certificate
   requirements. If the shared core has another version, deployment installs a
-  checksum-pinned official build in `/usr/local/lib/nextpanel/xray-26.2.6/`.
+  checksum-pinned official build in `/usr/local/lib/nextpanel/xray-26.10.31/`.
   It never replaces or downgrades the shared binary. Supported isolated-core
   architectures are Linux x86_64/aarch64; curl and unzip must be available.
 - A proxied, independently owned node hostname. An exact-host Configuration Rule

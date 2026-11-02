@@ -33,7 +33,7 @@ the existing explicit rejection behavior.
 
 OpenClash must use a verified Meta/Mihomo core; a plugin label saying "latest" is
 not an exact core version. Local native acceptance uses Mihomo **1.19.29** and
-Xray **26.2.6**, not the whole OpenClash router environment. Capable Shadowrocket
+Xray **26.10.31**, not the whole OpenClash router environment. Capable Shadowrocket
 clients receive XHTTP on the original link; its exact build and actual phone
 behavior still need independent acceptance. Explicit compatibility retains WS.
 Do not remove the compatibility entry or schedule automatic WS retirement.
@@ -46,7 +46,7 @@ Do not remove the compatibility entry or schedule automatic WS retirement.
   and remote listener/ownership checks passing. Prefer 443; if occupied, the
   [origin-port mapping extension](RUNBOOK-cf-origin-port.md) selects an isolated
   port. Never stop WS, replace a reverse proxy, or share its systemd unit.
-- The entry host must already have reviewed Xray **26.2.6** at the managed path.
+- The entry host must already have reviewed Xray **26.10.31** at the managed path.
   Deployment refuses missing/other versions rather than replacing a shared core.
   Upgrade any shared core only under a separate host inventory, backup and
   all-node configuration-validation gate.

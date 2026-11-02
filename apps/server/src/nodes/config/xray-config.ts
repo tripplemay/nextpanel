@@ -50,7 +50,7 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
                   },
                 }
               : {}),
-            sockopt: { tcpKeepAliveInterval: 30 },
+            sockopt: { tcpKeepAliveInterval: 30, tcpMptcp: false },
           },
           ...(chainReality
             ? {
@@ -98,6 +98,7 @@ export function generateXrayConfig(node: NodeInfo, creds: NodeCredentials): stri
             port: node.statsPort,
             protocol: 'dokodemo-door',
             settings: { address: '127.0.0.1' },
+            streamSettings: { sockopt: { tcpMptcp: false } },
           },
           proxyInbound,
         ],
@@ -237,7 +238,7 @@ function xrayStreamSettings(
   creds: NodeCredentials,
 ): unknown {
   const network = transportNetwork(transport);
-  const base: Record<string, unknown> = { network };
+  const base: Record<string, unknown> = { network, sockopt: { tcpMptcp: false } };
 
   if (network === 'ws') {
     base.wsSettings = { path: '/' };

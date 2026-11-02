@@ -6,7 +6,7 @@ The original TCP-only function remains unchanged. See
 
 ## Runtime / packaging
 
-- Node.js 22+, curl, and reviewed Xray-core **26.2.6**. Other/missing Xray versions
+- Node.js 22+, curl, and reviewed Xray-core **26.10.31**. Other/missing Xray versions
   fail runtime readiness rather than silently claiming transport support.
 - The worker starts on `0.0.0.0:9000`; a trusted HTTPS gateway must front it.
 - `CF_PROBE_ID`: stable lowercase ID, e.g. `guangzhou-cloud`.

@@ -4,8 +4,8 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
-// Official XTLS/Xray-core v26.2.6 release asset digest, reviewed at packaging time.
-const expected = '29ce535b56e207a406ffa1c2d4842dcc410be003eff8ec508bb732abc9f8e385';
+// Official XTLS/Xray-core v26.10.31 release asset digest, reviewed at packaging time.
+const expected = 'e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214';
 const [archive, destination] = process.argv.slice(2);
 if (!archive || !destination) throw new Error('Usage: node package-scf.mjs Xray-linux-64.zip OUTPUT.zip');
 const sha = data => createHash('sha256').update(data).digest('hex');
@@ -22,7 +22,7 @@ try {
   chmodSync(join(temp, 'scf_bootstrap'), 0o755);
   execFileSync('zip', ['-q', output, 'server.mjs', 'scf_bootstrap', 'xray'], { cwd: temp });
   chmodSync(output, 0o600);
-  const manifest = { xrayVersion: '26.2.6', xrayArchiveSha256: expected,
+  const manifest = { xrayVersion: '26.10.31', xrayArchiveSha256: expected,
     files: Object.fromEntries(['server.mjs', 'scf_bootstrap', 'xray'].map(name => [name, sha(readFileSync(join(temp, name)))])),
     zipSha256: sha(readFileSync(output)), zipBytes: readFileSync(output).length };
   writeFileSync(output + '.manifest.json', JSON.stringify(manifest, null, 2), { mode: 0o600 });
