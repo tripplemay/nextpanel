@@ -1,4 +1,4 @@
-import { ensureCfXhttpCore, CF_XHTTP_CORE_BIN, usageXrayBinary } from './cf-xhttp-core';
+import { ensureCfXhttpCore, ensureRealityCore, CF_XHTTP_CORE_BIN, REALITY_CORE_BIN, usageXrayBinary } from './cf-xhttp-core';
 
 const ok = (stdout = '') => ({ code: 0, stdout, stderr: '' });
 const missing = { code: 127, stdout: '', stderr: '' };
@@ -35,10 +35,22 @@ describe('isolated reviewed Xray core', () => {
     await expect(ensureCfXhttpCore(ssh as any)).rejects.toThrow('shared core unchanged');
     expect(ssh.execCommand).toHaveBeenCalledTimes(3);
   });
-  it.each(['/usr/local/bin/xray', CF_XHTTP_CORE_BIN, '/usr/local/lib/nextpanel/xray-26.2.6/xray'])('uses the deployed core for usage synchronization: %s', path => {
+  it.each(['26.2.6', '26.3.27'])('keeps a compatible REALITY shared core: %s', async version => {
+    const ssh = { execCommand: jest.fn().mockResolvedValue(ok(`Xray ${version}`)), dispose: jest.fn() };
+    expect(await ensureRealityCore(ssh as any)).toBe('/usr/local/bin/xray');
+    expect(ssh.execCommand).toHaveBeenCalledTimes(1);
+  });
+  it('isolates REALITY from a newer incompatible shared core without downgrading it', async () => {
+    const ssh = { execCommand: jest.fn().mockResolvedValueOnce(ok('Xray 26.10.31')).mockResolvedValueOnce(missing)
+      .mockResolvedValueOnce(ok('x86_64')).mockResolvedValueOnce(ok()).mockResolvedValueOnce(ok('Xray 26.3.27')), dispose: jest.fn() };
+    expect(await ensureRealityCore(ssh as any)).toBe(REALITY_CORE_BIN);
+    expect(ssh.execCommand.mock.calls[3][0]).toContain('/releases/download/v26.3.27/');
+    expect(ssh.execCommand.mock.calls[3][0]).not.toContain('/usr/local/bin/xray');
+  });
+  it.each(['/usr/local/bin/xray', CF_XHTTP_CORE_BIN, REALITY_CORE_BIN, '/usr/local/lib/nextpanel/xray-26.2.6/xray'])('uses the deployed core for usage synchronization: %s', path => {
     expect(usageXrayBinary(`{ path=${path} ; argv[]=${path} run -config /etc/nextpanel/nodes/n.json ; }`)).toBe(path);
   });
-  it.each(['', '{ path=/tmp/xray ; }', '{ path=/usr/local/lib/nextpanel/xray-26.3.27/xray ; }', '{ path=/bin/sh ; argv[]=/usr/local/bin/xray ; }'])('rejects unexpected usage entrypoint %s', entry => {
+  it.each(['', '{ path=/tmp/xray ; }', '{ path=/usr/local/lib/nextpanel/xray-26.3.28/xray ; }', '{ path=/bin/sh ; argv[]=/usr/local/bin/xray ; }'])('rejects unexpected usage entrypoint %s', entry => {
     expect(() => usageXrayBinary(entry)).toThrow('UNEXPECTED_CORE_PATH');
   });
 });

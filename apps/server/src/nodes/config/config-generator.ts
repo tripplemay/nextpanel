@@ -98,12 +98,12 @@ export function generateChainExitConfig(
           privateKey: reality.privateKey,
           shortIds: [reality.shortId],
         },
-        sockopt: { tcpKeepAliveInterval: 30 },
+        sockopt: { tcpKeepAliveInterval: 30, tcpMptcp: false },
       }
     : {
         network: 'tcp',
         security: 'none',
-        sockopt: { tcpKeepAliveInterval: 30 },
+        sockopt: { tcpKeepAliveInterval: 30, tcpMptcp: false },
       };
 
   return JSON.stringify(

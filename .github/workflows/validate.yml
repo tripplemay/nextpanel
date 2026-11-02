@@ -63,6 +63,16 @@ jobs:
           chmod +x "$RUNNER_TEMP/xray-fixture/xray"
           echo "XRAY_BINARY=$RUNNER_TEMP/xray-fixture/xray" >> "$GITHUB_ENV"
           echo "GO_BINARY=$(command -v go)" >> "$GITHUB_ENV"
+      - name: Install compatible REALITY core without changing the TLS core
+        run: |
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/Xray-reality-linux-64.zip"
+          curl --fail --location --retry 3 --max-time 120 \
+            https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip --output "$ARCHIVE"
+          printf '%s  %s\n' 23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae "$ARCHIVE" | sha256sum --check -
+          unzip -q "$ARCHIVE" xray -d "$RUNNER_TEMP/xray-reality-fixture"
+          chmod +x "$RUNNER_TEMP/xray-reality-fixture/xray"
+          echo "REALITY_XRAY_BINARY=$RUNNER_TEMP/xray-reality-fixture/xray" >> "$GITHUB_ENV"
       - name: Install checksum-pinned Mihomo for CDN transport compatibility
         run: |
           set -euo pipefail
@@ -91,6 +101,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo python3 scripts/tests/xray-mptcp.fixture.py "$XRAY_BINARY" 2>&1 | tee out/ci/xray-mptcp.log
+          sudo env GODEBUG=multipathtcp=0 NP_EXPLICIT_MPTCP_OFF=1 python3 scripts/tests/xray-mptcp.fixture.py "$REALITY_XRAY_BINARY" 2>&1 | tee out/ci/reality-mptcp.log
       - name: Preserve fixture-only verification logs
         if: always()
         uses: actions/upload-artifact@v4

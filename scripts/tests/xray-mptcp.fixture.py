@@ -40,9 +40,11 @@ with tempfile.TemporaryDirectory(prefix='np-mptcp-fixture-') as directory:
         reservation.bind(('127.0.0.1', 0))
         port = reservation.getsockname()[1]
     config = os.path.join(directory, 'config.json')
+    inbound = {'listen': '127.0.0.1', 'port': port, 'protocol': 'socks', 'settings': {'auth': 'noauth'}}
+    if os.environ.get('NP_EXPLICIT_MPTCP_OFF') == '1':
+        inbound['streamSettings'] = {'sockopt': {'tcpMptcp': False}}
     with open(config, 'w') as stream:
-        json.dump({'log': {'loglevel': 'none'}, 'inbounds': [{'listen': '127.0.0.1', 'port': port,
-                   'protocol': 'socks', 'settings': {'auth': 'noauth'}}], 'outbounds': [{'protocol': 'blackhole'}]}, stream)
+        json.dump({'log': {'loglevel': 'none'}, 'inbounds': [inbound], 'outbounds': [{'protocol': 'blackhole'}]}, stream)
     child = subprocess.Popen(traced([binary, 'run', '-config', config], 'candidate'),
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     try:

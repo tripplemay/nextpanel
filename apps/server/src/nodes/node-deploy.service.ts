@@ -11,7 +11,7 @@ import { CertService, type RemoteCertUpdate } from '../common/cert/cert.service'
 import { CloudflareService } from '../cloudflare/cloudflare.service';
 import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.service';
 import { isCfXhttp } from './protocols/cf-xhttp';
-import { ensureCfXhttpCore } from './protocols/cf-xhttp-core';
+import { ensureCfXhttpCore, ensureRealityCore } from './protocols/cf-xhttp-core';
 import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
 import { generateConfig, generateChainExitConfig, getBinaryCommand, NodeInfo } from './config/config-generator';
 import { connectSsh, uploadText, binaryExists, whichBinary, detectPackageManager } from './ssh/ssh.util';
@@ -276,6 +276,7 @@ export class NodeDeployService {
       await assertRemotePorts(ssh, [node.listenPort, ...(statsPort ? [statsPort] : [])], serviceName);
       await this.resources.assertDeploymentOwner(ssh, server, node.id, 'ENTRY');
       if (isCfXhttp(node)) bin = await ensureCfXhttpCore(ssh, log);
+      if (impl === 'XRAY' && node.tls === 'REALITY') bin = await ensureRealityCore(ssh, log);
       if (mappedOrigin) firewallGuard = await installOriginFirewall(ssh, node.id, node.listenPort, mappedOrigin.ref);
 
       // ── 4. Check binary, auto-install if missing ──────────────────────────
@@ -1305,22 +1306,26 @@ export class NodeDeployService {
       await assertRemotePorts(exitSsh, [node.exitPort], resourcePaths(node.id, 'EXIT').service);
       await this.resources.assertDeploymentOwner(exitSsh, exitServer, node.id, 'EXIT');
 
-      log(`[出口] 检查 Xray...`);
-      const { code } = await exitSsh.execCommand('test -x /usr/local/bin/xray');
-      if (code !== 0) {
-        log(`[出口] 安装 Xray...`);
-        const installed = await this.installXray(exitSsh, (m) => log(`[出口] ${m}`));
-        if (!installed) throw new Error('出口服务器 Xray 安装失败');
-      }
-      const exitBin = await this.ensureCoreVersion(
-        exitSsh,
-        '/usr/local/bin/xray',
-        'XRAY',
-        '25.3.6',
-        (message) => log(`[出口] ${message}`),
-      );
-
       const chain = parseChainCredentials(this.crypto.decrypt(node.chainCredEnc));
+      let exitBin: string;
+      if (chain.realityPrivateKey && chain.shortId) {
+        exitBin = await ensureRealityCore(exitSsh, (message) => log(`[出口] ${message}`));
+      } else {
+        log(`[出口] 检查 Xray...`);
+        const { code } = await exitSsh.execCommand('test -x /usr/local/bin/xray');
+        if (code !== 0) {
+          log(`[出口] 安装 Xray...`);
+          const installed = await this.installXray(exitSsh, (m) => log(`[出口] ${m}`));
+          if (!installed) throw new Error('出口服务器 Xray 安装失败');
+        }
+        exitBin = await this.ensureCoreVersion(
+          exitSsh,
+          '/usr/local/bin/xray',
+          'XRAY',
+          '25.3.6',
+          (message) => log(`[出口] ${message}`),
+        );
+      }
       const exitConfig = generateChainExitConfig(
         node.id,
         node.exitPort,
@@ -1341,6 +1346,7 @@ export class NodeDeployService {
         '',
         '[Service]',
         'Type=simple',
+        'Environment="GODEBUG=multipathtcp=0"',
         `ExecStart=${exitBin} run -config ${exitConfigPath}`,
         'Restart=always',
         'RestartSec=3',
@@ -2876,6 +2882,7 @@ function buildSystemdUnit(name: string, bin: string, args: string, firewallGuard
     '',
     '[Service]',
     'Type=simple',
+    ...(bin.endsWith('/xray') ? ['Environment="GODEBUG=multipathtcp=0"'] : []),
     ...(firewallGuard ? [`ExecStartPre=${firewallGuard}`] : []),
     `ExecStart=${bin} ${args}`,
     'Restart=always',

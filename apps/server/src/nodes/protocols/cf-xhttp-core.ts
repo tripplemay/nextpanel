@@ -11,6 +11,11 @@ const assets: Record<string, { name: string; sha256: string }> = {
   x86_64: { name: '64', sha256: 'e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214' },
   aarch64: { name: 'arm64-v8a', sha256: '1811c8f1da0c3b6dc707ebaf1c8390e987ba39859a8f0a7aadd8526157f2ec8d' },
 };
+export const REALITY_CORE_BIN = '/usr/local/lib/nextpanel/xray-26.3.27/xray';
+const realityAssets: typeof assets = {
+  x86_64: { name: '64', sha256: '23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae' },
+  aarch64: { name: 'arm64-v8a', sha256: '4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c' },
+};
 
 export async function preflightCfXhttpCore(ssh: NodeSSH) {
   const shared = await remoteExec(ssh, '/usr/local/bin/xray version 2>&1');
@@ -25,36 +30,49 @@ export async function preflightCfXhttpCore(ssh: NodeSSH) {
 
 /** Use the reviewed core without upgrading or downgrading other nodes' shared binary. */
 export async function ensureCfXhttpCore(ssh: NodeSSH, log: (message: string) => void = () => undefined) {
+  return ensureReviewedCore(ssh, log, CF_XHTTP_XRAY_VERSION, assets, reviewed);
+}
+
+/** New REALITY handshakes reject current sing-box clients; keep reviewed compatibility. */
+export async function ensureRealityCore(ssh: NodeSSH, log: (message: string) => void = () => undefined) {
+  return ensureReviewedCore(ssh, log, '26.3.27', realityAssets, /^Xray\s+v?26\.(?:2\.6|3\.27)(?:\s|\(|$)/);
+}
+
+async function ensureReviewedCore(ssh: NodeSSH, log: (message: string) => void, version: string,
+  platformAssets: typeof assets, sharedReviewed: RegExp) {
+  const directory = `/usr/local/lib/nextpanel/xray-${version}`;
+  const binary = `${directory}/xray`;
+  const exact = new RegExp(`^Xray\\s+v?${version.replace(/\./g, '\\.')}(?:\\s|\\(|$)`);
   const shared = await remoteExec(ssh, '/usr/local/bin/xray version 2>&1');
-  if (shared.code === 0 && reviewed.test(shared.stdout)) return '/usr/local/bin/xray';
-  const current = await remoteExec(ssh, `test ! -L /usr/local/lib/nextpanel && test ! -L ${quote(CF_XHTTP_CORE_DIR)} && test ! -L ${quote(CF_XHTTP_CORE_BIN)} && ${quote(CF_XHTTP_CORE_BIN)} version 2>/dev/null`);
-  if (current.code === 0 && reviewed.test(current.stdout)) return CF_XHTTP_CORE_BIN;
+  if (shared.code === 0 && sharedReviewed.test(shared.stdout)) return '/usr/local/bin/xray';
+  const current = await remoteExec(ssh, `test ! -L /usr/local/lib/nextpanel && test ! -L ${quote(directory)} && test ! -L ${quote(binary)} && ${quote(binary)} version 2>/dev/null`);
+  if (current.code === 0 && exact.test(current.stdout)) return binary;
   const arch = await remoteExec(ssh, 'uname -m');
-  const asset = assets[(arch.stdout ?? '').trim()];
-  if (arch.code !== 0 || !asset) throw new Error('CDN XHTTP supports Linux x86_64/aarch64; shared core unchanged');
+  const asset = platformAssets[(arch.stdout ?? '').trim()];
+  if (arch.code !== 0 || !asset) throw new Error('Reviewed Xray supports Linux x86_64/aarch64; shared core unchanged');
   const stage = `/usr/local/lib/nextpanel/.xray-${randomUUID()}`;
-  const url = `https://github.com/XTLS/Xray-core/releases/download/v${CF_XHTTP_XRAY_VERSION}/Xray-linux-${asset.name}.zip`;
-  log(`Preparing isolated Xray ${CF_XHTTP_XRAY_VERSION}; shared core unchanged`);
+  const url = `https://github.com/XTLS/Xray-core/releases/download/v${version}/Xray-linux-${asset.name}.zip`;
+  log(`Preparing isolated Xray ${version}; shared core unchanged`);
   const result = await remoteExec(ssh, `set -eu; umask 077; ` +
     `test "$(id -u)" = 0; command -v curl >/dev/null; command -v unzip >/dev/null; ` +
     `test ! -L /usr/local/lib/nextpanel; mkdir -p /usr/local/lib/nextpanel; ` +
-    `test ! -e ${quote(CF_XHTTP_CORE_DIR)}; test ! -L ${quote(CF_XHTTP_CORE_DIR)}; ` +
+    `test ! -e ${quote(directory)}; test ! -L ${quote(directory)}; ` +
     `mkdir -m 0700 ${quote(stage)}; trap 'rm -rf -- ${stage}' EXIT HUP INT TERM; ` +
     `curl --proto '=https' --tlsv1.2 -fsSL --retry 2 --connect-timeout 15 --max-time 120 -o ${quote(stage + '/core.zip')} ${quote(url)}; ` +
     `printf '%s  %s\\n' '${asset.sha256}' ${quote(stage + '/core.zip')} | sha256sum -c - >/dev/null; ` +
     `unzip -oq ${quote(stage + '/core.zip')} xray -d ${quote(stage)}; chmod 0755 ${quote(stage + '/xray')}; ` +
-    `${quote(stage + '/xray')} version | grep -Eq '^Xray[[:space:]]+v?${CF_XHTTP_XRAY_VERSION.replace(/\./g, '\\.')}([[:space:]]|\\()'; ` +
-    `rm -f ${quote(stage + '/core.zip')}; chmod 0755 ${quote(stage)}; mv -T ${quote(stage)} ${quote(CF_XHTTP_CORE_DIR)}`, 270000);
+    `${quote(stage + '/xray')} version | grep -Eq '^Xray[[:space:]]+v?${version.replace(/\./g, '\\.')}([[:space:]]|\\()'; ` +
+    `rm -f ${quote(stage + '/core.zip')}; chmod 0755 ${quote(stage)}; mv -T ${quote(stage)} ${quote(directory)}`, 270000);
   if (result.code !== 0) throw new Error('Isolated Xray preparation failed; check curl/unzip, download access and existing version directory; shared core unchanged');
-  const verified = await remoteExec(ssh, `${quote(CF_XHTTP_CORE_BIN)} version`);
-  if (verified.code !== 0 || !reviewed.test(verified.stdout)) throw new Error('Isolated Xray version verification failed');
-  return CF_XHTTP_CORE_BIN;
+  const verified = await remoteExec(ssh, `${quote(binary)} version`);
+  if (verified.code !== 0 || !exact.test(verified.stdout)) throw new Error('Isolated Xray version verification failed');
+  return binary;
 }
 
 export function usageXrayBinary(execStart: string): string {
   const path = /(?:^|\{\s*)path=([^\s;]+)\s*;/.exec(execStart)?.[1];
   // Allow the previous managed path during a rolling update, never for new installs.
-  if (path !== '/usr/local/bin/xray' && path !== CF_XHTTP_CORE_BIN &&
+  if (path !== '/usr/local/bin/xray' && path !== CF_XHTTP_CORE_BIN && path !== REALITY_CORE_BIN &&
       path !== '/usr/local/lib/nextpanel/xray-26.2.6/xray') throw new Error('UNEXPECTED_CORE_PATH');
   return path;
 }

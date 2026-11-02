@@ -1,7 +1,9 @@
 # Reviewed component updates
 
-The 2026-11-02 reviewed targets are Xray 26.10.31, sing-box 1.14.4 and NextTrace
-1.7.5. Updating the Agent does not update the installed third-party cores.
+The 2026-11-02 reviewed targets are Xray 26.10.31 for WS/XHTTP TLS, sing-box
+1.14.4 and NextTrace 1.7.5. Updating the Agent does not update third-party cores.
+REALITY retains compatible Xray 26.2.6/26.3.27; new isolated REALITY installs
+pin 26.3.27 without downgrading another node's shared binary.
 
 - Verify official archive digests before extracting executable candidates.
 - Validate candidate binaries against existing node configs before replacing any
@@ -24,6 +26,19 @@ traces with positive and negative controls. Older kernels/iproute2 combinations
 can omit listening MPTCP sockets from `ss -M`; an empty listing alone is not a
 security verdict. Reject production configs that explicitly enable `tcpMptcp`
 until separately reviewed. Updating Xray is mitigation, not a kernel CVE fix.
+
+The REALITY compatibility exception is deliberate: newer upstream servers
+require an X25519MLKEM768 key share that sing-box 1.14.4 does not send. See
+[upstream issue 4520](https://github.com/SagerNet/sing-box/issues/4520). A real
+chain canary failed and was rolled back; a synthetic loopback control confirmed
+the same old-core pass/new-core rejection. Do not weaken REALITY authentication
+or replace the encrypted chain with plaintext to force an upgrade.
+
+Compatible old cores need BOTH explicit `tcpMptcp: false` socket options and the
+process-scoped `GODEBUG=multipathtcp=0` systemd environment. The JSON flag alone
+does not suppress the Go default on the tested old binary. Verify the combined
+mitigation with the syscall fixture and real forwarding before acceptance;
+do not change shared host sysctls or another manager's services.
 
 New Xray also denies private destinations by default in Freedom outbounds. The
 native WS/XHTTP tests explicitly allow only their synthetic loopback sink and

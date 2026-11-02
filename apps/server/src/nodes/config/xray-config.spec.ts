@@ -118,7 +118,7 @@ describe('generateXrayConfig – chain routing', () => {
         password: 'chain-public-key',
         shortId: '0123456789abcdef',
       },
-      sockopt: { tcpKeepAliveInterval: 30 },
+      sockopt: { tcpKeepAliveInterval: 30, tcpMptcp: false },
     });
     expect(outbound.mux).toEqual({
       enabled: true,

@@ -85,7 +85,7 @@ describe('generateChainExitConfig', () => {
         privateKey: 'chain-private-key',
         shortIds: ['0123456789abcdef'],
       },
-      sockopt: { tcpKeepAliveInterval: 30 },
+      sockopt: { tcpKeepAliveInterval: 30, tcpMptcp: false },
     });
     expect(cfg.routing.rules[0]).toEqual({
       type: 'field',
@@ -100,7 +100,7 @@ describe('generateChainExitConfig', () => {
     expect(cfg.inbounds[0].streamSettings).toEqual({
       network: 'tcp',
       security: 'none',
-      sockopt: { tcpKeepAliveInterval: 30 },
+      sockopt: { tcpKeepAliveInterval: 30, tcpMptcp: false },
     });
   });
 

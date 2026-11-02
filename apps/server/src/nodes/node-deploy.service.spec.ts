@@ -7,6 +7,7 @@ import { NodeSSH } from 'node-ssh';
 import { generateConfig, generateChainExitConfig } from './config/config-generator';
 import { CleanupBlockedError } from '../resources/resource-lifecycle.service';
 import * as originFirewall from '../cloudflare/cf-origin-firewall';
+import * as reviewedCore from './protocols/cf-xhttp-core';
 
 jest.mock('../common/database/advisory-lock', () => ({
   withPostgresAdvisoryLocks: (_keys: string[], work: () => Promise<unknown>) => work(),
@@ -254,6 +255,7 @@ function setupHappyPath() {
 beforeEach(() => {
   jest.restoreAllMocks();
   jest.clearAllMocks();
+  jest.spyOn(reviewedCore, 'ensureRealityCore').mockResolvedValue('/usr/local/bin/xray');
   mockExecCommand.mockReset();
   mockAssertPorts.mockReset().mockResolvedValue(undefined);
   mockResources.assertDeploymentOwner.mockReset().mockResolvedValue(undefined);
@@ -2657,14 +2659,9 @@ describe('NodeDeployService', () => {
       const deployment = await promise;
 
       expect(connectSpy).toHaveBeenCalled();
-      expect(execSpy).toHaveBeenCalledWith('test -x /usr/local/bin/xray');
-      expect(ensureVersionSpy).toHaveBeenCalledWith(
-        expect.any(NodeSSH),
-        '/usr/local/bin/xray',
-        'XRAY',
-        '25.3.6',
-        expect.any(Function),
-      );
+      expect(reviewedCore.ensureRealityCore).toHaveBeenCalledWith(expect.any(NodeSSH), expect.any(Function));
+      expect(ensureVersionSpy).not.toHaveBeenCalled();
+      expect(mockUploadText.mock.calls.some(call => String(call[1]).includes('Environment="GODEBUG=multipathtcp=0"'))).toBe(true);
       expect(generateChainExitConfig).toHaveBeenCalledWith(
         'node-1',
         15001,
