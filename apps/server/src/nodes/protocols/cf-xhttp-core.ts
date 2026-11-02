@@ -34,12 +34,13 @@ export async function ensureCfXhttpCore(ssh: NodeSSH, log: (message: string) => 
 }
 
 /** New REALITY handshakes reject current sing-box clients; keep reviewed compatibility. */
-export async function ensureRealityCore(ssh: NodeSSH, log: (message: string) => void = () => undefined) {
-  return ensureReviewedCore(ssh, log, '26.3.27', realityAssets, /^Xray\s+v?26\.(?:2\.6|3\.27)(?:\s|\(|$)/);
+export async function ensureRealityCore(ssh: NodeSSH, log: (message: string) => void = () => undefined,
+  prepareDependencies?: () => Promise<void>) {
+  return ensureReviewedCore(ssh, log, '26.3.27', realityAssets, /^Xray\s+v?26\.(?:2\.6|3\.27)(?:\s|\(|$)/, prepareDependencies);
 }
 
 async function ensureReviewedCore(ssh: NodeSSH, log: (message: string) => void, version: string,
-  platformAssets: typeof assets, sharedReviewed: RegExp) {
+  platformAssets: typeof assets, sharedReviewed: RegExp, prepareDependencies?: () => Promise<void>) {
   const directory = `/usr/local/lib/nextpanel/xray-${version}`;
   const binary = `${directory}/xray`;
   const exact = new RegExp(`^Xray\\s+v?${version.replace(/\./g, '\\.')}(?:\\s|\\(|$)`);
@@ -50,6 +51,7 @@ async function ensureReviewedCore(ssh: NodeSSH, log: (message: string) => void, 
   const arch = await remoteExec(ssh, 'uname -m');
   const asset = platformAssets[(arch.stdout ?? '').trim()];
   if (arch.code !== 0 || !asset) throw new Error('Reviewed Xray supports Linux x86_64/aarch64; shared core unchanged');
+  await prepareDependencies?.();
   const stage = `/usr/local/lib/nextpanel/.xray-${randomUUID()}`;
   const url = `https://github.com/XTLS/Xray-core/releases/download/v${version}/Xray-linux-${asset.name}.zip`;
   log(`Preparing isolated Xray ${version}; shared core unchanged`);

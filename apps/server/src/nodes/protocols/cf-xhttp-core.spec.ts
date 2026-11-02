@@ -37,15 +37,25 @@ describe('isolated reviewed Xray core', () => {
   });
   it.each(['26.2.6', '26.3.27'])('keeps a compatible REALITY shared core: %s', async version => {
     const ssh = { execCommand: jest.fn().mockResolvedValue(ok(`Xray ${version}`)), dispose: jest.fn() };
-    expect(await ensureRealityCore(ssh as any)).toBe('/usr/local/bin/xray');
+    const dependencies = jest.fn();
+    expect(await ensureRealityCore(ssh as any, undefined, dependencies)).toBe('/usr/local/bin/xray');
+    expect(dependencies).not.toHaveBeenCalled();
     expect(ssh.execCommand).toHaveBeenCalledTimes(1);
   });
   it('isolates REALITY from a newer incompatible shared core without downgrading it', async () => {
     const ssh = { execCommand: jest.fn().mockResolvedValueOnce(ok('Xray 26.10.31')).mockResolvedValueOnce(missing)
       .mockResolvedValueOnce(ok('x86_64')).mockResolvedValueOnce(ok()).mockResolvedValueOnce(ok('Xray 26.3.27')), dispose: jest.fn() };
-    expect(await ensureRealityCore(ssh as any)).toBe(REALITY_CORE_BIN);
+    const dependencies = jest.fn(async () => { expect(ssh.execCommand).toHaveBeenCalledTimes(3); });
+    expect(await ensureRealityCore(ssh as any, undefined, dependencies)).toBe(REALITY_CORE_BIN);
+    expect(dependencies).toHaveBeenCalledTimes(1);
     expect(ssh.execCommand.mock.calls[3][0]).toContain('/releases/download/v26.3.27/');
     expect(ssh.execCommand.mock.calls[3][0]).not.toContain('/usr/local/bin/xray');
+  });
+  it('stops before downloading REALITY if dependency provisioning fails', async () => {
+    const ssh = { execCommand: jest.fn().mockResolvedValueOnce(missing).mockResolvedValueOnce(missing)
+      .mockResolvedValueOnce(ok('x86_64')), dispose: jest.fn() };
+    await expect(ensureRealityCore(ssh as any, undefined, async () => { throw Error('unzip unavailable'); })).rejects.toThrow('unzip unavailable');
+    expect(ssh.execCommand).toHaveBeenCalledTimes(3);
   });
   it.each(['/usr/local/bin/xray', CF_XHTTP_CORE_BIN, REALITY_CORE_BIN, '/usr/local/lib/nextpanel/xray-26.2.6/xray'])('uses the deployed core for usage synchronization: %s', path => {
     expect(usageXrayBinary(`{ path=${path} ; argv[]=${path} run -config /etc/nextpanel/nodes/n.json ; }`)).toBe(path);

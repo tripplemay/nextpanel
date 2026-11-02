@@ -300,6 +300,20 @@ beforeEach(() => {
 // Speed up the 2s timer in deploy
 jest.useFakeTimers();
 
+describe('REALITY installation dependencies', () => {
+  it.each([true, false])('provisions unzip only when isolated installation requests it: available=%s', async available => {
+    const unzip = jest.spyOn(svc as any, 'ensureUnzip').mockResolvedValue(available);
+    jest.mocked(reviewedCore.ensureRealityCore).mockImplementation(async (_ssh, _log, prepare) => {
+      await prepare!();
+      return reviewedCore.REALITY_CORE_BIN;
+    });
+    const result = (svc as any).prepareRealityCore(mockSsh, jest.fn());
+    if (available) await expect(result).resolves.toBe(reviewedCore.REALITY_CORE_BIN);
+    else await expect(result).rejects.toThrow('unzip unavailable');
+    expect(unzip).toHaveBeenCalledWith(mockSsh, expect.any(Function));
+  });
+});
+
 describe('detached resource cleanup', () => {
   const job = { id: 'cleanup', ownerId: 'user-1', serverId: 'srv-1', nodeId: 'node-1', role: 'ENTRY', payload: { port: 10086, statsPort: 30086, protocols: ['tcp'] } };
   beforeEach(() => {
@@ -2659,7 +2673,7 @@ describe('NodeDeployService', () => {
       const deployment = await promise;
 
       expect(connectSpy).toHaveBeenCalled();
-      expect(reviewedCore.ensureRealityCore).toHaveBeenCalledWith(expect.any(NodeSSH), expect.any(Function));
+      expect(reviewedCore.ensureRealityCore).toHaveBeenCalledWith(expect.any(NodeSSH), expect.any(Function), expect.any(Function));
       expect(ensureVersionSpy).not.toHaveBeenCalled();
       expect(mockUploadText.mock.calls.some(call => String(call[1]).includes('Environment="GODEBUG=multipathtcp=0"'))).toBe(true);
       expect(generateChainExitConfig).toHaveBeenCalledWith(

@@ -276,7 +276,7 @@ export class NodeDeployService {
       await assertRemotePorts(ssh, [node.listenPort, ...(statsPort ? [statsPort] : [])], serviceName);
       await this.resources.assertDeploymentOwner(ssh, server, node.id, 'ENTRY');
       if (isCfXhttp(node)) bin = await ensureCfXhttpCore(ssh, log);
-      if (impl === 'XRAY' && node.tls === 'REALITY') bin = await ensureRealityCore(ssh, log);
+      if (impl === 'XRAY' && node.tls === 'REALITY') bin = await this.prepareRealityCore(ssh, log);
       if (mappedOrigin) firewallGuard = await installOriginFirewall(ssh, node.id, node.listenPort, mappedOrigin.ref);
 
       // ── 4. Check binary, auto-install if missing ──────────────────────────
@@ -1309,7 +1309,7 @@ export class NodeDeployService {
       const chain = parseChainCredentials(this.crypto.decrypt(node.chainCredEnc));
       let exitBin: string;
       if (chain.realityPrivateKey && chain.shortId) {
-        exitBin = await ensureRealityCore(exitSsh, (message) => log(`[出口] ${message}`));
+        exitBin = await this.prepareRealityCore(exitSsh, (message) => log(`[出口] ${message}`));
       } else {
         log(`[出口] 检查 Xray...`);
         const { code } = await exitSsh.execCommand('test -x /usr/local/bin/xray');
@@ -2005,6 +2005,12 @@ export class NodeDeployService {
         log(`Unknown implementation "${impl}", cannot auto-install.`);
         return null;
     }
+  }
+
+  private async prepareRealityCore(ssh: NodeSSH, log: (msg: string) => void): Promise<string> {
+    return ensureRealityCore(ssh, log, async () => {
+      if (!(await this.ensureUnzip(ssh, log))) throw new Error('REALITY core preparation failed: unzip unavailable');
+    });
   }
 
   /**
