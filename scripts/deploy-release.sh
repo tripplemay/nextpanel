@@ -6,6 +6,10 @@ umask 077
 APP=/opt/apps/nextpanel
 BACKUPS=/opt/backups/nextpanel/releases
 DB_CONTAINER=nextpanel-postgres
+# Keep the panel runtime independent of other applications and the PM2 daemon.
+if [[ -x /opt/apps/nextpanel-runtime/current/bin/node ]]; then
+  export PATH="/opt/apps/nextpanel-runtime/current/bin:$PATH"
+fi
 mkdir -p "$BACKUPS"
 exec 9>"$BACKUPS/deploy.lock"
 flock -n 9 || { echo 'Another NextPanel deploy/rollback is running' >&2; exit 1; }

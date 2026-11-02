@@ -27,7 +27,7 @@ if (process.argv[2] !== 'isolated') {
   (async () => {
     assert.equal(await ensureCfXhttpCore(ssh), CF_XHTTP_CORE_BIN);
     assert.equal(hash(shared), baseline, 'A newer shared core must not be downgraded');
-    assert.match(execFileSync(CF_XHTTP_CORE_BIN, ['version'], { encoding: 'utf8' }), /^Xray 26\.2\.6\b/);
+    assert.match(execFileSync(CF_XHTTP_CORE_BIN, ['version'], { encoding: 'utf8' }), /^Xray 26\.10\.31\b/);
     const installed = hash(CF_XHTTP_CORE_BIN);
     assert.equal(await ensureCfXhttpCore(ssh), CF_XHTTP_CORE_BIN);
     assert.equal(hash(CF_XHTTP_CORE_BIN), installed, 'Retry must reuse the installed artifact');

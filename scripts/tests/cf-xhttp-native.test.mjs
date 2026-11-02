@@ -78,9 +78,16 @@ test('isolated XHTTP TLS/H2 E2E with Xray worker and Mihomo, including certifica
     const node = { id: 'fixture', name: 'fixture', protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'TLS',
       domain: 'cdn.example.com', listenPort };
     const server = JSON.parse(generateXrayConfig(node, credentials));
+    if (process.env.NP_NATIVE_DEBUG === '1') server.log = { loglevel: 'debug' };
     // Only the fixture socket/cert paths change. No public address can be dialed.
     server.inbounds[0].listen = '127.0.0.1';
     server.inbounds[0].streamSettings.tlsSettings.certificates = [{ certificateFile: crt, keyFile: key }];
+    // New Xray blocks private destinations by default. Permit only this fixture sink.
+    const direct = server.outbounds.find(outbound => outbound.tag === 'direct');
+    direct.settings = { ...direct.settings, finalRules: [
+      { action: 'allow', ip: ['127.0.0.1/32'], port: String(target.address().port) },
+      { action: 'block', blockDelay: '0-0' },
+    ] };
     server.outbounds.push({ protocol: 'blackhole', tag: 'blocked' });
     server.routing = { rules: [{ type: 'field', ip: ['127.0.0.1'], outboundTag: 'direct' },
       { type: 'field', network: 'tcp,udp', outboundTag: 'blocked' }] };
@@ -90,6 +97,7 @@ test('isolated XHTTP TLS/H2 E2E with Xray worker and Mihomo, including certifica
 
     const clientPort = await port();
     const client = xrayConfig({ domain: node.domain, ...credentials, protocol: 3 }, '127.0.0.1', clientPort);
+    if (process.env.NP_NATIVE_DEBUG === '1') client.log = { loglevel: 'debug' };
     client.outbounds[0].settings.vnext[0].port = listenPort;
     client.outbounds[0].streamSettings.tlsSettings.certificates = [{ certificateFile: crt, usage: 'verify' }];
     const clientFile = join(dir, 'worker.json'); writeFileSync(clientFile, JSON.stringify(client));
@@ -97,7 +105,7 @@ test('isolated XHTTP TLS/H2 E2E with Xray worker and Mihomo, including certifica
     await ready(clientPort, start(xray, ['run', '-c', clientFile]));
     const upload = 'p'.repeat(128 * 1024);
     const throughWorker = await request(clientPort, targetUrl, upload);
-    assert.equal(throughWorker.code, 0, throughWorker.error + logs); assert.equal(throughWorker.out, `fixture:${upload.length}`);
+    assert.equal(throughWorker.code, 0, `target requests=${received}\n` + throughWorker.error + logs); assert.equal(throughWorker.out, `fixture:${upload.length}`);
 
     const candidate = cfVariants({ ...node, host: node.domain, port: 443, credentials }, 'fixture', ['104.16.0.1'], null)[0];
     const cert = readFileSync(crt, 'utf8');

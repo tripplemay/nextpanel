@@ -128,7 +128,7 @@ async function runtimeAvailable() {
         const match = output.match(binary === 'curl' ? /^curl ([\d.]+)/ : /^Xray ([\d.]+)/);
         if (match) {
           runtimeVersions[binary === 'curl' ? 'curl' : 'xray'] = match[1];
-          validVersion = binary === 'curl' || match[1] === '26.2.6';
+          validVersion = binary === 'curl' || match[1] === '26.10.31';
         }
       });
       child.once('error', () => resolve(false)); child.once('close', code => resolve(code === 0 && validVersion));

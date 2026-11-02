@@ -534,7 +534,7 @@ describe('NodeDeployService', () => {
       mockExecCommand.mockReset();
       mockExecCommand
         .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })                      // uname -m
-        .mockResolvedValueOnce({ stdout: '{"tag_name":"v26.2.6"}', stderr: '' })      // github API
+        .mockResolvedValueOnce({ stdout: '{"tag_name":"v26.10.31"}', stderr: '' })      // github API
         .mockResolvedValueOnce({ code: 0, stderr: '' })                               // ensureUnzip: command -v unzip → present
         .mockResolvedValueOnce({ stderr: '' })                                         // download + extract + install
         .mockResolvedValueOnce({ code: 0 })                                            // test -x xray
@@ -941,7 +941,7 @@ describe('NodeDeployService', () => {
       mockExecCommand.mockReset();
       mockExecCommand
         .mockResolvedValueOnce({ stdout: 'x86_64', stderr: '' })                 // uname -m
-        .mockResolvedValueOnce({ stdout: '{"tag_name":"v26.2.6"}', stderr: '' }) // github API
+        .mockResolvedValueOnce({ stdout: '{"tag_name":"v26.10.31"}', stderr: '' }) // github API
         .mockResolvedValueOnce({ code: 0, stderr: '' })                           // ensureUnzip: command -v unzip → present
         .mockResolvedValueOnce({ stderr: '' })                                    // download + extract + install
         .mockResolvedValueOnce({ code: 0 });                                      // test -x xray succeeds → installXray returns true
@@ -1678,7 +1678,7 @@ describe('NodeDeployService', () => {
           versionReads += 1;
           return {
             code: 0,
-            stdout: versionReads === 1 ? 'Xray 24.1.1' : 'Xray 26.2.6',
+            stdout: versionReads === 1 ? 'Xray 24.1.1' : 'Xray 26.10.31',
             stderr: '',
           };
         }
@@ -1740,7 +1740,7 @@ describe('NodeDeployService', () => {
           versionReads += 1;
           return {
             code: 0,
-            stdout: versionReads === 1 ? 'Xray 24.1.1' : 'Xray 26.2.6',
+            stdout: versionReads === 1 ? 'Xray 24.1.1' : 'Xray 26.10.31',
             stderr: '',
           };
         }
@@ -1834,7 +1834,7 @@ describe('NodeDeployService', () => {
     it.each([
       ['a failed command', { code: 1, stdout: 'sing-box version 1.12.0', stderr: 'broken' }],
       ['a prerelease', { code: 0, stdout: 'sing-box version 1.12.0-beta.1', stderr: '' }],
-      ['another product output', { code: 0, stdout: 'Xray 26.2.6', stderr: '' }],
+      ['another product output', { code: 0, stdout: 'Xray 26.10.31', stderr: '' }],
     ])('rejects %s as a stable sing-box version', async (_label, response) => {
       mockExecCommand.mockReset().mockResolvedValue(response);
       mockBinaryExists.mockResolvedValue(false);
@@ -2000,7 +2000,7 @@ describe('NodeDeployService', () => {
       const verify = jest.spyOn(originFirewall, 'verifyOriginFirewall').mockResolvedValue(undefined);
       mockConnectSsh.mockResolvedValue(mockSsh);
       mockExecCommand.mockReset().mockImplementation(async (command: string) => {
-        if (command.endsWith(' version 2>&1')) return { code: 0, stdout: 'Xray 26.2.6', stderr: '' };
+        if (command.endsWith(' version 2>&1')) return { code: 0, stdout: 'Xray 26.10.31', stderr: '' };
         if (command.includes('systemctl is-active')) return { code: 0, stdout: 'active', stderr: '' };
         return { code: 0, stdout: '', stderr: '' };
       });
@@ -2047,7 +2047,7 @@ describe('NodeDeployService', () => {
       {
         label: 'XHTTP CDN',
         node: { protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'TLS' },
-        version: 'Xray 26.2.6 (Xray, Penetrates Everything.)',
+        version: 'Xray 26.10.31 (Xray, Penetrates Everything.)',
         versionBin: '/usr/local/bin/xray',
         socket: 'tcp',
       },
@@ -2169,7 +2169,7 @@ describe('NodeDeployService', () => {
         if (command === '/usr/local/bin/xray version 2>&1') {
           return {
             code: 0,
-            stdout: 'Xray 26.2.6 (Xray, Penetrates Everything.)',
+            stdout: 'Xray 26.10.31 (Xray, Penetrates Everything.)',
             stderr: '',
           };
         }
@@ -2226,7 +2226,7 @@ describe('NodeDeployService', () => {
       mockBinaryExists.mockResolvedValue(true);
       mockExecCommand.mockReset().mockImplementation(async (command: string) => {
         if (command === '/usr/local/bin/xray version 2>&1') {
-          return { code: 0, stdout: 'Xray 26.2.6 (Xray, Penetrates Everything.)', stderr: '' };
+          return { code: 0, stdout: 'Xray 26.10.31 (Xray, Penetrates Everything.)', stderr: '' };
         }
         if (command === 'systemctl is-active nextpanel-node-1') {
           return { code: 3, stdout: 'failed', stderr: '' };
@@ -2335,7 +2335,7 @@ describe('NodeDeployService', () => {
       (mockCfSettings.getDecryptedToken as jest.Mock).mockResolvedValue(null);
       mockExecCommand.mockReset().mockResolvedValue({
         code: 0,
-        stdout: protocol === 'VLESS' ? 'Xray 26.2.6' : 'sing-box version 1.12.0',
+        stdout: protocol === 'VLESS' ? 'Xray 26.10.31' : 'sing-box version 1.12.0',
         stderr: '',
       });
 
@@ -2421,7 +2421,7 @@ describe('NodeDeployService', () => {
       mockBinaryExists.mockResolvedValue(true);
       mockExecCommand.mockReset().mockImplementation(async (command: string) => {
         if (command === '/usr/local/bin/xray version 2>&1') {
-          return { code: 0, stdout: 'Xray 26.2.6 (Xray, Penetrates Everything.)', stderr: '' };
+          return { code: 0, stdout: 'Xray 26.10.31 (Xray, Penetrates Everything.)', stderr: '' };
         }
         if (command === 'command -v curl') {
           return { code: 0, stdout: '/usr/bin/curl', stderr: '' };
@@ -2755,7 +2755,7 @@ describe('NodeDeployService', () => {
         .mockResolvedValue(true);
       mockExecCommand.mockImplementation(async (command: string) => {
         if (command === '/usr/local/bin/xray version 2>&1') {
-          return { code: 0, stdout: 'Xray 26.2.6 (Xray, Penetrates Everything.)', stderr: '' };
+          return { code: 0, stdout: 'Xray 26.10.31 (Xray, Penetrates Everything.)', stderr: '' };
         }
         if (command === `systemctl is-active nextpanel-${chainNode.id}`) {
           return { code: 3, stdout: 'failed', stderr: '' };

@@ -35,6 +35,12 @@ test('native Xray identities, hot add/remove, traffic attribution and persistent
     const config = JSON.parse(generateXrayConfig({ id: 'fixture', protocol: 'VLESS', implementation: 'XRAY', transport: 'WS', tls: 'TLS', domain: 'localhost', listenPort: listen, statsPort: api }, { uuid: legacy }));
     config.inbounds[1].listen = '127.0.0.1';
     config.inbounds[1].streamSettings.tlsSettings.certificates = [{ certificateFile: certificate, keyFile: key }];
+    // The exception is confined to the synthetic loopback sink, never production.
+    const direct = config.outbounds.find(outbound => outbound.tag === 'direct');
+    direct.settings = { ...direct.settings, finalRules: [
+      { action: 'allow', ip: ['127.0.0.1/32'], port: String(sink.address().port) },
+      { action: 'block', blockDelay: '0-0' },
+    ] };
     const file = join(dir, 'server.json');
     const prepared = usageConfig(JSON.stringify(config), 'fixture', api, []);
     const staged = usageStagingPaths(file, 'fixture');

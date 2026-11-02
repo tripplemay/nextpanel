@@ -8,8 +8,8 @@ export const CF_XHTTP_CORE_DIR = `/usr/local/lib/nextpanel/xray-${CF_XHTTP_XRAY_
 export const CF_XHTTP_CORE_BIN = `${CF_XHTTP_CORE_DIR}/xray`;
 const reviewed = new RegExp(`^Xray\\s+v?${CF_XHTTP_XRAY_VERSION.replace(/\./g, '\\.')}(?:\\s|\\(|$)`);
 const assets: Record<string, { name: string; sha256: string }> = {
-  x86_64: { name: '64', sha256: '29ce535b56e207a406ffa1c2d4842dcc410be003eff8ec508bb732abc9f8e385' },
-  aarch64: { name: 'arm64-v8a', sha256: 'b52d8263453fbd6f4747fd6a1ecf70cd43a664243615dc892ea4674c01b2b5ee' },
+  x86_64: { name: '64', sha256: 'e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214' },
+  aarch64: { name: 'arm64-v8a', sha256: '1811c8f1da0c3b6dc707ebaf1c8390e987ba39859a8f0a7aadd8526157f2ec8d' },
 };
 
 export async function preflightCfXhttpCore(ssh: NodeSSH) {
@@ -43,7 +43,7 @@ export async function ensureCfXhttpCore(ssh: NodeSSH, log: (message: string) => 
     `curl --proto '=https' --tlsv1.2 -fsSL --retry 2 --connect-timeout 15 --max-time 120 -o ${quote(stage + '/core.zip')} ${quote(url)}; ` +
     `printf '%s  %s\\n' '${asset.sha256}' ${quote(stage + '/core.zip')} | sha256sum -c - >/dev/null; ` +
     `unzip -oq ${quote(stage + '/core.zip')} xray -d ${quote(stage)}; chmod 0755 ${quote(stage + '/xray')}; ` +
-    `${quote(stage + '/xray')} version | grep -Eq '^Xray[[:space:]]+v?26\\.2\\.6([[:space:]]|\\()'; ` +
+    `${quote(stage + '/xray')} version | grep -Eq '^Xray[[:space:]]+v?${CF_XHTTP_XRAY_VERSION.replace(/\./g, '\\.')}([[:space:]]|\\()'; ` +
     `rm -f ${quote(stage + '/core.zip')}; chmod 0755 ${quote(stage)}; mv -T ${quote(stage)} ${quote(CF_XHTTP_CORE_DIR)}`, 270000);
   if (result.code !== 0) throw new Error('Isolated Xray preparation failed; check curl/unzip, download access and existing version directory; shared core unchanged');
   const verified = await remoteExec(ssh, `${quote(CF_XHTTP_CORE_BIN)} version`);
@@ -53,6 +53,8 @@ export async function ensureCfXhttpCore(ssh: NodeSSH, log: (message: string) => 
 
 export function usageXrayBinary(execStart: string): string {
   const path = /(?:^|\{\s*)path=([^\s;]+)\s*;/.exec(execStart)?.[1];
-  if (path !== '/usr/local/bin/xray' && path !== CF_XHTTP_CORE_BIN) throw new Error('UNEXPECTED_CORE_PATH');
+  // Allow the previous managed path during a rolling update, never for new installs.
+  if (path !== '/usr/local/bin/xray' && path !== CF_XHTTP_CORE_BIN &&
+      path !== '/usr/local/lib/nextpanel/xray-26.2.6/xray') throw new Error('UNEXPECTED_CORE_PATH');
   return path;
 }

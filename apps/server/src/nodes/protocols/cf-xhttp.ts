@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 
 export const CF_XHTTP_MODE = 'packet-up';
-export const CF_XHTTP_XRAY_VERSION = '26.2.6';
+export const CF_XHTTP_XRAY_VERSION = '26.10.31';
 
 export function isCfXhttp(node: { protocol: string; transport?: string | null; tls?: string | null }): boolean {
   return node.protocol === 'VLESS' && node.transport === 'XHTTP' && node.tls === 'TLS';

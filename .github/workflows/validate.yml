@@ -38,27 +38,27 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           sudo apt-get update
-          sudo apt-get install -y postgresql-16 nftables iproute2
+          sudo apt-get install -y postgresql-16 nftables iproute2 strace
           python -m pip install -r scripts/tests/browser-requirements.txt
           python -m playwright install --with-deps chromium
       - name: Install checksum-pinned sing-box for native config validation
         run: |
           set -euo pipefail
-          ARCHIVE="$RUNNER_TEMP/sing-box-1.13.0-linux-amd64.tar.gz"
+          ARCHIVE="$RUNNER_TEMP/sing-box-1.14.4-linux-amd64.tar.gz"
           curl --fail --location --retry 3 --max-time 120 \
-            https://github.com/SagerNet/sing-box/releases/download/v1.13.0/sing-box-1.13.0-linux-amd64.tar.gz \
+            https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz \
             --output "$ARCHIVE"
-          printf '%s  %s\n' 86db0f9df3f822ca2adccde2f7c1c9e21d64e646a77bf258274fde3be399025b "$ARCHIVE" | sha256sum --check -
+          printf '%s  %s\n' 699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968 "$ARCHIVE" | sha256sum --check -
           tar -xzf "$ARCHIVE" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/sing-box-1.13.0-linux-amd64" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/sing-box-1.14.4-linux-amd64" >> "$GITHUB_PATH"
       - name: Install checksum-pinned Xray for loopback identity validation
         run: |
           set -euo pipefail
           ARCHIVE="$RUNNER_TEMP/Xray-linux-64.zip"
           curl --fail --location --retry 3 --max-time 120 \
-            https://github.com/XTLS/Xray-core/releases/download/v26.2.6/Xray-linux-64.zip \
+            https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-64.zip \
             --output "$ARCHIVE"
-          printf '%s  %s\n' 29ce535b56e207a406ffa1c2d4842dcc410be003eff8ec508bb732abc9f8e385 "$ARCHIVE" | sha256sum --check -
+          printf '%s  %s\n' e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214 "$ARCHIVE" | sha256sum --check -
           unzip -q "$ARCHIVE" xray -d "$RUNNER_TEMP/xray-fixture"
           chmod +x "$RUNNER_TEMP/xray-fixture/xray"
           echo "XRAY_BINARY=$RUNNER_TEMP/xray-fixture/xray" >> "$GITHUB_ENV"
@@ -87,6 +87,10 @@ jobs:
         run: |
           set -euo pipefail
           sudo "$(command -v node)" scripts/tests/cf-xhttp-core.fixture.cjs 2>&1 | tee out/ci/cf-xhttp-core.log
+      - name: Verify reviewed Xray does not create MPTCP listeners by default
+        run: |
+          set -euo pipefail
+          sudo python3 scripts/tests/xray-mptcp.fixture.py "$XRAY_BINARY" 2>&1 | tee out/ci/xray-mptcp.log
       - name: Preserve fixture-only verification logs
         if: always()
         uses: actions/upload-artifact@v4
