@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { once } from 'node:events';
-import { createProbeServer, validateBatch, xrayConfig, isCfIp, probeOne, parseCurlMeasurement } from '../cf-probe/server.mjs';
+import { once, EventEmitter } from 'node:events';
+import net from 'node:net';
+import { spawn } from 'node:child_process';
+import { createProbeServer, validateBatch, xrayConfig, isCfIp, probeOne, parseCurlMeasurement, waitForXrayReady } from '../cf-probe/server.mjs';
 
 test('parses portable curl trailers without counting metadata as payload', () => {
   const trailer = '\nNP_CF_META:204 1.250000\n';
@@ -48,6 +50,29 @@ test('missing Xray process cleans up and terminates within the bounded startup d
     const result = await probeOne(batch, batch.ips[0], new AbortController().signal);
     assert.equal(result.error, 'PROBE_RUNTIME_UNAVAILABLE');
   } finally { if (old === undefined) delete process.env.XRAY_BINARY; else process.env.XRAY_BINARY = old; }
+});
+test('a recycled listening port cannot mask a missing Xray executable', { timeout: 3000 }, async t => {
+  const listener = net.createServer(socket => socket.destroy());
+  listener.listen(0, '127.0.0.1'); await once(listener, 'listening');
+  t.after(() => listener.close());
+  const child = spawn('/nonexistent/nextpanel-fixture-xray', [], { stdio: 'ignore' });
+  await assert.rejects(waitForXrayReady(child, listener.address().port, new AbortController().signal), /XRAY_UNAVAILABLE/);
+  for (const event of ['error', 'exit', 'close']) assert.equal(child.listenerCount(event), 0);
+});
+test('Xray readiness rejects exited processes and exit during connection polling', { timeout: 3000 }, async t => {
+  const listener = net.createServer(socket => socket.destroy());
+  listener.listen(0, '127.0.0.1'); await once(listener, 'listening');
+  t.after(() => listener.close());
+  for (const event of ['exit', 'close', 'error']) {
+    const child = new EventEmitter();
+    child.exitCode = null; child.signalCode = null;
+    const pending = waitForXrayReady(child, listener.address().port, new AbortController().signal);
+    child.emit(event, event === 'error' ? new Error('fixture failure') : 0);
+    await assert.rejects(pending, /XRAY_UNAVAILABLE/);
+    for (const name of ['error', 'exit', 'close']) assert.equal(child.listenerCount(name), 0);
+  }
+  const exited = new EventEmitter(); exited.exitCode = 0;
+  await assert.rejects(waitForXrayReady(exited, listener.address().port, new AbortController().signal), /XRAY_UNAVAILABLE/);
 });
 test('probe authentication, identity and exact-target HTTP contract without external IO', async t => {
   let calls = 0;

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
 
 // This is a separate authenticated v2 worker, never a replacement for the legacy GFW function.
 export const CF_RANGES = ['173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22',
@@ -60,19 +61,34 @@ async function freePort() {
   return port;
 }
 
-async function ready(port, signal) {
-  const deadline = Date.now() + 3000;
-  while (!signal.aborted && Date.now() < deadline) {
-    const open = await new Promise(resolve => {
-      const socket = net.connect({ host: '127.0.0.1', port });
-      socket.setTimeout(100);
-      const done = ok => { socket.destroy(); resolve(ok); };
-      socket.once('connect', () => done(true)); socket.once('error', () => done(false)); socket.once('timeout', () => done(false));
-    });
-    if (open) return;
-    await new Promise(resolve => setTimeout(resolve, 50));
+export async function waitForXrayReady(child, port, outerSignal) {
+  const stopped = new AbortController();
+  const unavailable = () => stopped.abort(new Error('XRAY_UNAVAILABLE'));
+  child.once('error', unavailable); child.once('exit', unavailable); child.once('close', unavailable);
+  if (child.exitCode != null || child.signalCode != null) unavailable();
+  const signal = AbortSignal.any([outerSignal, stopped.signal]);
+  try {
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      signal.throwIfAborted();
+      const open = await new Promise(resolve => {
+        const socket = net.connect({ host: '127.0.0.1', port });
+        socket.setTimeout(100);
+        const done = ok => { socket.destroy(); resolve(ok); };
+        socket.once('connect', () => done(true)); socket.once('error', () => done(false)); socket.once('timeout', () => done(false));
+      });
+      // A recycled port must not make a failed child look ready.
+      signal.throwIfAborted();
+      if (open) return;
+      await delay(50, undefined, { signal });
+    }
+    throw new Error('XRAY_UNAVAILABLE');
+  } catch (error) {
+    if (stopped.signal.aborted) throw stopped.signal.reason;
+    throw error;
+  } finally {
+    child.removeListener('error', unavailable); child.removeListener('exit', unavailable); child.removeListener('close', unavailable);
   }
-  throw new Error('XRAY_UNAVAILABLE');
 }
 
 export function parseCurlMeasurement({ code, tail, bytes, download, exceeded = false }) {
@@ -147,25 +163,28 @@ export async function probeOne(body, ip, outerSignal) {
   const dir = await mkdtemp(join(tmpdir(), 'np-cf-probe-'));
   let child;
   let closed = false;
+  let runtimeFailed = false;
   try {
     const port = await freePort();
     const config = join(dir, 'config.json');
     await writeFile(config, JSON.stringify(xrayConfig(body, ip, port)), { mode: 0o600 });
     child = spawn(process.env.XRAY_BINARY || 'xray', ['run', '-c', config], { stdio: 'ignore' });
-    child.on('error', () => undefined);
+    child.on('error', () => { runtimeFailed = true; });
+    child.once('exit', () => { runtimeFailed = true; });
     child.once('close', () => { closed = true; });
-    await ready(port, signal);
+    await waitForXrayReady(child, port, signal);
     const test = await requestViaProxy(port, false, signal);
     const result = { ip, ok: true, latency: test.durationMs };
     if (body.downloadIps.includes(ip)) {
       try { Object.assign(result, await requestViaProxy(port, true, signal)); }
       catch { /* A failed throughput sample must not erase a successful connectivity test. */ }
     }
+    if (runtimeFailed || closed) throw new Error('XRAY_UNAVAILABLE');
     return result;
   } catch (error) {
     return { ip, ok: false, latency: -1,
       ...(error.failure && { failure: error.failure }),
-      ...((['XRAY_UNAVAILABLE', 'PROBE_RUNTIME_UNAVAILABLE'].includes(error.message) || error.code === 'ENOENT') && { error: 'PROBE_RUNTIME_UNAVAILABLE' }) };
+      ...((runtimeFailed || closed || ['XRAY_UNAVAILABLE', 'PROBE_RUNTIME_UNAVAILABLE'].includes(error.message) || error.code === 'ENOENT') && { error: 'PROBE_RUNTIME_UNAVAILABLE' }) };
   }
   finally {
     if (child?.pid && !closed) {
