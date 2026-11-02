@@ -8,7 +8,9 @@ import { spawnSync, spawn } from 'node:child_process';
 import net from 'node:net';
 import http from 'node:http';
 import { once } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import { xrayConfig } from '../cf-probe/server.mjs';
+import { waitForMihomoReady } from './mihomo-readiness.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const require = createRequire(join(root, 'apps/server/package.json'));
@@ -59,6 +61,8 @@ test(`isolated XHTTP ${alpn}/${mode} with Xray worker and Mihomo, including cert
   const credentials = { uuid: '00000000-0000-4000-8000-000000000001', path: '/pilot', xhttpMode: mode, xhttpAlpn: alpn };
   const dir = mkdtempSync(join(tmpdir(), 'np-xhttp-native-'));
   const children = []; let received = 0; let logs = '';
+  const nonce = randomUUID();
+  const readiness = http.createServer((_req, res) => res.end(nonce));
   const target = http.createServer((req, res) => {
     let bytes = 0; req.on('data', chunk => { bytes += chunk.length; });
     req.on('end', () => { received++; res.end(`fixture:${bytes}`); });
@@ -74,6 +78,9 @@ test(`isolated XHTTP ${alpn}/${mode} with Xray worker and Mihomo, including cert
     checked('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=cdn.example.com',
       '-addext', 'subjectAltName=DNS:cdn.example.com', '-addext', 'basicConstraints=critical,CA:TRUE', '-keyout', key, '-out', crt]);
     target.listen(0, '127.0.0.1'); await once(target, 'listening');
+    readiness.listen(0, '127.0.0.1'); await once(readiness, 'listening');
+    const readinessPort = readiness.address().port;
+    assert.notEqual(readinessPort, target.address().port);
     const targetUrl = `http://127.0.0.1:${target.address().port}/fixture`;
     const listenPort = await port();
     const node = { id: 'fixture', name: 'fixture', protocol: 'VLESS', implementation: 'XRAY', transport: 'XHTTP', tls: 'TLS',
@@ -128,11 +135,16 @@ test(`isolated XHTTP ${alpn}/${mode} with Xray worker and Mihomo, including cert
       const proxyPort = await port();
       const exported = { ...candidate, host: '127.0.0.1', port: listenPort, domain: wrongName ? 'wrong.example.com' : node.domain };
       // This is the spelling accepted by the pinned Mihomo 1.19.29 native core.
-      const yaml = `mixed-port: ${proxyPort}\nbind-address: 127.0.0.1\nallow-lan: false\nmode: rule\ntls:\n  custom-certifactes:\n    - ${JSON.stringify(cert)}\nproxies:\n${buildClashProxy(exported)}\nrules:\n  - ${JSON.stringify(`MATCH,${exported.name}`)}\n`;
+      // Mihomo opens listeners before tunnel.OnRunning. A separate loopback-only
+      // sink checks forwarding readiness without retrying the TLS test payload.
+      const readinessRule = `AND,((IP-CIDR,127.0.0.1/32),(DST-PORT,${readinessPort})),DIRECT`;
+      const yaml = `mixed-port: ${proxyPort}\nbind-address: 127.0.0.1\nallow-lan: false\nmode: rule\ntls:\n  custom-certifactes:\n    - ${JSON.stringify(cert)}\nproxies:\n${buildClashProxy(exported)}\nrules:\n  - ${JSON.stringify(readinessRule)}\n  - ${JSON.stringify(`MATCH,${exported.name}`)}\n`;
       const configFile = join(dir, `mihomo-${wrongName}.yaml`); writeFileSync(configFile, yaml);
       checked(mihomo, ['-t', '-d', dir, '-f', configFile]);
       const before = received;
-      await ready(proxyPort, start(mihomo, ['-d', dir, '-f', configFile]));
+      const process = start(mihomo, ['-d', dir, '-f', configFile]);
+      try { await waitForMihomoReady(process, proxyPort, readinessPort, nonce); }
+      catch (error) { throw new Error(`${error.message}\n${logs}`); }
       const result = await request(proxyPort, targetUrl, upload);
       if (wrongName) { assert.notEqual(result.code, 0); assert.equal(received, before, 'invalid TLS must not reach target'); }
       else { assert.equal(result.code, 0, result.error + logs); assert.equal(result.out, `fixture:${upload.length}`); }
@@ -143,6 +155,7 @@ test(`isolated XHTTP ${alpn}/${mode} with Xray worker and Mihomo, including cert
       const closed = once(child, 'close'); child.kill('SIGKILL'); await closed;
     }
     target.closeAllConnections(); await new Promise(resolve => target.close(resolve));
+    readiness.closeAllConnections(); await new Promise(resolve => readiness.close(resolve));
     rmSync(dir, { recursive: true, force: true });
   }
 });
