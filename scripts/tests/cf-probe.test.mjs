@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { once } from 'node:events';
-import { createProbeServer, validateBatch, xrayConfig, isCfIp, probeOne, parseCurlMeasurement } from '../cf-probe/server.mjs';
+import { once, EventEmitter } from 'node:events';
+import net from 'node:net';
+import { spawn } from 'node:child_process';
+import { createProbeServer, validateBatch, xrayConfig, isCfIp, probeOne, parseCurlMeasurement, waitForXrayReady } from '../cf-probe/server.mjs';
 
 test('parses portable curl trailers without counting metadata as payload', () => {
   const trailer = '\nNP_CF_META:204 1.250000\n';
@@ -48,6 +50,29 @@ test('missing Xray process cleans up and terminates within the bounded startup d
     const result = await probeOne(batch, batch.ips[0], new AbortController().signal);
     assert.equal(result.error, 'PROBE_RUNTIME_UNAVAILABLE');
   } finally { if (old === undefined) delete process.env.XRAY_BINARY; else process.env.XRAY_BINARY = old; }
+});
+test('a recycled listening port cannot mask a missing Xray executable', { timeout: 3000 }, async t => {
+  const listener = net.createServer(socket => socket.destroy());
+  listener.listen(0, '127.0.0.1'); await once(listener, 'listening');
+  t.after(() => listener.close());
+  const child = spawn('/nonexistent/nextpanel-fixture-xray', [], { stdio: 'ignore' });
+  await assert.rejects(waitForXrayReady(child, listener.address().port, new AbortController().signal), /XRAY_UNAVAILABLE/);
+  for (const event of ['error', 'exit', 'close']) assert.equal(child.listenerCount(event), 0);
+});
+test('Xray readiness rejects exited processes and exit during connection polling', { timeout: 3000 }, async t => {
+  const listener = net.createServer(socket => socket.destroy());
+  listener.listen(0, '127.0.0.1'); await once(listener, 'listening');
+  t.after(() => listener.close());
+  for (const event of ['exit', 'close', 'error']) {
+    const child = new EventEmitter();
+    child.exitCode = null; child.signalCode = null;
+    const pending = waitForXrayReady(child, listener.address().port, new AbortController().signal);
+    child.emit(event, event === 'error' ? new Error('fixture failure') : 0);
+    await assert.rejects(pending, /XRAY_UNAVAILABLE/);
+    for (const name of ['error', 'exit', 'close']) assert.equal(child.listenerCount(name), 0);
+  }
+  const exited = new EventEmitter(); exited.exitCode = 0;
+  await assert.rejects(waitForXrayReady(exited, listener.address().port, new AbortController().signal), /XRAY_UNAVAILABLE/);
 });
 test('probe authentication, identity and exact-target HTTP contract without external IO', async t => {
   let calls = 0;
@@ -108,13 +133,31 @@ test('dual probe contract preserves v2 WS and echoes v3 transport identity', asy
   const url = `http://127.0.0.1:${server.address().port}`;
   const headers = { Authorization: `Bearer ${'f'.repeat(32)}`, 'Content-Type': 'application/json' };
   const caps = await (await fetch(url + '/capabilities', { headers })).json();
-  assert.equal(caps.protocol, 2); assert.deepEqual(caps.protocols, [2, 3]);
+  assert.equal(caps.protocol, 2); assert.deepEqual(caps.protocols, [2, 3, 4]);
   assert.ok(caps.features.includes('vless-xhttp-tls-packet-up-h2'));
-  for (const body of [batch, { ...batch, protocol: 3, transport: 'XHTTP', mode: 'packet-up' }]) {
+  for (const body of [batch, { ...batch, protocol: 3, transport: 'XHTTP', mode: 'packet-up' },
+    { ...batch, protocol: 4, transport: 'XHTTP', mode: 'stream-up', alpn: 'h2' },
+    { ...batch, protocol: 4, transport: 'XHTTP', mode: 'packet-up', alpn: 'h3' }]) {
     const response = await fetch(url + '/probe', { method: 'POST', headers, body: JSON.stringify(body) });
     assert.equal(response.status, 200);
     const result = await response.json();
     assert.equal(result.protocol, body.protocol ?? 2); assert.equal(result.transport, body.transport);
     assert.equal(result.mode, body.mode); assert.equal(result.regionKey, 'ap-guangzhou');
+    assert.equal(result.alpn, body.alpn);
   }
+});
+
+test('v4 profiles require exact ALPN/mode and preserve TLS verification and CDN restrictions', () => {
+  for (const [alpn, mode] of [['h2', 'stream-up'], ['h3', 'packet-up']]) {
+    const request = { ...batch, protocol: 4, transport: 'XHTTP', mode, alpn, path: '/pilot' };
+    validateBatch(request);
+    const outbound = xrayConfig(request, request.ips[0], 1080).outbounds[0];
+    assert.deepEqual(outbound.streamSettings.tlsSettings, { serverName: batch.domain, allowInsecure: false, alpn: [alpn] });
+    assert.equal(outbound.streamSettings.xhttpSettings.mode, mode);
+    for (const override of [{ protocol: 3 }, { alpn: ['h3'] }, { alpn: 'http/1.1' }, { mode: 'auto' },
+      { mode: 'stream-one' }, { ips: ['192.0.2.1'] }, { downloadSettings: { address: '192.0.2.1' } }]) {
+      assert.throws(() => validateBatch({ ...request, ...override }), /INVALID_BATCH/);
+    }
+  }
+  assert.throws(() => validateBatch({ ...batch, protocol: 4, transport: 'XHTTP', mode: 'stream-up', alpn: 'h3' }), /INVALID_BATCH/);
 });

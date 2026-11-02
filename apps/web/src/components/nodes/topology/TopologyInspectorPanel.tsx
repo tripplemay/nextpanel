@@ -124,6 +124,9 @@ function NodeRow({
             onClick={() => nodeActions.openEgressPolicy(node)}
           />
         </Tooltip>
+        {node.protocol === 'VLESS' && node.transport === 'XHTTP' && node.tls === 'TLS' && (
+          <Button size="small" onClick={() => nodeActions.openXhttpProfile(node)}>XHTTP 传输设置</Button>
+        )}
         <Button size="small" icon={<EditOutlined />} onClick={() => nodeActions.openRename(node)} />
         <Button size="small" danger icon={<DeleteOutlined />} onClick={() => nodeActions.confirmDelete(node)} />
       </div>

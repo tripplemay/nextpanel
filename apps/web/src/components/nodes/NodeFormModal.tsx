@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import {
   App,
+  Alert,
   Modal,
   Form,
   Input,
@@ -62,6 +63,8 @@ export default function NodeFormModal({ open, initialValues, onClose, onSuccess 
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const isEdit = !!initialValues?.id;
+  const isCfXhttpEdit = isEdit && initialValues?.protocol === 'VLESS'
+    && initialValues?.transport === 'XHTTP' && initialValues?.tls === 'TLS';
 
   // Watched values for conditional rendering — no setFieldValue calls depend on these
   const protocol  = Form.useWatch('protocol',  form) as string | undefined;
@@ -101,7 +104,7 @@ export default function NodeFormModal({ open, initialValues, onClose, onSuccess 
 
   const usedPorts = new Set(serverNodes?.map((n) => n.listenPort) ?? []);
 
-  const { data: credentials } = useQuery({
+  const { data: credentials, isFetching: credentialsLoading, isError: credentialsError } = useQuery({
     queryKey: ['node-credentials', initialValues?.id],
     queryFn: () => nodesApi.credentials(initialValues!.id as string).then((r) => r.data),
     enabled: open && isEdit && !!initialValues?.id,
@@ -128,6 +131,7 @@ export default function NodeFormModal({ open, initialValues, onClose, onSuccess 
       password: credentials.password,
       method:   credentials.method,
       username: credentials.username,
+      xhttpMode: credentials.xhttpMode ?? 'packet-up',
     });
   }, [credentials, open, form]);
 
@@ -166,6 +170,13 @@ export default function NodeFormModal({ open, initialValues, onClose, onSuccess 
 
   const mutation = useMutation({
     mutationFn: (values: Record<string, unknown>) => {
+      if (isCfXhttpEdit) {
+        return nodesApi.update(initialValues!.id as string, {
+          name: String(values.name), enabled: Boolean(values.enabled),
+          ...(values.xhttpMode !== (credentials?.xhttpMode ?? 'packet-up')
+            ? { xhttpMode: values.xhttpMode as 'packet-up' | 'stream-up' } : {}),
+        });
+      }
       const { uuid, password, method, username, ...rest } = values;
       const creds: Record<string, string> = {};
       if (uuid)     creds.uuid     = String(uuid);
@@ -265,6 +276,31 @@ export default function NodeFormModal({ open, initialValues, onClose, onSuccess 
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
+
+  if (isCfXhttpEdit) {
+    const h3 = credentials?.xhttpAlpn === 'h3';
+    return (
+      <Modal open={open} title="编辑 CDN XHTTP 节点" onCancel={onClose} onOk={() => form.submit()}
+        confirmLoading={mutation.isPending} okButtonProps={{ disabled: !credentials || credentialsLoading || credentialsError }} width={580}>
+        <Form form={form} layout="vertical" onFinish={(values) => mutation.mutate(values)}>
+          <Alert type={credentialsError ? 'error' : 'info'} showIcon style={{ marginBottom: 16 }}
+            message={credentialsError ? '无法读取当前模式，请重新打开后重试' : `${h3 ? 'HTTP/3' : 'HTTP/2'} · CDN 接入`}
+            description="仅修改名称、启用状态和支持的上传模式；域名、UUID、路径及端口保持不变，不回退源站直连。" />
+          <Form.Item name="name" label="节点名称" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="enabled" label="启用" valuePropName="checked"><Switch /></Form.Item>
+          <Form.Item name="xhttpMode" label="XHTTP 上传模式" rules={[{ required: true }]}>
+            <Select disabled={h3 || credentialsLoading || credentialsError} options={[
+              { value: 'packet-up', label: 'packet-up · 兼容默认' },
+              ...(!h3 ? [{ value: 'stream-up', label: 'stream-up · 持续流式上传' }] : []),
+            ]} />
+          </Form.Item>
+          <Alert type="warning" showIcon message="保存会重新部署此节点，可能短暂重连"
+            description={h3 ? 'H3 预设固定使用 packet-up；需要 H2 时保留或新建独立 H2 节点。'
+              : '切换模式后必须更新客户端订阅；stream-up 需开启 CF gRPC。部署失败按现有事务机制回滚；要恢复旧模式，请改回 packet-up 并再次更新订阅。'} />
+        </Form>
+      </Modal>
+    );
+  }
 
   return (
     <Modal

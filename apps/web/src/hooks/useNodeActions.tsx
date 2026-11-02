@@ -10,6 +10,7 @@ import { useDeployStream } from '@/hooks/useDeployStream';
 import DeployDrawer from '@/components/nodes/DeployDrawer';
 import NodeShareModal from '@/components/nodes/NodeShareModal';
 import DeployLogModal from '@/components/nodes/DeployLogModal';
+import NodeFormModal from '@/components/nodes/NodeFormModal';
 import type { ConnectivityResult, Node } from '@/types/api';
 
 interface UseNodeActionsOptions {
@@ -30,6 +31,7 @@ export interface UseNodeActionsResult {
   confirmDelete: (node: Node) => void;
   openRename: (node: Node) => void;
   openEgressPolicy: (node: Node) => void;
+  openXhttpProfile: (node: Node) => void;
   openShare: (node: Node) => void;
   openLogs: (node: Node) => void;
   modals: React.ReactNode;
@@ -53,6 +55,7 @@ export function useNodeActions({ nodes }: UseNodeActionsOptions): UseNodeActions
   const [renameNode, setRenameNode] = useState<Node | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [egressPolicyNode, setEgressPolicyNode] = useState<Node | null>(null);
+  const [xhttpNode, setXhttpNode] = useState<Node | null>(null);
   const [egressIpPolicy, setEgressIpPolicy] = useState<'AUTO' | 'IPV4_ONLY'>('AUTO');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [deployingNode, setDeployingNode] = useState<Node | null>(null);
@@ -275,6 +278,12 @@ export function useNodeActions({ nodes }: UseNodeActionsOptions): UseNodeActions
 
   const modals = (
     <>
+      <NodeFormModal open={!!xhttpNode} initialValues={xhttpNode as unknown as Record<string, unknown> | null}
+        onClose={() => setXhttpNode(null)} onSuccess={() => {
+          void qc.invalidateQueries({ queryKey: ['nodes'] });
+          void qc.invalidateQueries({ queryKey: ['node-credentials', xhttpNode?.id] });
+          setXhttpNode(null);
+        }} />
       <Modal
         open={!!renameNode}
         destroyOnHidden
@@ -357,6 +366,9 @@ export function useNodeActions({ nodes }: UseNodeActionsOptions): UseNodeActions
     confirmDelete,
     openRename,
     openEgressPolicy,
+    openXhttpProfile: (node) => {
+      if (node.protocol === 'VLESS' && node.transport === 'XHTTP' && node.tls === 'TLS') setXhttpNode(node);
+    },
     openShare: setShareNode,
     openLogs: setLogNode,
     modals,

@@ -11,6 +11,7 @@
 
 import { REALITY_DEFAULT_SNI, REALITY_FLOW } from '../protocols/reality';
 import { parseXhttpExtra, parseXhttpHost, parseXhttpMode } from '../protocols/xhttp';
+import { cfXhttpProfile } from '../protocols/cf-xhttp';
 
 export interface NodeTestInfo {
   protocol: string;      // VMESS | VLESS | TROJAN | SHADOWSOCKS | SOCKS5 | HTTP
@@ -173,7 +174,7 @@ function clientStreamSettings(node: NodeTestInfo): unknown {
     base.security = 'tls';
     base.tlsSettings = {
       serverName: domain ?? '',
-      ...(network === 'xhttp' && node.secureProbe ? { alpn: ['h2'], allowInsecure: false } : {}),
+      ...(network === 'xhttp' && node.secureProbe ? { alpn: [cfXhttpProfile(c).alpn], allowInsecure: false } : {}),
     };
   } else if (tls === 'REALITY') {
     base.security = 'reality';

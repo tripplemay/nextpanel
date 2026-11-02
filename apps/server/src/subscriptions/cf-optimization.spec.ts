@@ -451,6 +451,39 @@ describe('probe to publication pipeline', () => {
       expect(JSON.stringify(body)).not.toContain(node.server.ip);
     }
   });
+  it.each([
+    ['h2', 'stream-up', 'ok'], ['h3', 'packet-up', 'ok'],
+    ['h2', 'stream-up', 'old-worker'], ['h3', 'packet-up', 'old-worker'],
+    ['h2', 'stream-up', 'wrong-mode'], ['h3', 'packet-up', 'wrong-alpn'],
+  ])('requires exact v4 profile evidence for %s/%s (%s)', async (alpn, mode, scenario) => {
+    const creds = { ...exported.credentials, xhttpAlpn: alpn, xhttpMode: mode };
+    const pilot = { ...node, transport: 'XHTTP', credentialsEnc: JSON.stringify(creds) };
+    db.node.findUnique.mockResolvedValue(pilot);
+    service = new CfOptimizationService(db, { getCredentials: jest.fn().mockResolvedValue(creds) } as any,
+      { defaultIp: jest.fn().mockResolvedValue('104.16.0.1') } as any);
+    remote.mockImplementation(async (_url, options) => {
+      if (!options?.body) return new Response(JSON.stringify({ protocol: 2, protocols: scenario === 'old-worker' ? [2, 3] : [2, 3, 4],
+        probeId: probe.id, features: scenario === 'old-worker' ? ['vless-xhttp-tls-packet-up-h2'] : [`vless-xhttp-tls-${mode}-${alpn}`] }));
+      const body = JSON.parse(String(options.body)); requests.push(body);
+      return new Response(JSON.stringify({ protocol: 4, transport: 'XHTTP',
+        mode: scenario === 'wrong-mode' ? 'packet-up' : mode, alpn: scenario === 'wrong-alpn' ? 'h2' : alpn,
+        probeId: probe.id, results: body.ips.map((ip: string) => ({ ip, ok: true, latency: 100 })) }));
+    });
+    await service.measure(pilot as any, probe);
+    if (scenario === 'old-worker') {
+      expect(requests).toHaveLength(0);
+      expect(row.error).toBe('PROBE_IDENTITY_OR_CAPABILITY_MISMATCH');
+    } else {
+      expect(requests[0]).toMatchObject({ protocol: 4, transport: 'XHTTP', alpn, mode });
+      expect(row.error).toBe(scenario === 'ok' ? null : 'INVALID_PROBE_RESULT');
+      if (scenario === 'ok') {
+        clock.mockReturnValue(now + 300_000);
+        await service.measure(pilot as any, probe);
+        expect(row.published.length).toBeGreaterThan(0);
+      } else expect(row.published).toEqual([]);
+    }
+    expect(nodeFingerprint(pilot)).not.toBe(nodeFingerprint({ ...pilot, credentialsEnc: JSON.stringify(exported.credentials) }));
+  });
   it('retains the last good pool and backs off when a worker is unavailable', async () => {
     await rounds();
     const before = JSON.stringify(row.published); const checked = row.checkedAt;

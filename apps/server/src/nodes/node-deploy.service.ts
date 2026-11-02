@@ -10,7 +10,7 @@ import { OperationLogService } from '../operation-log/operation-log.service';
 import { CertService, type RemoteCertUpdate } from '../common/cert/cert.service';
 import { CloudflareService } from '../cloudflare/cloudflare.service';
 import { CloudflareSettingsService } from '../cloudflare/cloudflare-settings.service';
-import { isCfXhttp } from './protocols/cf-xhttp';
+import { cfXhttpProfile, isCfXhttp } from './protocols/cf-xhttp';
 import { ensureCfXhttpCore, ensureRealityCore } from './protocols/cf-xhttp-core';
 import { withPostgresAdvisoryLocks } from '../common/database/advisory-lock';
 import { generateConfig, generateChainExitConfig, getBinaryCommand, NodeInfo } from './config/config-generator';
@@ -148,6 +148,17 @@ export class NodeDeployService {
       onLog?.(line);
     };
 
+    const credentials = JSON.parse(this.crypto.decrypt(node.credentialsEnc)) as Record<string, string>;
+    if (isCfXhttp(node) && cfXhttpProfile(credentials).protocol !== 3) {
+      try {
+        if (!this.cfOrigin) throw new Error('Cloudflare XHTTP preflight unavailable');
+        await this.cfOrigin.checkXhttpEdge(node.userId, credentials, node.cfOriginRoute);
+      } catch (err) {
+        log(`XHTTP edge preflight failed: ${err instanceof Error ? err.message : String(err)}`);
+        return { success: false, log: logs.join('\n') };
+      }
+    }
+
     let mappedOrigin: OriginRoute | null = null;
     if (node.publicPort != null) {
       try {
@@ -167,11 +178,6 @@ export class NodeDeployService {
         return { success: false, log: logs.join('\n') };
       }
     }
-
-    // ── 1. Decrypt credentials ───────────────────────────────────────────────
-    const credentials = JSON.parse(
-      this.crypto.decrypt(node.credentialsEnc),
-    ) as Record<string, string>;
 
     // ── 2. Generate config JSON ──────────────────────────────────────────────
     const impl = (node.implementation ?? 'XRAY').toUpperCase();
@@ -509,6 +515,11 @@ export class NodeDeployService {
         log(`CDN origin mapping acceptance: ${connectivity.message}`);
         isActive = connectivity.reachable;
         if (isActive) await this.cfOrigin!.ready(node.id);
+      }
+      if (isActive && !mappedOrigin && isCfXhttp(node) && cfXhttpProfile(credentials).protocol === 4) {
+        const connectivity = await this.xrayTest.testNode(node.id);
+        log(`CDN XHTTP profile acceptance: ${connectivity.message}`);
+        isActive = connectivity.reachable;
       }
       if (isActive) ownershipUpdate = await this.resources.registerDeployment(ssh, server, node.id, 'ENTRY', configJson);
 

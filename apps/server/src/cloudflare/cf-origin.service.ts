@@ -11,6 +11,7 @@ import { originRoute, type OriginRoute } from './cf-origin.util';
 import { verifyOriginFirewall } from './cf-origin-firewall';
 import { ensureOriginNftables, preflightOriginHost } from './cf-origin-dependencies';
 import { ensureCfXhttpCore, preflightCfXhttpCore } from '../nodes/protocols/cf-xhttp-core';
+import { cfXhttpProfile } from '../nodes/protocols/cf-xhttp';
 
 export const ORIGIN_AUDIT_BATCH = Prisma.sql`
   SELECT id FROM "Node"
@@ -30,6 +31,15 @@ export class CfOriginService {
     const cf = await this.settings.getDecryptedToken(ownerId);
     if (!cf) throw new Error('Cloudflare credentials unavailable');
     return new CfOriginApi(cf.apiToken, zoneId);
+  }
+
+  async checkXhttpEdge(ownerId: string, credentials: Record<string, string>, route?: unknown) {
+    const profile = cfXhttpProfile(credentials);
+    if (profile.protocol === 3) return;
+    const cf = await this.settings.getDecryptedToken(ownerId);
+    if (!cf) throw new Error('Cloudflare credentials unavailable');
+    const zone = route ? originRoute(route).zoneId : cf.zoneId;
+    await new CfOriginApi(cf.apiToken, zone).requireXhttpSetting(profile.alpn === 'h3' ? 'http3' : 'grpc');
   }
 
   async preflight(ownerId: string, serverId: string, mapped: boolean) {

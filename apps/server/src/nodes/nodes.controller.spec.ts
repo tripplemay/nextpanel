@@ -35,7 +35,7 @@ describe('NodesController SSE ownership checks', () => {
     expect(presets.find((preset) => preset.value === 'ANYTLS')).toMatchObject({ accessMode: 'DIRECT' });
     expect(presets.find((preset) => preset.value === 'TUIC_V5')).toMatchObject({ accessMode: 'DIRECT' });
     expect(presets.filter((preset) => preset.accessMode === 'CDN').map((preset) => preset.value))
-      .toEqual(['VLESS_XHTTP_TLS', 'VLESS_WS_TLS']);
+      .toEqual(['VLESS_XHTTP_TLS', 'VLESS_XHTTP_H3_TLS', 'VLESS_WS_TLS']);
   });
 
   it('checks ownership before opening a deploy stream', async () => {

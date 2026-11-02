@@ -6,6 +6,7 @@ describe('Protocol preset ingress descriptions', () => {
     ['VLESS_XHTTP_REALITY', 'DIRECT'],
     ['VLESS_WS_TLS', 'CDN'],
     ['VLESS_XHTTP_TLS', 'CDN'],
+    ['VLESS_XHTTP_H3_TLS', 'CDN'],
     ['VLESS_TCP_TLS', 'DIRECT'],
     ['HYSTERIA2', 'DIRECT'],
     ['TUIC_V5', 'DIRECT'],

@@ -5,7 +5,7 @@ import { Alert, App, Collapse, Modal, Form, Input, Select, Tag, Space, Radio, Se
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { nodesApi, serversApi } from '@/lib/api';
 import StatusTag from '@/components/common/StatusTag';
-import type { CreateChainNodeDto, Node } from '@/types/api';
+import type { CreateChainNodeDto, CreateNodeFromPresetDto, Node } from '@/types/api';
 import type { AxiosError } from 'axios';
 
 const { Option } = Select;
@@ -50,6 +50,8 @@ export default function NodePresetModal({
   const queryClient = useQueryClient();
   const [form] = Form.useForm();
   const selectedPreset = Form.useWatch('preset', form);
+  const xhttpMode = Form.useWatch('xhttpMode', form);
+  const isXhttpCdn = ['VLESS_XHTTP_TLS', 'VLESS_XHTTP_H3_TLS'].includes(selectedPreset);
   const [deployMode, setDeployMode] = useState<DeployMode>('direct');
   const [chainExitType, setChainExitType] = useState<ChainExitType>('MANAGED_SERVER');
   const [serverId, setServerId] = useState<string | undefined>(undefined);
@@ -130,7 +132,7 @@ export default function NodePresetModal({
   }, [open, form, defaultDeployMode, defaultServerId, defaultEntryServerId, defaultExitServerId]);
 
   const directMutation = useMutation({
-    mutationFn: (values: { serverId: string; preset: string; name: string }) =>
+    mutationFn: (values: CreateNodeFromPresetDto) =>
       nodesApi.createFromPreset(values),
     onSuccess: (res) => {
       onSuccess(res.data);
@@ -163,6 +165,8 @@ export default function NodePresetModal({
   }, [directMutation.isError, chainMutation.isError, queryClient]);
 
   function handleFinish(values: Record<string, unknown>) {
+    const mode = values.preset === 'VLESS_XHTTP_TLS'
+      ? { xhttpMode: (values.xhttpMode ?? 'packet-up') as 'packet-up' | 'stream-up' } : {};
     if (deployMode === 'chain') {
       const { entryServerId, exitServerId, socksUri, preset, name } = values as {
         entryServerId: string; exitServerId?: string; socksUri?: string; preset: string; name: string;
@@ -176,10 +180,11 @@ export default function NodePresetModal({
         exitType: chainExitType,
         preset,
         name,
+        ...mode,
         ...(chainExitType === 'MANAGED_SERVER' ? { exitServerId } : { socksUri }),
       });
     } else {
-      directMutation.mutate(values as { serverId: string; preset: string; name: string });
+      directMutation.mutate({ serverId: String(values.serverId), preset: String(values.preset), name: String(values.name), ...mode });
     }
   }
 
@@ -306,7 +311,7 @@ export default function NodePresetModal({
                 description={
                   <Space orientation="vertical" size={8} style={{ width: '100%' }}>
                     <div>{trafficPath}</div>
-                    {selectedPreset !== 'VLESS_XHTTP_TLS' && <div>{preset?.description}</div>}
+                    <div>{preset?.description}</div>
                     {accessMode === 'CDN' ? (
                       <>
                         <div>待部署验证：DNS 代理、证书与回源配置完成后才生效；选择预设不代表已受保护。</div>
@@ -326,12 +331,28 @@ export default function NodePresetModal({
         )}
 
         {selectedPreset === 'VLESS_XHTTP_TLS' && (
+          <Form.Item name="xhttpMode" label="XHTTP 上传模式" initialValue="packet-up" preserve={false}
+            extra="HTTP/2；不修改已有节点。stream-up 需先在 Cloudflare 开启 gRPC，面板只读检查，不自动修改区域设置。">
+            <Select options={[
+              { value: 'packet-up', label: 'packet-up · 兼容默认' },
+              { value: 'stream-up', label: 'stream-up · 持续流式上传' },
+            ]} />
+          </Form.Item>
+        )}
+        {isXhttpCdn && (selectedPreset === 'VLESS_XHTTP_H3_TLS' || xhttpMode === 'stream-up') && (
+          <Alert type="warning" showIcon style={{ marginBottom: 16 }}
+            message={selectedPreset === 'VLESS_XHTTP_H3_TLS' ? 'HTTP/3 · packet-up' : 'HTTP/2 · stream-up'}
+            description={selectedPreset === 'VLESS_XHTTP_H3_TLS'
+              ? '需开启 CF HTTP/3、客户端支持 XHTTP/H3 且网络允许 UDP/443。仅客户端到 CDN 使用 H3，回源仍为 TLS/H2，不开放源站 UDP。不自动降级；建议保留 H2 / WS 节点。'
+              : '需开启 CF gRPC，并允许对应路径通过 WAF。适合持续上传，但不保证比 packet-up 更快；应先对照拨测。'} />
+        )}
+        {isXhttpCdn && (
           <Collapse size="small" style={{ marginBottom: 16 }} items={[{
             key: 'xhttp-requirements',
             label: 'XHTTP 部署与客户端要求 · 不替换网站或 WS',
             children: <Alert type="warning" showIcon
               message="独立 CDN 试点，不替换 WS"
-              description="自动检测端口；443 被网站或 WS 占用时，保留原服务，使用空闲回源端口，客户端仍连接 Cloudflare 443。映射回源需有效 CF 域名、Origin Rules 权限、Full (strict) TLS 及 nftables；不自动修改网站或全局安全设置。OpenClash 使用 XHTTP 试点链接，Shadowrocket 在实测确认前继续使用原 WS 链接。" />,
+              description="自动检测端口；443 被网站或 WS 占用时，保留原服务，使用空闲回源端口，客户端仍连接 Cloudflare 443。映射回源需有效 CF 域名、Origin Rules 权限、Full (strict) TLS 及 nftables；新模式预检还需 Zone Settings Read 权限。使用新版 Mihomo / OpenClash 或支持该模式的 Shadowrocket，订阅启用 XHTTP 导出；不支持 XHTTP 的客户端继续使用 WS。两地探针也需发布支持对应模式的版本后才能产生优选结果。" />,
           }]} />
         )}
 

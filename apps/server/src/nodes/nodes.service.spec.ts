@@ -50,7 +50,7 @@ const mockCfSettings = {
 } as unknown as CloudflareSettingsService;
 
 const mockResources = { unavailablePorts: jest.fn().mockResolvedValue(new Set()) };
-const mockOrigin = { preflight: jest.fn().mockResolvedValue(undefined), prepare: jest.fn().mockResolvedValue({}), remove: jest.fn().mockResolvedValue(undefined) };
+const mockOrigin = { checkXhttpEdge: jest.fn().mockResolvedValue(undefined), preflight: jest.fn().mockResolvedValue(undefined), prepare: jest.fn().mockResolvedValue({}), remove: jest.fn().mockResolvedValue(undefined) };
 const svc = new NodesService(mockPrisma, mockCrypto, mockDeploy, mockCfService, mockCfSettings, mockResources as any, mockOrigin as any);
 
 const fakeNode = {
@@ -65,6 +65,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockOrigin.prepare.mockResolvedValue({});
   mockOrigin.preflight.mockResolvedValue(undefined);
+  mockOrigin.checkXhttpEdge.mockResolvedValue(undefined);
   mockResources.unavailablePorts.mockResolvedValue(new Set());
   (mockDeploy.deploy as jest.Mock).mockResolvedValue({ success: true, log: '' });
   (mockDeploy.undeploy as jest.Mock).mockResolvedValue(undefined);
@@ -99,6 +100,63 @@ describe('NodesService', () => {
       expect((mockPrisma.node.create as jest.Mock).mock.calls[0][0].data).toMatchObject({ transport: 'XHTTP', tls: 'TLS', listenPort: 443 });
       expect(mockCfService.createARecord).toHaveBeenCalledWith('fixture', 'zone', expect.any(String), '192.0.2.1', true);
       expect(mockDeploy.deploy).not.toHaveBeenCalled();
+    });
+    it.each(['VLESS_XHTTP_TLS', 'VLESS_XHTTP_H3_TLS'] as const)('prechecks the edge and persists the selected profile for %s', async preset => {
+      const xhttpMode = preset === 'VLESS_XHTTP_TLS' ? 'stream-up' : 'packet-up';
+      await svc.createFromPreset('owner', { serverId: 'srv-1', name: 'profile', preset, xhttpMode });
+      const data = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
+      const creds = JSON.parse(mockCrypto.decrypt(data.credentialsEnc));
+      expect(creds.xhttpMode).toBe(xhttpMode);
+      expect(creds.xhttpAlpn ?? 'h2').toBe(preset === 'VLESS_XHTTP_TLS' ? 'h2' : 'h3');
+      expect(mockOrigin.checkXhttpEdge).toHaveBeenCalledWith('owner', creds, undefined);
+      expect(mockCfService.createARecord).toHaveBeenCalledWith('fixture', 'zone', expect.any(String), '192.0.2.1', true);
+    });
+    it('does not create resources if the Cloudflare HTTP/3 setting is unavailable', async () => {
+      mockOrigin.checkXhttpEdge.mockRejectedValue(new Error('Cloudflare http3 must be enabled'));
+      await expect(svc.createFromPreset('owner', { serverId: 'srv-1', name: 'h3', preset: 'VLESS_XHTTP_H3_TLS' })).rejects.toThrow('http3');
+      expect(mockPrisma.node.create).not.toHaveBeenCalled();
+      expect(mockCfService.createARecord).not.toHaveBeenCalled();
+      expect(mockDeploy.deploy).not.toHaveBeenCalled();
+    });
+    it.each(['VLESS_XHTTP_TLS', 'VLESS_XHTTP_H3_TLS'] as const)('creates a managed chain with the selected %s profile', async preset => {
+      (mockPrisma.server.findFirst as jest.Mock).mockResolvedValue({ id: 'srv-1', sshAuthEnc: 'fixture' });
+      const xhttpMode = preset === 'VLESS_XHTTP_TLS' ? 'stream-up' : 'packet-up';
+      await svc.createChainNode('owner', { entryServerId: 'srv-1', exitServerId: 'srv-2', name: 'chain', preset, xhttpMode });
+      const data = (mockPrisma.node.create as jest.Mock).mock.calls[0][0].data;
+      expect(data).toMatchObject({ exitServerId: 'srv-2', transport: 'XHTTP', tls: 'TLS' });
+      expect(JSON.parse(mockCrypto.decrypt(data.credentialsEnc))).toMatchObject({ xhttpMode });
+      expect(mockOrigin.checkXhttpEdge).toHaveBeenCalled();
+      expect(mockCfService.createARecord).toHaveBeenCalledWith('fixture', 'zone', expect.any(String), '192.0.2.1', true);
+    });
+    it('rejects an H3 stream-up edit and leaves stored credentials untouched', async () => {
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue({ ...fakeNode, protocol: 'VLESS', transport: 'XHTTP', tls: 'TLS',
+        listenPort: 443, credentialsEnc: 'enc:{"xhttpMode":"packet-up","xhttpAlpn":"h3"}' });
+      await expect(svc.update(fakeNode.id, { xhttpMode: 'stream-up' }, 'owner')).rejects.toThrow('Supported CDN XHTTP profiles');
+      expect(mockPrisma.node.update).not.toHaveBeenCalled();
+      expect(mockDeploy.deploy).not.toHaveBeenCalled();
+    });
+    it.each(['VLESS_WS_TLS', 'VLESS_XHTTP_H3_TLS'] as const)('rejects stream-up on %s before writes', async preset => {
+      await expect(svc.createFromPreset('owner', { serverId: 'srv-1', name: 'invalid', preset, xhttpMode: 'stream-up' })).rejects.toThrow();
+      expect(mockPrisma.node.create).not.toHaveBeenCalled();
+    });
+    it.each([false, true])('transactionally switches existing H2 mode and preserves identity (deploy failure=%s)', async fail => {
+      const creds = { uuid: '00000000-0000-4000-8000-000000000001', path: '/fixture', xhttpMode: 'packet-up' };
+      const previous = { ...fakeNode, protocol: 'VLESS', transport: 'XHTTP', tls: 'TLS', listenPort: 443,
+        domain: 'cdn.example.com', cfDnsRecordId: 'dns', credentialsEnc: mockCrypto.encrypt(JSON.stringify(creds)) };
+      (mockPrisma.node.findFirst as jest.Mock).mockResolvedValue(previous);
+      (mockPrisma.node.update as jest.Mock).mockImplementation(async ({ data }) => ({ ...previous, ...data }));
+      (mockDeploy.deploy as jest.Mock).mockResolvedValue({ success: !fail, log: 'fixture deployment failed' });
+      const updating = svc.update(previous.id, { xhttpMode: 'stream-up' }, 'owner');
+      if (fail) await expect(updating).rejects.toThrow(); else await updating;
+      const data = (mockPrisma.node.update as jest.Mock).mock.calls[0][0].data;
+      expect(data).not.toHaveProperty('xhttpMode');
+      expect(JSON.parse(mockCrypto.decrypt(data.credentialsEnc))).toEqual({ ...creds, xhttpMode: 'stream-up' });
+      expect(mockOrigin.checkXhttpEdge).toHaveBeenCalled();
+      expect(mockDeploy.deploy).toHaveBeenCalledWith(previous.id, undefined, undefined, undefined,
+        expect.objectContaining({ forceRollback: true }));
+      if (fail) expect(mockPrisma.node.update).toHaveBeenLastCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ credentialsEnc: previous.credentialsEnc, domain: previous.domain, listenPort: 443 }),
+      }));
     });
     it('uses an isolated origin port when the website owns 443', async () => {
       mockResources.unavailablePorts.mockResolvedValue(new Set([443]));

@@ -17,7 +17,7 @@ presets = json.loads(subprocess.check_output([
     "const p = require('./apps/server/dist/nodes/protocols/presets.js');"
     "process.stdout.write(JSON.stringify(p.SUPPORTED_PROTOCOLS.map(value => ({value, ...p.PROTOCOL_PRESETS[value]}))));",
 ], cwd=root, text=True))
-assert len(presets) == 9
+assert len(presets) == 10
 seed = """
 localStorage.setItem('auth-store', JSON.stringify({state:{user:{id:'owner',username:'owner',role:'ADMIN'},token:'fixture'},version:0}));
 localStorage.setItem('access_token','fixture');
@@ -85,7 +85,7 @@ with sync_playwright() as p:
 
         for preset in presets:
             select_preset(preset)
-            if preset['value'] == 'VLESS_XHTTP_TLS':
+            if preset['value'] in ('VLESS_XHTTP_TLS', 'VLESS_XHTTP_H3_TLS'):
                 details = dialog.get_by_text('XHTTP 部署与客户端要求 · 不替换网站或 WS', exact=True)
                 details.click()
                 expect(dialog.get_by_text(re.compile('自动检测端口'))).to_be_visible()
@@ -139,5 +139,5 @@ with sync_playwright() as p:
         assert not errors, errors
         assert not mutations, mutations
         context.close()
-        print(f'PASS all 9 presets, chain ingress, pending protection, unknown metadata, no mutations: {width}px {mode}')
+        print(f'PASS all 10 presets, chain ingress, pending protection, unknown metadata, no mutations: {width}px {mode}')
     browser.close()

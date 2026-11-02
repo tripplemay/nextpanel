@@ -32,9 +32,12 @@ describe('bounded CDN XHTTP configuration', () => {
     expect(first).not.toEqual(CREDENTIAL_GENERATORS.VLESS_XHTTP_TLS());
     expect(cfXhttpCredentials(first, node.domain).xhttpHost).toBe(node.domain);
     expect(first).not.toHaveProperty('realityPrivateKey');
+    expect(PROTOCOL_PRESETS.VLESS_XHTTP_H3_TLS).toMatchObject({ accessMode: 'CDN', transport: 'XHTTP', tls: 'TLS', fixedPort: 443 });
+    expect(CREDENTIAL_GENERATORS.VLESS_XHTTP_H3_TLS()).toMatchObject({ xhttpMode: 'packet-up', xhttpAlpn: 'h3' });
   });
   it.each([{ xhttpExtra: '{"downloadSettings":{"address":"192.0.2.90"}}' }, { xhttpMode: 'auto' },
-    { xhttpMode: 'stream-one' }, { xhttpHost: 'origin.example.com' }, { path: '/' }, { path: '/a\r\nb' }, { uuid: '' }])(
+    { xhttpMode: 'stream-one' }, { xhttpMode: 'stream-up', xhttpAlpn: 'h3' }, { xhttpAlpn: 'h2,h3' },
+    { xhttpAlpn: '' }, { xhttpHost: 'origin.example.com' }, { path: '/' }, { path: '/a\r\nb' }, { uuid: '' }])(
     'rejects unsupported or unsafe pilot options %j', override => {
       expect(() => cfXhttpCredentials({ ...credentials, ...override }, node.domain)).toThrow();
     });
@@ -69,6 +72,28 @@ describe('bounded CDN XHTTP configuration', () => {
   it('uses compatibility for unknown clients and supports explicit overrides', () => {
     expect(clientProfile(undefined)).toBe('compatible'); expect(clientProfile('xhttp')).toBe('xhttp');
     for (const value of [null, '', 'latest', ['xhttp'], { value: 'xhttp' }]) expect(() => clientProfile(value)).toThrow();
+  });
+  it.each([
+    ['h2', 'packet-up'], ['h2', 'stream-up'], ['h3', 'packet-up'],
+  ])('keeps %s/%s export and probe profiles consistent without changing origin to UDP', (alpn, mode) => {
+    const creds = { ...credentials, xhttpAlpn: alpn, xhttpMode: mode };
+    const normalized = cfXhttpCredentials(creds, node.domain);
+    const inbound = JSON.parse(generateXrayConfig(node, normalized)).inbounds.find((i: any) => i.tag === 'in-pilot');
+    expect(inbound.streamSettings.tlsSettings.alpn).toEqual(['h2', 'http/1.1']);
+    expect(inbound.streamSettings.xhttpSettings.mode).toBe(mode);
+    const candidate = cfVariants({ ...exported, credentials: creds }, node.id, ['104.16.0.1'], null)[0];
+    const uri = new URL(buildShareUri(candidate)!);
+    expect(uri.searchParams.get('alpn')).toBe(alpn);
+    expect(uri.searchParams.get('mode')).toBe(mode);
+    expect(uri.hostname).toBe('104.16.0.1');
+    const yaml = buildClashProxy(candidate)!;
+    expect(yaml).toContain(`alpn: [${alpn}]`);
+    expect(yaml).toContain(`mode: ${mode}`);
+    expect(yaml).toContain('skip-cert-verify: false');
+    expect(yaml).not.toContain(node.server.ip);
+    const client = JSON.parse(buildXrayClientConfig({ ...candidate, secureProbe: true }, 1080)).outbounds[0];
+    expect(client.streamSettings.tlsSettings).toMatchObject({ alpn: [alpn], allowInsecure: false, serverName: node.domain });
+    expect(client.streamSettings.xhttpSettings.mode).toBe(mode);
   });
 });
 

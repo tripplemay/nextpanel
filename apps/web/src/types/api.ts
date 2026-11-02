@@ -26,12 +26,15 @@ export interface CreateNodeDto {
   enabled?: boolean;
 }
 
-export interface UpdateNodeDto extends Partial<Omit<CreateNodeDto, 'serverId'>> {}
+export interface UpdateNodeDto extends Partial<Omit<CreateNodeDto, 'serverId'>> {
+  xhttpMode?: 'packet-up' | 'stream-up';
+}
 
 export interface CreateNodeFromPresetDto {
   serverId: string;
   name: string;
   preset: string;
+  xhttpMode?: 'packet-up' | 'stream-up';
 }
 
 export interface NodePreset {
@@ -47,6 +50,7 @@ export interface NodePreset {
 export interface CreateChainNodeDto {
   name: string;
   preset: string;
+  xhttpMode?: 'packet-up' | 'stream-up';
   entryServerId: string;
   exitType?: 'MANAGED_SERVER' | 'SOCKS5';
   exitServerId?: string;
