@@ -165,9 +165,38 @@ match the registered key and `networkType=CLOUD` before publication. An optional
 `expectedEgressIp` adds an exact egress check but does not establish residential
 network representativeness. Never infer region from a URL, probe ID or ASN.
 
-Optional `nodeIds` limits a probe to explicit managed nodes for a bounded pilot;
-an empty list disables its scope. Omitted means all eligible nodes. A node's
-exports/status show only probes in its scope. Keys must be safe stable slugs;
+`CF_OPTIMIZATION_SCOPE_MODE=auto` (the default) enrolls all eligible nodes in
+every enabled registered probe, including nodes added after rollout. Non-empty
+legacy `nodeIds` pilot lists no longer limit automatic enrollment. An explicit
+`nodeIds: []` still disables that probe. Set the mode to `restricted` to restore
+the original non-empty allowlist behavior; an omitted list covers all eligible
+nodes in either mode. Invalid modes fail closed.
+
+Eligibility requires an enabled RUNNING managed VLESS WS/XHTTP TLS CDN node,
+ready origin mapping, and membership in an automatic subscription owned by the
+same user with the node in its CDN protection scope. External/direct nodes are
+excluded. Creating a node alone does not opt an unsubscribed node into spending.
+Each scheduled round recomputes eligibility, so additions require neither manual
+registration nor a restart; disabled, removed and unsubscribed nodes stop being
+scheduled. Explicit node pauses, capability/region validation, two-success
+promotion, freshness and fail-closed CDN export rules remain unchanged.
+
+No registry rewrite or snapshot migration is needed to enable auto mode: the
+scope policy is separate from probe identity, preserving current valid snapshots.
+Keep legacy `nodeIds` unchanged during rollout to allow a scope-only rollback.
+Credentials, endpoints, node configuration and region changes still invalidate
+snapshots. Rollback to `restricted` hides out-of-scope results from exports too.
+
+Automatic enrollment does NOT increase monthly batches, daily per-probe requests,
+download limits or frequency. The status API reports aggregate 30-day batch
+demand and worst-case daily IP checks, not only per-node demand. Seven nodes in
+two regions at 15 minutes need 40,320 batches per 30 days (41,664 per 31 days),
+exceeding 32,000; a probe may also need up to 5,376 daily IP checks versus its
+5,000 limit. Review these constraints before production rollout. No claim is
+made that a fixed cadence can be sustained for unlimited automatic additions.
+The monetary budget is not a batch-counter hard cap on the cloud bill.
+
+A node's exports/status show only probes in its scope. Keys must be safe stable slugs;
 labels for the same key must agree. Probe/token/config changes invalidate old
 snapshots; upgrade the worker before registering a regional identity.
 

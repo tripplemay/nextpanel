@@ -10,6 +10,15 @@ import { allowedByRanges, automaticVariants, regionalCandidates, CfMeasurement, 
 import type { NodeExportInfo } from './uri-builder';
 import { cfXhttpCredentials, cfXhttpProfile, isCfXhttp } from '../nodes/protocols/cf-xhttp';
 
+type AutoNode = Parameters<typeof isCfManagedNode>[0] & {
+  id: string; userId: string; enabled: boolean; status: string;
+  subscriptionNodes?: { subscription: { ownerId: string; cfOnly: boolean; cfProtectedNodeIds: string[] } }[];
+};
+const AUTO_SUBSCRIPTIONS = { where: { subscription: { cfAuto: true } },
+  select: { subscription: { select: { ownerId: true, cfOnly: true, cfProtectedNodeIds: true } } } } as const;
+const MAX_DAILY_REQUESTS = 5000;
+const MAX_BATCH_IPS = 8;
+
 export function nodeFingerprint(node: Record<string, unknown>): string {
   const legacy = ['userId', 'serverId', 'cfDnsRecordId', 'domain', 'listenPort', 'protocol', 'transport', 'tls', 'credentialsEnc', 'exitType',
     'exitServerId', 'exitPort', 'chainCredEnc', 'socksExitEnc'].map(key => node[key] ?? null);
@@ -43,8 +52,35 @@ export class CfOptimizationService {
   private running = false;
   constructor(private readonly prisma: PrismaService, private readonly nodes: NodesService, private readonly cf: CfAccessService) {}
 
+  private scopeMode(): 'auto' | 'restricted' {
+    const mode = process.env.CF_OPTIMIZATION_SCOPE_MODE ?? 'auto';
+    if (mode !== 'auto' && mode !== 'restricted') throw new Error('INVALID_PROBE_SCOPE_MODE');
+    return mode;
+  }
+  private inScope(probe: CfProbe, nodeId?: string): boolean {
+    const mode = this.scopeMode();
+    // An explicitly disabled probe stays disabled, including after automatic enrollment.
+    if (probe.nodeIds?.length === 0) return false;
+    return !nodeId || mode === 'auto' || !probe.nodeIds || probe.nodeIds.includes(nodeId);
+  }
   private probes(nodeId?: string): CfProbe[] {
-    return probeRegistry(process.env.CF_OPTIMIZATION_PROBES).filter(p => !nodeId || !p.nodeIds || p.nodeIds.includes(nodeId));
+    this.scopeMode();
+    return probeRegistry(process.env.CF_OPTIMIZATION_PROBES).filter(p => this.inScope(p, nodeId));
+  }
+  private ineligibleReason(node: AutoNode) {
+    if (!node.enabled || node.status !== 'RUNNING') return 'NODE_INACTIVE' as const;
+    if (!isCfManagedNode(node)) return 'UNSUPPORTED_NODE' as const;
+    if (!node.subscriptionNodes?.some(({ subscription }) => subscription.ownerId === node.userId
+      && (subscription.cfOnly || subscription.cfProtectedNodeIds.includes(node.id) || isCfXhttp(node)))) {
+      return 'NO_AUTO_SUBSCRIPTION' as const;
+    }
+    return null;
+  }
+  private async eligibleNodes() {
+    const nodes = await this.prisma.node.findMany({ where: { enabled: true, status: 'RUNNING',
+      subscriptionNodes: { some: { subscription: { cfAuto: true } } } },
+      include: { subscriptionNodes: AUTO_SUBSCRIPTIONS } });
+    return nodes.filter(node => !this.ineligibleReason(node));
   }
   private probeFingerprint(probe: CfProbe): string {
     return fingerprint([probe, fingerprint(process.env[probe.tokenEnv] ?? '')]);
@@ -130,7 +166,7 @@ export class CfOptimizationService {
   }
 
   async status(nodeId: string, userId: string) {
-    const node = await this.prisma.node.findFirst({ where: { id: nodeId, userId } });
+    const node = await this.prisma.node.findFirst({ where: { id: nodeId, userId }, include: { subscriptionNodes: AUTO_SUBSCRIPTIONS } });
     if (!node) throw new NotFoundException('Node not found');
     const rows = await this.prisma.cfOptimization.findMany({ where: { nodeId } });
     const ranges = await this.prisma.cfOptimizationState.findUnique({ where: { key: 'ranges' } });
@@ -138,8 +174,9 @@ export class CfOptimizationService {
     const paused = !!await this.prisma.cfOptimizationState.findUnique({ where: { key: `pause:${nodeId}` } });
     let monthlyLimit: number | null = null; let budgetError = false;
     try { monthlyLimit = this.monthlyLimit(); } catch { budgetError = true; }
-    let probes: CfProbe[] = []; let registryError = false;
-    try { probes = this.probes(node.id); } catch { registryError = true; }
+    let probes: CfProbe[] = []; let allProbes: CfProbe[] = []; let registryError = false;
+    let scopeMode: 'auto' | 'restricted' | null = null;
+    try { scopeMode = this.scopeMode(); allProbes = this.probes(); probes = this.probes(node.id); } catch { registryError = true; }
     const now = Date.now();
     const monthly = await this.prisma.cfOptimizationState.findUnique({ where: { key: `monthly:${new Date(now).toISOString().slice(0, 7)}` } });
     const used = (monthly?.value as { batches?: number } | undefined)?.batches ?? 0;
@@ -147,31 +184,50 @@ export class CfOptimizationService {
     const lowBudget = process.env.CF_OPTIMIZATION_LOW_BUDGET === 'true';
     let intervalMinutes: number | null = null;
     try { intervalMinutes = this.intervalMinutes(); } catch { budgetError = true; }
-    const estimatedMonthlyBatchesPerNode = probes.length * (lowBudget ? 6 : intervalMinutes ? 1440 / intervalMinutes : 0) * 30;
+    const batchesPerDay = lowBudget ? 6 : intervalMinutes ? 1440 / intervalMinutes : 0;
+    const eligible = registryError ? [] : await this.eligibleNodes();
+    const assignments = allProbes.map(p => eligible.filter(n => this.inScope(p, n.id)).length);
+    const estimatedMonthlyBatchesPerNode = probes.length * batchesPerDay * 30;
+    const estimatedMonthlyBatchesTotal = assignments.reduce((sum, count) => sum + count, 0) * batchesPerDay * 30;
+    const estimatedMaxDailyRequestsPerProbe = Math.max(0, ...assignments) * batchesPerDay * MAX_BATCH_IPS;
     const regions = [...new Map(probes.filter(p => p.regionKey).map(p => [p.regionKey!, { key: p.regionKey!, label: p.region }])).values()];
+    const reason = this.ineligibleReason(node);
+    const profiles = probes.map(p => {
+      const row = rows.find(r => r.probeId === p.id && r.fingerprint === this.rowFingerprint(node, p));
+      return { probeId: p.id, regionKey: p.regionKey ?? null, region: p.region, networkType: 'CLOUD', carrier: 'GENERIC',
+        classification: p.regionKey ? 'REGIONAL' : 'GENERIC', checkedAt: row?.checkedAt ?? null,
+        stale: !row || now - row.checkedAt.getTime() > FRESH_MS,
+        error: row?.error ?? null, revision: row?.revision ?? 0,
+        candidates: row?.published ?? [], observations: row?.observations ?? [] };
+    });
+    const freshProbeIds = new Set(rows.filter(r => probes.some(p => p.id === r.probeId && r.fingerprint === this.rowFingerprint(node, p))
+      && !['PROBE_IDENTITY_OR_CAPABILITY_MISMATCH', 'INVALID_PROBE_RESULT'].includes(r.error ?? '')
+      && now - r.checkedAt.getTime() <= FRESH_MS && Array.isArray(r.published)
+      && (r.published as unknown as CfObservation[]).some(o => now - o.checkedAt <= FRESH_MS && o.failed < 2
+        && allowedByRanges(o.ip, (ranges?.value as { cidrs?: string[] } | undefined)?.cidrs ?? CF_IP_RANGES))).map(r => r.probeId));
+    const enabled = process.env.CF_OPTIMIZATION_ENABLED === 'true';
+    const state = reason ? 'INELIGIBLE' : registryError || budgetError ? 'CONFIG_ERROR' : !enabled ? 'DISABLED'
+      : paused ? 'PAUSED' : !probes.length ? 'NO_PROBES' : monthlyLimit !== null && used >= monthlyLimit ? 'BUDGET_EXHAUSTED'
+      : freshProbeIds.size ? 'READY' : profiles.some(p => p.error) ? 'PROBE_ERROR'
+      : profiles.every(p => !p.checkedAt || p.checkedAt.getTime() === 0) ? 'WAITING_FIRST_PROBE'
+      : profiles.every(p => p.stale) ? 'STALE' : 'MEASURING';
     return {
-      enabled: process.env.CF_OPTIMIZATION_ENABLED === 'true', paused, registryError,
+      enabled, paused, registryError,
+      enrollment: { mode: scopeMode, eligible: !reason, reason, state,
+        probeCount: probes.length, availableProbeCount: allProbes.length },
       transport: node.transport, tls: node.tls,
       compatibility: isCfXhttp(node) ? 'XHTTP_CAPABLE_CLIENT' : 'WS_COMPATIBLE',
       budget: { lowBudget, intervalMinutes, monthlyLimit, used: budgetError ? null : used,
         remaining: budgetError || monthlyLimit === null ? null : Math.max(0, monthlyLimit - used),
-        estimatedMonthlyBatchesPerNode, constrained: monthlyLimit !== null && estimatedMonthlyBatchesPerNode > monthlyLimit, error: budgetError },
+        estimatedMonthlyBatchesPerNode, estimatedMonthlyBatchesTotal, eligibleNodeCount: eligible.length,
+        estimatedMaxDailyRequestsPerProbe, dailyRequestLimitPerProbe: MAX_DAILY_REQUESTS,
+        dailyConstrained: estimatedMaxDailyRequestsPerProbe > MAX_DAILY_REQUESTS,
+        constrained: monthlyLimit !== null && estimatedMonthlyBatchesTotal > monthlyLimit, error: budgetError },
       regions,
       missingCarriers: [], // Transitional API field for already loaded pre-regional admin pages.
       rangeUpdatedAt: ranges?.updatedAt ?? null, rangeError: !!rangeError,
-      profiles: probes.map(p => {
-        const row = rows.find(r => r.probeId === p.id && r.fingerprint === this.rowFingerprint(node, p));
-        return { probeId: p.id, regionKey: p.regionKey ?? null, region: p.region, networkType: 'CLOUD', carrier: 'GENERIC',
-          classification: p.regionKey ? 'REGIONAL' : 'GENERIC', checkedAt: row?.checkedAt ?? null,
-          stale: !row || Date.now() - row.checkedAt.getTime() > FRESH_MS,
-          error: row?.error ?? null, revision: row?.revision ?? 0,
-          candidates: row?.published ?? [], observations: row?.observations ?? [] };
-      }),
-      missingRegions: regions.filter(region => !rows.some(r => probes.some(p => p.id === r.probeId && p.regionKey === region.key
-        && r.fingerprint === this.rowFingerprint(node, p)) && !['PROBE_IDENTITY_OR_CAPABILITY_MISMATCH', 'INVALID_PROBE_RESULT'].includes(r.error ?? '')
-        && now - r.checkedAt.getTime() <= FRESH_MS && Array.isArray(r.published)
-        && (r.published as unknown as CfObservation[]).some(o => now - o.checkedAt <= FRESH_MS && o.failed < 2
-          && allowedByRanges(o.ip, (ranges?.value as { cidrs?: string[] } | undefined)?.cidrs ?? CF_IP_RANGES)))).map(r => r.key),
+      profiles,
+      missingRegions: regions.filter(region => !probes.some(p => p.regionKey === region.key && freshProbeIds.has(p.id))).map(r => r.key),
     };
   }
 
@@ -220,14 +276,9 @@ export class CfOptimizationService {
         if (!probes.length) return;
         const started = Date.now();
         await this.syncRanges(started);
-        const selected = await this.prisma.node.findMany({ where: { enabled: true, status: 'RUNNING',
-          subscriptionNodes: { some: { subscription: { cfAuto: true } } } },
-          include: { subscriptionNodes: { where: { subscription: { cfAuto: true } },
-            select: { subscription: { select: { ownerId: true, cfOnly: true, cfProtectedNodeIds: true } } } } } });
-        const nodes = selected.filter(node => isCfManagedNode(node) && node.subscriptionNodes.some(({ subscription }) =>
-          subscription.ownerId === node.userId && (subscription.cfOnly || subscription.cfProtectedNodeIds.includes(node.id) || isCfXhttp(node))));
+        const nodes = await this.eligibleNodes();
         const previous = await this.prisma.cfOptimization.findMany({ where: { nodeId: { in: nodes.map(n => n.id) } } });
-        const jobs = nodes.flatMap(node => probes.filter(p => !p.nodeIds || p.nodeIds.includes(node.id)).map(probe => ({ node, probe,
+        const jobs = nodes.flatMap(node => probes.filter(p => this.inScope(p, node.id)).map(probe => ({ node, probe,
           last: previous.find(r => r.nodeId === node.id && r.probeId === probe.id)?.attemptedAt.getTime() ?? 0 })))
           .sort((a, b) => a.last - b.last);
         for (const job of jobs) {
@@ -288,7 +339,7 @@ export class CfOptimizationService {
       const probation = (ip: string) => observed.some(o => o.ip === ip && o.passed === 1 && now - o.checkedAt <= FRESH_MS) ? 0 : 1;
       const ips = [...new Set([...published.map(o => o.ip), ...pool.sort((a, b) => probation(a) - probation(b)
         || (observed.find(o => o.ip === a)?.checkedAt ?? 0) - (observed.find(o => o.ip === b)?.checkedAt ?? 0))])]
-        .filter(ip => allowedByRanges(ip, ranges) && !observed.some(o => o.ip === ip && o.failed >= 2 && now - o.checkedAt < 6 * 3600_000)).slice(0, 8);
+        .filter(ip => allowedByRanges(ip, ranges) && !observed.some(o => o.ip === ip && o.failed >= 2 && now - o.checkedAt < 6 * 3600_000)).slice(0, MAX_BATCH_IPS);
       if (!ips.length) throw new Error('No candidates');
       const key = `budget:${probe.id}:${new Date(now).toISOString().slice(0, 10)}`;
       const budget = (await this.prisma.cfOptimizationState.findUnique({ where: { key } }))?.value as { requests?: number; bytes?: number } | undefined;
@@ -298,7 +349,7 @@ export class CfOptimizationService {
       const requests = (budget?.requests ?? 0) + ips.length;
       const downloadBytes = (budget?.bytes ?? 0) + downloadIps.length * 1024 * 1024;
       phase = 'DAILY_BUDGET_EXHAUSTED';
-      if (requests > 5000) throw new Error('Budget exhausted');
+      if (requests > MAX_DAILY_REQUESTS) throw new Error('Budget exhausted');
       const value = { requests, bytes: downloadBytes };
       await this.prisma.cfOptimizationState.upsert({ where: { key }, create: { key, value }, update: { value } });
       phase = 'PROBE_UNAVAILABLE';

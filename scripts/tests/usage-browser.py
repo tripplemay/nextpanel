@@ -69,7 +69,7 @@ with sync_playwright() as p:
             elif path.path.endswith('/history'):
                 route.fulfill(json=[{'timestamp': stamp, 'upBytes': '1048576', 'downBytes': '8388608'}])
             elif path.path.startswith('/api/subscriptions/cf-access/optimization/'):
-                route.fulfill(json={'paused': False, 'enabled': True, 'registryError': False, 'rangeError': False, 'rangeUpdatedAt': stamp,
+                cf = {'paused': False, 'enabled': True, 'registryError': False, 'rangeError': False, 'rangeUpdatedAt': stamp,
                                     'transport': 'XHTTP' if state['regional_rollout'] else 'WS', 'tls': 'TLS',
                                     'compatibility': 'XHTTP_CAPABLE_CLIENT' if state['regional_rollout'] else 'WS_COMPATIBLE',
                                     'regions': [{'key': 'ap-guangzhou', 'label': '广州'}, {'key': 'ap-chengdu', 'label': '成都'}], 'missingRegions': ['ap-chengdu'],
@@ -78,7 +78,23 @@ with sync_playwright() as p:
                                     'profiles': [{'probeId': 'guangzhou-cloud', 'regionKey': 'ap-guangzhou', 'classification': 'REGIONAL', 'networkType': 'CLOUD', 'region': '广州', 'checkedAt': stamp, 'stale': False,
                                                   'error': None, 'revision': 3, 'candidates': [{'ip': '104.16.0.1', 'latency': 180, 'checkedAt': int(now.timestamp() * 1000), 'failed': 0}]},
                                                  {'probeId': 'chengdu-cloud', 'regionKey': 'ap-chengdu', 'classification': 'REGIONAL', 'networkType': 'CLOUD', 'region': '成都', 'checkedAt': None,
-                                                  'stale': True, 'error': 'PROBE_UNAVAILABLE', 'revision': 0, 'candidates': []}]})
+                                                  'stale': True, 'error': 'PROBE_UNAVAILABLE', 'revision': 0, 'candidates': []}]}
+                if state.get('enrollment'):
+                    enrollment = state['enrollment']
+                    cf['enrollment'] = {'mode': 'restricted' if enrollment == 'NO_PROBES' else 'auto',
+                                        'state': enrollment, 'eligible': True, 'reason': None,
+                                        'probeCount': 0 if enrollment == 'NO_PROBES' else 2, 'availableProbeCount': 2}
+                    cf['budget'].update({'monthlyLimit': 32000, 'remaining': 31976, 'estimatedMonthlyBatchesTotal': 40320,
+                                         'eligibleNodeCount': 7, 'constrained': True, 'dailyConstrained': True,
+                                         'estimatedMaxDailyRequestsPerProbe': 5376, 'dailyRequestLimitPerProbe': 5000})
+                    if enrollment == 'NO_PROBES':
+                        cf.update({'regions': [], 'profiles': [], 'missingRegions': []})
+                    else:
+                        cf['missingRegions'] = ['ap-guangzhou', 'ap-chengdu']
+                        for profile in cf['profiles']:
+                            profile.update({'candidates': [], 'checkedAt': None, 'stale': True, 'revision': 0,
+                                            'error': 'PROBE_IDENTITY_OR_CAPABILITY_MISMATCH' if enrollment == 'PROBE_ERROR' else None})
+                route.fulfill(json=cf)
             elif route.request.method == 'POST':
                 mutations.append((path.path, route.request.post_data_json))
                 if path.path == '/api/subscriptions/s1/usage':
@@ -139,6 +155,29 @@ with sync_playwright() as p:
         page.get_by_text('成都 · 云测点', exact=True).scroll_into_view_if_needed()
         expect(page.get_by_text('成都 · 云测点', exact=True)).to_be_in_viewport()
         page.screenshot(path=str(output / f'usage-cf-regional-missing-{width}-{mode}.png'))
+        for enrollment, title in [('WAITING_FIRST_PROBE', '已纳入拨测，等待首次结果'),
+                                  ('PROBE_ERROR', '已纳入拨测，最近探查未完成'),
+                                  ('NO_PROBES', '当前节点未分配可用测点')]:
+            state['enrollment'] = enrollment
+            page.reload()
+            page.wait_for_load_state('networkidle')
+            page.get_by_role('tab', name='优选状态', exact=True).click()
+            expect(page.get_by_text(title, exact=True)).to_be_visible()
+            expect(page.get_by_text('后台自动维护已开启', exact=True)).not_to_be_visible()
+            expect(page.get_by_text('每日候选检测额度可能不足', exact=True)).to_be_visible()
+            expect(page.get_by_text(re.compile('全部 7 个符合条件节点.*40320'))).to_be_visible()
+            if enrollment == 'NO_PROBES':
+                expect(page.get_by_text('已配置测点，但当前节点未分配地区测点', exact=True)).to_be_visible()
+                expect(page.get_by_text('0 个已分配测点 / 2 个可用测点', exact=True)).to_be_visible()
+            else:
+                expect(page.get_by_text('符合条件自动纳入', exact=True)).to_be_visible()
+                expect(page.get_by_text('2 个已分配测点 / 2 个可用测点', exact=True)).to_be_visible()
+                expect(page.get_by_text('广州 · 缺少新鲜候选', exact=True)).to_be_visible()
+            assert not mutations, 'enrollment status must not enqueue probes or mutate configuration'
+            assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), 'enrollment status overflow'
+            page.get_by_text(title, exact=True).scroll_into_view_if_needed()
+            page.screenshot(path=str(output / f'usage-enrollment-{enrollment}-{width}-{mode}.png'))
+        state['enrollment'] = None
         page.get_by_role('tab', name='接入与覆盖').click()
         page.get_by_role('button', name='准备节点', exact=True).click()
         expect(page.get_by_text(re.compile('首次准备可能需要重启此节点'))).to_be_visible()
