@@ -322,8 +322,15 @@ export interface CfOptimizationStatus {
   tls?: string;
   compatibility?: 'XHTTP_CAPABLE_CLIENT' | 'XHTTP_OPT_IN' | 'WS_COMPATIBLE';
   paused: boolean;
+  enrollment?: { mode: 'auto' | 'restricted' | null; eligible: boolean;
+    reason: 'NODE_INACTIVE' | 'UNSUPPORTED_NODE' | 'NO_AUTO_SUBSCRIPTION' | null;
+    state: 'INELIGIBLE' | 'CONFIG_ERROR' | 'DISABLED' | 'PAUSED' | 'NO_PROBES' | 'BUDGET_EXHAUSTED'
+      | 'READY' | 'PROBE_ERROR' | 'WAITING_FIRST_PROBE' | 'STALE' | 'MEASURING';
+    probeCount: number; availableProbeCount: number };
   budget?: { lowBudget: boolean; intervalMinutes: number | null; monthlyLimit: number | null; used: number | null; remaining: number | null;
-    estimatedMonthlyBatchesPerNode: number; constrained: boolean; error: boolean };
+    estimatedMonthlyBatchesPerNode: number; estimatedMonthlyBatchesTotal?: number; eligibleNodeCount?: number;
+    estimatedMaxDailyRequestsPerProbe?: number; dailyRequestLimitPerProbe?: number; dailyConstrained?: boolean;
+    constrained: boolean; error: boolean };
   enabled: boolean; registryError: boolean; rangeError: boolean; rangeUpdatedAt: string | null;
   regions: Array<{ key: string; label: string }>;
   missingRegions: string[];

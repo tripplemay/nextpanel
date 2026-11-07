@@ -16,6 +16,7 @@ const node = { id: 'node', userId: 'owner', name: 'Hong Kong', protocol: 'VLESS'
   listenPort: 443, domain: 'cdn.example.com', cfDnsRecordId: 'record', credentialsEnc: 'encrypted-fixture',
   enabled: true, status: 'RUNNING', server: { ip: '192.0.2.1' } };
 const exported = { ...node, host: node.domain, port: 443, credentials: { uuid: '00000000-0000-4000-8000-000000000001', path: '/ws' } };
+const automaticNode = { ...node, subscriptionNodes: [{ subscription: { ownerId: 'owner', cfOnly: true, cfProtectedNodeIds: [] } }] };
 const observation = (ip: string, latency = 100) => ({ ip, latency, passed: 2, failed: 0, checkedAt: now });
 const guangzhou = { key: 'ap-guangzhou', label: '广州' };
 const chengdu = { key: 'ap-chengdu', label: '成都' };
@@ -239,9 +240,10 @@ describe('optimization service boundaries', () => {
   let service: CfOptimizationService; let db: any;
   const env = { ...process.env };
   beforeEach(() => {
+    delete process.env.CF_OPTIMIZATION_SCOPE_MODE;
     process.env.CF_OPTIMIZATION_PROBES = JSON.stringify([probe]);
     process.env.FIXTURE_CF_TOKEN = 'f'.repeat(32);
-    db = { node: { findFirst: jest.fn(), findMany: jest.fn() },
+    db = { node: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([automaticNode]) },
       cfOptimization: { findMany: jest.fn().mockResolvedValue([]) },
       cfOptimizationState: { findUnique: jest.fn().mockResolvedValue(null) } };
     service = new CfOptimizationService(db, {} as any, {} as any);
@@ -293,6 +295,7 @@ describe('optimization service boundaries', () => {
     expect(db.cfOptimization.findMany).not.toHaveBeenCalled();
   });
   it('schedules a regional pilot only for its registered nodes at the configured interval', async () => {
+    process.env.CF_OPTIMIZATION_SCOPE_MODE = 'restricted';
     process.env.CF_OPTIMIZATION_ENABLED = 'true'; delete process.env.CF_OPTIMIZATION_LOW_BUDGET;
     process.env.CF_OPTIMIZATION_INTERVAL_MINUTES = '15';
     const pilot = { ...probe, id: 'chengdu', regionKey: chengdu.key, region: chengdu.label, nodeIds: ['node'] };
@@ -309,6 +312,89 @@ describe('optimization service boundaries', () => {
     expect(measure).toHaveBeenCalledTimes(1);
     clock.mockReturnValue(now + 15 * 60_000); await service.tick(); expect(measure).toHaveBeenCalledTimes(2);
     process.env.CF_OPTIMIZATION_INTERVAL_MINUTES = '0'; await service.tick(); expect(measure).toHaveBeenCalledTimes(2);
+  });
+  it('automatically schedules new eligible WS and XHTTP nodes in both regions without rewriting pilot lists', async () => {
+    process.env.CF_OPTIMIZATION_ENABLED = 'true'; process.env.CF_OPTIMIZATION_LOW_BUDGET = 'false';
+    process.env.CF_OPTIMIZATION_INTERVAL_MINUTES = '15';
+    const probes = [guangzhou, chengdu].map(region => ({ ...probe, id: region.key, regionKey: region.key, region: region.label, nodeIds: ['node'] }));
+    const registry = JSON.stringify(probes); process.env.CF_OPTIMIZATION_PROBES = registry;
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now);
+    jest.spyOn(service, 'syncRanges').mockResolvedValue();
+    const measure = jest.spyOn(service, 'measure').mockResolvedValue();
+    db.cfOptimizationState.deleteMany = jest.fn();
+    await service.tick(); expect(measure).toHaveBeenCalledTimes(2);
+    const additions = [{ ...automaticNode, id: 'new-ws' }, { ...automaticNode, id: 'new-xhttp', transport: 'XHTTP' }];
+    db.node.findMany.mockResolvedValue([automaticNode, ...additions]);
+    clock.mockReturnValue(now + 15 * 60_000); await service.tick();
+    expect(measure).toHaveBeenCalledTimes(8);
+    for (const added of additions) for (const p of probes) expect(measure).toHaveBeenCalledWith(added, p);
+    expect(process.env.CF_OPTIMIZATION_PROBES).toBe(registry);
+    measure.mockClear(); db.node.findMany.mockResolvedValue([automaticNode]);
+    clock.mockReturnValue(now + 30 * 60_000); await service.tick();
+    expect(measure).toHaveBeenCalledTimes(2);
+    expect(measure.mock.calls.every(([n]) => n.id === node.id)).toBe(true);
+  });
+  it('keeps inactive, unowned, unsubscribed, unprotected and direct nodes out of automatic scheduling', async () => {
+    process.env.CF_OPTIMIZATION_ENABLED = 'true'; process.env.CF_OPTIMIZATION_LOW_BUDGET = 'false';
+    jest.spyOn(Date, 'now').mockReturnValue(now); jest.spyOn(service, 'syncRanges').mockResolvedValue();
+    const measure = jest.spyOn(service, 'measure').mockResolvedValue();
+    db.cfOptimizationState.deleteMany = jest.fn();
+    db.node.findMany.mockResolvedValue([
+      automaticNode, { ...automaticNode, enabled: false }, { ...automaticNode, status: 'STOPPED' },
+      { ...automaticNode, userId: 'foreign' }, { ...automaticNode, subscriptionNodes: [] },
+      { ...automaticNode, cfDnsRecordId: null }, { ...automaticNode, transport: 'TCP' },
+      { ...automaticNode, protocol: 'TUIC' },
+      { ...automaticNode, subscriptionNodes: [{ subscription: { ownerId: 'owner', cfOnly: false, cfProtectedNodeIds: [] } }] },
+      { ...automaticNode, transport: 'XHTTP', publicPort: 443, cfOriginRoute: { status: 'PENDING' } },
+    ]);
+    await service.tick(); expect(measure).toHaveBeenCalledTimes(1);
+    expect(measure).toHaveBeenCalledWith(automaticNode, probe);
+  });
+  it('preserves explicit probe disables, per-node pauses and fails closed for an invalid scope mode', async () => {
+    process.env.CF_OPTIMIZATION_ENABLED = 'true'; process.env.CF_OPTIMIZATION_LOW_BUDGET = 'false';
+    jest.spyOn(Date, 'now').mockReturnValue(now); jest.spyOn(service, 'syncRanges').mockResolvedValue();
+    const measure = jest.spyOn(service, 'measure').mockResolvedValue(); db.cfOptimizationState.deleteMany = jest.fn();
+    process.env.CF_OPTIMIZATION_PROBES = JSON.stringify([{ ...probe, nodeIds: [] }]);
+    await service.tick(); expect(measure).not.toHaveBeenCalled();
+    process.env.CF_OPTIMIZATION_PROBES = JSON.stringify([probe]);
+    db.cfOptimizationState.findUnique.mockImplementation(async ({ where }: any) => where.key === 'pause:node' ? { value: true } : null);
+    await service.tick(); expect(measure).not.toHaveBeenCalled();
+    process.env.CF_OPTIMIZATION_SCOPE_MODE = 'typo';
+    await service.tick(); expect(measure).not.toHaveBeenCalled();
+    db.node.findFirst.mockResolvedValue(automaticNode);
+    expect(await service.status(node.id, 'owner')).toMatchObject({ registryError: true, enrollment: { state: 'CONFIG_ERROR' } });
+  });
+  it('preserves incumbent snapshot identity during scope expansion and hides new-node results on scope rollback', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    const regional = { ...probe, regionKey: guangzhou.key, region: guangzhou.label, nodeIds: ['old-node'] };
+    process.env.CF_OPTIMIZATION_PROBES = JSON.stringify([regional]);
+    const identity = fingerprint([nodeFingerprint(node), fingerprint([regional, fingerprint('f'.repeat(32))])]);
+    db.cfOptimization.findMany.mockResolvedValue([{ probeId: probe.id, fingerprint: identity, checkedAt: new Date(now), published: [observation('104.16.0.1')] }]);
+    expect((await service.variants(exported, node, null))[0].cfProfile).toBe(`REGION:${guangzhou.key}`);
+    process.env.CF_OPTIMIZATION_SCOPE_MODE = 'restricted';
+    expect(await service.variants(exported, node, null)).toEqual([]);
+    expect((await service.variants(exported, { ...node, id: 'old-node' }, null))[0].cfProfile).toBe(`REGION:${guangzhou.key}`);
+  });
+  it('reports automatic enrollment, first-probe wait and aggregate capacity without expanding budgets', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    process.env.CF_OPTIMIZATION_ENABLED = 'true'; process.env.CF_OPTIMIZATION_LOW_BUDGET = 'false';
+    process.env.CF_OPTIMIZATION_INTERVAL_MINUTES = '15'; process.env.CF_OPTIMIZATION_MAX_MONTHLY_BATCHES = '32000';
+    process.env.CF_OPTIMIZATION_PROBES = JSON.stringify([guangzhou, chengdu].map(region =>
+      ({ ...probe, id: region.key, regionKey: region.key, region: region.label, nodeIds: ['old-node'] })));
+    db.node.findFirst.mockResolvedValue(automaticNode);
+    db.node.findMany.mockResolvedValue(Array.from({ length: 7 }, (_, i) => ({ ...automaticNode, id: `node-${i}` })));
+    const remote = jest.spyOn(global, 'fetch');
+    const result = await service.status(node.id, 'owner');
+    expect(result.enrollment).toEqual({ mode: 'auto', eligible: true, reason: null, state: 'WAITING_FIRST_PROBE', probeCount: 2, availableProbeCount: 2 });
+    expect(result.regions).toHaveLength(2); expect(result.missingRegions).toHaveLength(2);
+    expect(result.budget).toMatchObject({ monthlyLimit: 32000, remaining: 32000, intervalMinutes: 15,
+      estimatedMonthlyBatchesPerNode: 5760, estimatedMonthlyBatchesTotal: 40320, eligibleNodeCount: 7, constrained: true,
+      estimatedMaxDailyRequestsPerProbe: 5376, dailyRequestLimitPerProbe: 5000, dailyConstrained: true });
+    expect(remote).not.toHaveBeenCalled();
+    process.env.CF_OPTIMIZATION_SCOPE_MODE = 'restricted';
+    expect((await service.status(node.id, 'owner')).enrollment).toMatchObject({ state: 'NO_PROBES', probeCount: 0, availableProbeCount: 2 });
+    db.node.findFirst.mockResolvedValue(node);
+    expect((await service.status(node.id, 'owner')).enrollment).toMatchObject({ state: 'INELIGIBLE', reason: 'NO_AUTO_SUBSCRIPTION' });
   });
   it('reports regional freshness and shared quota without making a cloud request', async () => {
     jest.spyOn(Date, 'now').mockReturnValue(now);
@@ -327,6 +413,27 @@ describe('optimization service boundaries', () => {
     expect(remote).not.toHaveBeenCalled();
     db.cfOptimization.findMany.mockResolvedValue([{ probeId: probe.id, fingerprint: identity, checkedAt: new Date(now), published: [observation('192.0.2.1')] }]);
     expect((await service.status(node.id, 'owner')).missingRegions).toEqual([guangzhou.key, chengdu.key]);
+  });
+  it('distinguishes observation, valid candidates, failure, expiry and budget pause from enrollment', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    process.env.CF_OPTIMIZATION_ENABLED = 'true'; process.env.CF_OPTIMIZATION_MAX_MONTHLY_BATCHES = '32000';
+    db.node.findFirst.mockResolvedValue(automaticNode);
+    const identity = fingerprint([nodeFingerprint(node), fingerprint([probe, fingerprint('f'.repeat(32))])]);
+    const row = { probeId: probe.id, fingerprint: identity, checkedAt: new Date(now), published: [], error: null };
+    db.cfOptimization.findMany.mockResolvedValue([row]);
+    expect((await service.status(node.id, 'owner')).enrollment.state).toBe('MEASURING');
+    db.cfOptimization.findMany.mockResolvedValue([{ ...row, published: [observation('104.16.0.1')] }]);
+    expect((await service.status(node.id, 'owner')).enrollment.state).toBe('READY');
+    db.cfOptimization.findMany.mockResolvedValue([{ ...row, error: 'PROBE_IDENTITY_OR_CAPABILITY_MISMATCH' }]);
+    expect((await service.status(node.id, 'owner')).enrollment.state).toBe('PROBE_ERROR');
+    db.cfOptimization.findMany.mockResolvedValue([{ ...row, checkedAt: new Date(now - FRESH_MS - 1) }]);
+    expect((await service.status(node.id, 'owner')).enrollment.state).toBe('STALE');
+    db.cfOptimizationState.findUnique.mockImplementation(async ({ where }: any) => where.key === 'monthly:2026-10' ? { value: { batches: 32000 } } : null);
+    expect((await service.status(node.id, 'owner')).enrollment.state).toBe('BUDGET_EXHAUSTED');
+    db.cfOptimizationState.findUnique.mockImplementation(async ({ where }: any) => where.key === 'pause:node' ? { value: true } : null);
+    expect((await service.status(node.id, 'owner')).enrollment.state).toBe('PAUSED');
+    process.env.CF_OPTIMIZATION_ENABLED = 'false';
+    expect((await service.status(node.id, 'owner')).enrollment.state).toBe('DISABLED');
   });
   it('schedules mixed protected CF nodes only, excluding ordinary and foreign nodes', async () => {
     process.env.CF_OPTIMIZATION_ENABLED = 'true'; delete process.env.CF_OPTIMIZATION_LOW_BUDGET;
