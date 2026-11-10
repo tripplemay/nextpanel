@@ -68,7 +68,11 @@ export class ServersService {
   async findOne(id: string, userId: string) {
     const server = await this.prisma.server.findFirst({
       where: { id, userId },
-      select: { ...this.safeSelect(), sshAuthEnc: true, ipCheck: { select: { gfwBlocked: true } } },
+      select: {
+        ...this.safeSelect(), sshAuthEnc: true, ipCheck: { select: { gfwBlocked: true } },
+        systemInfo: { select: { schemaVersion: true, agentVersion: true, fields: true,
+          missingFields: true, collectedAt: true, receivedAt: true } },
+      },
     });
     if (!server) throw new NotFoundException(`Server ${id} not found`);
     const { sshAuthEnc, ...rest } = server;

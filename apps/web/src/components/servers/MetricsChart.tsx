@@ -60,7 +60,7 @@ export default function MetricsChart({ data, timeRange }: MetricsChartProps) {
   return (
     <Row gutter={16}>
       <Col xs={24} xl={12}>
-        <Text type="secondary" style={{ fontSize: 12 }}>CPU / 内存 / 磁盘 (%)</Text>
+        <Text type="secondary" style={{ fontSize: 12 }}>CPU / 内存 / 根分区 (%)</Text>
         <ResponsiveContainer width="100%" height={220}>
           <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
             <defs>
@@ -87,7 +87,7 @@ export default function MetricsChart({ data, timeRange }: MetricsChartProps) {
             />
             <Area type="monotone" dataKey="CPU" stroke={statusColors.info} fill="url(#gradCpu)" dot={false} strokeWidth={1.5} />
             <Area type="monotone" dataKey="内存" stroke={statusColors.success} fill="url(#gradMem)" dot={false} strokeWidth={1.5} />
-            <Area type="monotone" dataKey="磁盘" stroke={statusColors.warning} fill="url(#gradDisk)" dot={false} strokeWidth={1.5} />
+            <Area type="monotone" dataKey="磁盘" name="根分区" stroke={statusColors.warning} fill="url(#gradDisk)" dot={false} strokeWidth={1.5} />
           </AreaChart>
         </ResponsiveContainer>
       </Col>

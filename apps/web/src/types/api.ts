@@ -199,6 +199,19 @@ export interface RouteData {
   inbound?: InboundNode[];
 }
 
+export type SystemInfoField = 'cpuModel' | 'cpuLogicalCores' | 'architecture' | 'memoryTotalBytes'
+  | 'rootTotalBytes' | 'rootFsType' | 'osName' | 'osVersion' | 'kernelVersion'
+  | 'virtualizationSystem' | 'virtualizationRole';
+
+export interface ServerSystemInfo {
+  schemaVersion: number;
+  agentVersion: string;
+  fields: Partial<Record<SystemInfoField, { value: string | number; collectedAt: string }>>;
+  missingFields: SystemInfoField[];
+  collectedAt: string;
+  receivedAt: string;
+}
+
 export interface Server {
   id: string;
   name: string;
@@ -228,6 +241,7 @@ export interface Server {
   createdAt: string;
   updatedAt: string;
   ipCheck?: { gfwBlocked: boolean | null } | null;
+  systemInfo?: ServerSystemInfo | null;
 }
 
 export interface Node {

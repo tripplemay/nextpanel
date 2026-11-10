@@ -111,8 +111,20 @@ model Server {
   chainExitNodes Node[]         @relation("chainExitServer")
   metrics        ServerMetric[]
   ipCheck        ServerIpCheck?
+  systemInfo     ServerSystemInfo?
 
   @@index([userId])
+}
+
+model ServerSystemInfo {
+  serverId        String   @id
+  server          Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  schemaVersion   Int
+  agentVersion    String
+  fields          Json
+  missingFields   String[]
+  collectedAt     DateTime
+  receivedAt      DateTime @default(now())
 }
 
 model PanelIdentity {

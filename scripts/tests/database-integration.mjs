@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import { verifyResourceLifecycle } from './resource-lifecycle-pg.fixture.mjs';
 import { verifyCfAccess } from './cf-access-pg.fixture.mjs';
 import { verifyUsage } from './usage-pg.fixture.mjs';
+import { verifySystemInfo } from './system-info-pg.fixture.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(join(root, 'apps/server/package.json'));
@@ -71,6 +72,7 @@ test('isolated PostgreSQL migration, concurrency and restore drill', { timeout: 
     assert.equal(sql('SELECT "shareToken" FROM "SubscriptionShare" WHERE id=\'share\''), 'recipient-token');
 
     prisma = new PrismaClient({ datasources: { db: { url: `postgresql://review@localhost:55432/nextpanel?host=${encodeURIComponent(socket)}` } } });
+    await verifySystemInfo({ prisma, require, root });
     const metrics = new MetricsService(prisma);
     const metricNow = new Date('2026-10-07T12:00:00Z');
     await prisma.serverMetric.createMany({ data: [
