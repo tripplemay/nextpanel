@@ -40,6 +40,7 @@ import EmptyState from '@/components/common/EmptyState';
 import { DetailSkeleton } from '@/components/common/skeletons';
 import IpCheckCard from '@/components/servers/IpCheckCard';
 import ServerTagList from '@/components/servers/ServerTagList';
+import HardwareInfoCard from '@/components/servers/HardwareInfoCard';
 import { statusColors, usageColor, pingColor, heartbeatColor } from '@/theme/semantic';
 import type { Node, Metric, OperationLogEntry } from '@/types/api';
 import type { ColumnType } from 'antd/es/table';
@@ -146,7 +147,7 @@ export default function ServerDetailPage({
     });
   }, [modal, destroyCredentialsMutation]);
 
-  const { data: server, isLoading: serverLoading } = useQuery({
+  const { data: server, isLoading: serverLoading, isError: serverError } = useQuery({
     queryKey: ['server', id],
     queryFn: () => serversApi.get(id).then((r) => r.data),
     refetchInterval: 30_000,
@@ -422,13 +423,15 @@ export default function ServerDetailPage({
         </Col>
       </Row>
 
+      <HardwareInfoCard server={server} refreshError={serverError} />
+
       {/* 当前资源数值 */}
       <Row gutter={16}>
         {(
           [
-            { label: 'CPU', value: server.cpuUsage },
-            { label: '内存', value: server.memUsage },
-            { label: '磁盘', value: server.diskUsage },
+            { label: 'CPU 使用率', value: server.cpuUsage },
+            { label: '内存使用率', value: server.memUsage },
+            { label: '根分区使用率', value: server.diskUsage },
           ] as { label: string; value: number | null }[]
         ).map(({ label, value }) => (
           <Col xs={12} sm={6} key={label}>

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,7 +16,7 @@ import (
 )
 
 const (
-	version           = "1.8.0"
+	version           = "1.9.0"
 	heartbeatInterval = 10 * time.Second
 	httpTimeout       = 8 * time.Second
 )
@@ -202,6 +203,7 @@ func main() {
 		log.Printf("NextPanel Agent v%s 启动，面板地址: %s", version, cfg.ServerURL)
 	}
 
+	go runSystemInfoReporter(context.Background(), cfg)
 	ensureNexttrace()
 
 	var xrayNodes []xrayNode

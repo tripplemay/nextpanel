@@ -2,11 +2,19 @@ import { Controller, Get, Post, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { AgentService } from './agent.service';
 import { HeartbeatDto } from './heartbeat.dto';
+import { SystemInfoDto } from './system-info.dto';
+import { SystemInfoService } from './system-info.service';
 
 @ApiTags('agent')
 @Controller('agent')
 export class AgentController {
-  constructor(private agentService: AgentService) {}
+  constructor(private agentService: AgentService, private systemInfo: SystemInfoService) {}
+
+  @Post('system-info')
+  @ApiOperation({ summary: 'Low-frequency system inventory, authenticated by agentToken' })
+  reportSystemInfo(@Body() payload: SystemInfoDto) {
+    return this.systemInfo.receive(payload);
+  }
 
   /** Called by each node's agent to report health and metrics */
   @Post('heartbeat')

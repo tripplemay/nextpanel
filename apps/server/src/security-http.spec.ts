@@ -14,6 +14,7 @@ import { OperationLogController } from './operation-log/operation-log.controller
 import { OperationLogService } from './operation-log/operation-log.service';
 import { AgentController } from './agent/agent.controller';
 import { AgentService } from './agent/agent.service';
+import { SystemInfoService } from './agent/system-info.service';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { AuditService } from './audit/audit.service';
 import { connectSsh } from './nodes/ssh/ssh.util';
@@ -66,6 +67,7 @@ describe('real HTTP routing, JWT, roles and ownership (isolated persistence)', (
         { provide: AutoSetupService, useValue: new AutoSetupService(db as any, {} as any) },
         { provide: OperationLogService, useValue: new OperationLogService(db as any) },
         { provide: AgentService, useValue: { handleHeartbeat: heartbeat } },
+        { provide: SystemInfoService, useValue: new SystemInfoService(db as any) },
         { provide: MetricsService, useValue: new MetricsService(db as any) },
         { provide: ResourceLifecycleService, useValue: new ResourceLifecycleService(db as any, {} as any) },
         { provide: AuditService, useValue: { log: jest.fn() } },
